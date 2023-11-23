@@ -1,0 +1,18 @@
+{
+	"name": "Irrigation Prediction",
+	"version": "0.0.1",
+	"description": "This application predicts soil moisture values for sensors attached to the WaziGate.",
+	"private": false,
+	"author": "Waziup",
+	"license": "NA",
+	"waziapp": {
+		"icon": "ui/icon.svg",
+		"menu": {
+			"IrrigationPrediction": {
+				"primary": "Irrigation Prediction",
+				"icon": "ui/menu-icon.svg",
+				"href": "#/apps/waziup.irrigation-prediction/ui/"
+			}
+		}
+	}
+}

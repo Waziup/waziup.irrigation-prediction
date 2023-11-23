@@ -1,0 +1,25 @@
+version: "3"
+
+services:
+  wazi-app:
+    image: waziup/irrigation-prediction
+    container_name: waziup.irrigation-prediction
+    build:
+      context: ./
+    volumes:
+      #- ./:/root/src/  # Uncomment for development
+      - ./:/var/lib/waziapp/ # The unix socket has to have this name and be in ./ : proxy.sock
+    privileged: false
+    environment:
+      - TEST_VAR=1
+    healthcheck:
+      test: curl --fail --unix-socket /root/app/proxy.sock http://localhost/ || exit 1
+      interval: 30s
+      retries: 10 # Will try for 5 minutes
+    extra_hosts:
+      - "wazigate:172.17.0.1"
+#-------------------------#
+
+networks:
+  default:
+    name: wazigate

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <title>Settings of the "Irrigation Prediction" WaziApp</title>
+  <meta name="description" content="" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link rel="stylesheet" href="main.css" type="text/css" />
+  <script type="text/javascript" src="libs/jquery-3.2.1.min.js"></script>
+  <script type="text/javascript" src="libs/apexcharts.min.js"></script> <!-- Include the locally hosted ApexCharts -->
+  <script type="text/javascript">
+    
+    // Nav
+    function goToSettings() {
+      window.location.href = "settings.html";
+    }
+
+    // JavaScript function to toggle visibility
+    function showElements() {
+      var inputElements = document.querySelector('.input_elements');
+      inputElements.style.display = "block";
+    }
+
+    // Display Snesor values and other elements
+    function displaySensorsAndElements(sensorList) {
+      // Get the <select> element by its ID
+      const selectElement = document.getElementById("sensor_list");
+      showElements()
+
+      // Loop through the sensor names and create <option> elements
+      sensorList.forEach(sensor => {
+        // Create an <option> element
+        const optionElement = document.createElement("option");
+
+        // Set the value and text of the <option> element
+        optionElement.value = sensor.deviceId + "/" + sensor.sensorId;
+        optionElement.text = sensor.deviceName + " / " + sensor.sensorName;
+
+        // Append the <option> element to the <select> element
+        selectElement.appendChild(optionElement);
+      });
+    }
+
+    // Creates List of sensors
+    function parseSensorData(jsonData) {
+      const sensorList = [];
+
+      // Loop through the array of objects (devices) in jsonData
+      jsonData.forEach(device => {
+        // Check if the device has a "sensors" property
+        if (device.sensors && Array.isArray(device.sensors)) {
+          // Loop through the sensors array of the device
+          device.sensors.forEach(sensor => {
+            // Extract sensor information
+            const sensorInfo = {
+              deviceId: device.id,
+              deviceName: device.name,
+              sensorId: sensor.id,
+              sensorName: sensor.name,
+              sensorValue: sensor.value,
+            };
+
+            // Push the sensor information to the sensorList
+            sensorList.push(sensorInfo);
+          });
+        }
+      });
+      return sensorList;
+    }
+
+    // To confirm that user had run the config
+    function checkConfigPresent() {
+      return fetch(`../api/checkConfigPresent`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.data.config_present == true) {
+              return true;
+            } else {
+              alert('Please press the settings button and set up the needed Parameters');
+            }
+            console.log(data);
+            return false;
+        })
+    }
+
+    // Function to format ISO timestamp to a readable format
+    function formatTimestamp(isoTimestamp) {
+        const date = new Date(isoTimestamp);
+        const options = { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit'/*, second: '2-digit'*/ };
+        return date.toLocaleString('de-DE', options);
+    }
+
+    // Get data from to display inside chart from backend
+    function fetchChartData() {
+      fetch('../api/getChartData')
+        .then(response => response.json())
+        .then(chartData => {
+          // Format the data
+          var temperatureSeriesRounded = chartData.temperatureSeries.map(value => parseFloat(value.toFixed(1)));
+          var moistureSeriesRounded = chartData.moistureSeries.map(value => parseFloat(value.toFixed(2)));
+          var formattedTimestamps = chartData.timestamps.map(timestamp => formatTimestamp(timestamp));
+
+          var options = {
+            chart: {
+                type: 'line',
+                title: 'Temperature and Soil Moisture' // Set the title here
+            },
+            series: [
+                {
+                    name: 'Temperature in °C',
+                    data: temperatureSeriesRounded
+                },
+                {
+                    name: 'Moisture in cbar',
+                    data: moistureSeriesRounded
+                }
+            ],
+            xaxis: {
+                categories: formattedTimestamps,//chartData.timestamps,//formattedTimestamps,
+                labels: {
+                  rotate: -45, // Rotate labels by -45 degrees to avoid overlapping
+                  minHeight: 40, // Set a minimum height for labels to prevent overlapping
+                  // datetimeFormatter: {
+                  //     year: 'yyyy',
+                  //     month: 'MMM \'yy',
+                  //     day: 'dd MMM',
+                  //     hour: 'HH:mm',
+                  //     minute: 'HH:mm'
+                  // }
+                }
+            }
+          };
+
+          var chart = new ApexCharts(document.querySelector("#chart"), options);
+          chart.render();
+        })
+        .catch(error => console.error('Error fetching data:', error));
+    }
+
+    //
+    function startTraining() {
+      fetch(`../api/startTraining`)
+        .then(response => response.text())
+        .then(data => {
+            if (data == "") {
+              alert("Training will start")
+            } else {
+              alert('Cannot start, see console!');
+            }
+            console.log(data);
+        })
+    }
+
+    // Main function
+    function loadStuff() {
+      $.get("/devices", function (data) {
+        checkConfigPresent().then((ret) => {
+          if (ret) {
+            // Config is present 
+            console.log("Config is already present...");
+            fetchChartData();
+          }
+        }).catch((e) => {
+          alert('Please press the settings button and set up the needed Parameters');
+          console.log("Config is not present... Error: ", e);
+        })
+      });
+    }
+
+    // Called on page load => shows loading animation
+    $(function () {
+      $("#sensor_list").html("<img src=\"./loading.gif\" /> Loading...").fadeIn();
+      loadStuff();
+    });
+  </script>
+</head>
+
+<body>
+  <div class="input_elements">
+    <button class="input_elements" type="button" onclick="goToSettings()">Settings</button>
+  </div>
+  <div class="center_full">
+      <h1>WaziUp Irrigation Prediction</h1>
+      <p>This application predicts soil moisture values for sensors attached to the WaziGate.</p>
+      <div class="display_elements">
+        <div id="chart"></div>
+        <button class="input_elements" type="button" onclick="startTraining()">Start Training</button>
+      </div>
+    
+  </div>
+</body>
+
+</html>
