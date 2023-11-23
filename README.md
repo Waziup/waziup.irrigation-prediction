@@ -1,2 +1,2 @@
-# sensor-value-forwarder
-This application forwards sensor values received by WaziGate to an endpoint.
+# irrigation-prediction
+This application (WaziApp) for the WaziGate predicts irrigation times with help of soil sensors.
