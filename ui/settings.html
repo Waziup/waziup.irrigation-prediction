@@ -86,6 +86,10 @@
         }
     };
 
+    // For debug set custom API path
+    //var Api_path = "/devices"                       // production api path for local fetch
+    var Api_path = "http://192.168.189.2/devices"     // other gw in local network, token!!
+
     // handle menu button
     function goHome() {
       window.location.href = "index.html";
@@ -236,20 +240,20 @@
 
       // Loop through the sensor names and create <option> elements
       sensorList.forEach(sensor => {
-      // Create separate <option> elements for each select element
-      const optionElement_moisture = document.createElement("option");
-      const optionElement_temp = document.createElement("option");
+        // Create separate <option> elements for each select element
+        const optionElement_moisture = document.createElement("option");
+        const optionElement_temp = document.createElement("option");
 
-      // Set the value and text of the <option> elements
-      optionElement_moisture.value = sensor.deviceId + "/" + sensor.sensorId;
-      optionElement_moisture.text = sensor.deviceName + " / " + sensor.sensorName;
-        
-      optionElement_temp.value = sensor.deviceId + "/" + sensor.sensorId;
-      optionElement_temp.text = sensor.deviceName + " / " + sensor.sensorName;
+        // Set the value and text of the <option> elements
+        optionElement_moisture.value = sensor.deviceId + "/" + sensor.sensorId;
+        optionElement_moisture.text = sensor.deviceName + " / " + sensor.sensorName;
+          
+        optionElement_temp.value = sensor.deviceId + "/" + sensor.sensorId;
+        optionElement_temp.text = sensor.deviceName + " / " + sensor.sensorName;
 
-      // Append the <option> elements to the <select> elements
-      sensor_list_moisture.appendChild(optionElement_moisture);
-      sensor_list_temp.appendChild(optionElement_temp);
+        // Append the <option> elements to the <select> elements
+        sensor_list_moisture.appendChild(optionElement_moisture);
+        sensor_list_temp.appendChild(optionElement_temp);
       });
     }
 
@@ -282,7 +286,7 @@
 
     // Main function
     function loadStuff() {
-      $.get("/devices", function (data) {
+      $.get(api_path, function (data) {
         const sensors = parseSensorData(data);
         console.log("Sensors: ", sensors)
         displaySensorsAndElements(sensors)

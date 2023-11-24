@@ -33,7 +33,7 @@ import main
 #DeviceApiUrl = "http://wazigate/devices/" # Production mode
 DeviceApiUrl = "http://localhost:8080/devices/" # Debug mode
 #DeviceApiUrl = "http://192.168.189.2/devices/" # Debug mode on local gw
-
+Token = ""
 
 # Initialize an empty dictionary to store the current config
 Current_config = {}
@@ -57,6 +57,9 @@ Sample_rate = 60
 
 # Forecast horizon TODO: add config or adjust automa
 Forcast_horizon = 5 #days
+
+# Created features that are dropped later
+To_be_dropped = ['Timestamp', 'minute', 'grouped_soil', 'grouped_soil_temp', 'gradient']
 
 # Mapping to identify models TODO: check for correctness
 Model_mapping = {
@@ -104,6 +107,45 @@ def read_config():
     DeviceAndSensorIdsMoisture = Current_config["DeviceAndSensorIdsMoisture"]
     DeviceAndSensorIdsTemp = Current_config["DeviceAndSensorIdsTemp"]
 
+# not ready
+def get_token():
+    global Token
+    # Generate token to fetch data from another gateway
+    if DeviceApiUrl.startswith('http://wazigate/') or DeviceApiUrl.startswith('http://localhost/'):
+        print('There is no token needed, fetch data from local gateway.')
+    # Get token, important for non localhost devices
+    else:
+        # curl -X POST "http://192.168.189.2/auth/token" -H "accept: application/json" -d "{\"username\": \"admin\", \"password\": \"loragateway\"}"
+        token_url = DeviceApiUrl + "auth/token" + " -H " + "accept: application/json" + " -d " + "{\"username\": \"admin\", \"password\": \"loragateway\"}"
+        
+        # Parse the URL
+        parsed_token_url = urllib.parse.urlsplit(token_url)
+        
+        # Encode the query parameters
+        encoded_query = urllib.parse.quote(parsed_token_url.query, safe='=&')
+        
+        # Reconstruct the URL with the encoded query
+        encoded_url = urllib.parse.urlunsplit((parsed_token_url.scheme, 
+                                            parsed_token_url.netloc, 
+                                            parsed_token_url.path, 
+                                            encoded_query, 
+                                            parsed_token_url.fragment))
+        try:
+            # Send a GET request to the API
+            response = requests.get(encoded_url)
+
+            # Check if the request was successful (status code 200)
+            if response.status_code == 200:
+                # The response content contains the data from the API
+                Token = response.json()
+            else:
+                print("Request failed with status code:", response.status_code)
+        except requests.exceptions.RequestException as e:
+            # Handle request exceptions (e.g., connection errors)
+            print("Request error:", e)
+            return "", e #TODO: intruduce error handling!
+        
+
 # Load from CSV file
 def load_data(path):
     # creating a data frame
@@ -111,8 +153,8 @@ def load_data(path):
     print(data.head())
     return data
 
-# Load from CSV file
-def load_data_api(sensor_name):
+# Load from wazigate API
+def load_data_api(sensor_name, token):
     # Create URL for API call
     api_url = DeviceApiUrl + sensor_name.split('/')[0] + "/sensors/" + sensor_name.split('/')[1] + "/values"#?from=" + fromObject.isoformat() + "&to=" + toObject.isoformat()
     # Parse the URL
@@ -238,8 +280,8 @@ def get_weather_forecast_api(start_date, end_date):
         f'?latitude={Current_config["Gps_info"]["lattitude"]}'
         f'&longitude={Current_config["Gps_info"]["longitude"]}'
         f'&hourly=temperature_2m,relative_humidity_2m,precipitation,cloud_cover,et0_fao_evapotranspiration,wind_speed_10m,wind_direction_10m,soil_temperature_18cm,soil_moisture_3_to_9cm,shortwave_radiation'
-        f'&start={start_date.strftime("%Y-%m-%d")}'
-        f'&end={end_date.strftime("%Y-%m-%d")}'
+        f'&start_date={start_date.strftime("%Y-%m-%d")}'
+        f'&end_date={end_date.strftime("%Y-%m-%d")}'
         f'&timezone=UTC'
     )
 
@@ -264,10 +306,6 @@ def get_weather_forecast_api(start_date, end_date):
             .assign(date = lambda x : pd.to_datetime(x.date, format='%Y-%m-%dT%H:%M', utc=True))
             .set_index(['date'])
             .dropna())
-
-    # data_forecast = pd.DataFrame(dct['hourly'])
-    # data_forecast['timestamp'] = pd.to_datetime(data_forecast['timestamp'], unit='s', utc=True)
-    # data_forecast.set_index('timestamp', inplace=True)
 
     return data_forecast
 
@@ -339,7 +377,7 @@ def add_volumetric_col_to_df(df, col_name):
 
     return df
 
-# TODO: more sophisticated approach needed:
+# TODO: more sophisticated approach needed: needs to learn from former => introduce model
 def add_pump_state(data):
     slope = float(Current_config["Slope"])
     for index, row in data.iterrows():
@@ -373,19 +411,6 @@ def create_features(data):
     data['date'] = data.index.day#.astype("float64")
     data['month'] = data.index.month#.astype("float64")
     data['day_of_year'] = data.index.dayofyear#.astype("float64")
-    
-    # bring back to order -> not important
-    # data = data[['Time', 'hour', 'minute', 'date', 'month', 'grouped_soil', 
-    #              'grouped_resistance', 'grouped_soil_temp', 'rolling_mean_grouped_soil', 
-    #              'rolling_mean_grouped_soil_temp', 
-    #              '638de53168f31919048f189d, 63932c6e68f319085df375b5; B2_solar_x2_03, Soil_tension', 
-    #              '638de53168f31919048f189d, 63932c6e68f319085df375b7; B2_solar_x2_03, Resistance', 
-    #              '638de53168f31919048f189d, 63932c6e68f319085df375b9; B2_solar_x2_03, Soil_temperature', 
-    #              '638de56a68f31919048f189e, 63932ce468f319085df375cb; B3_solar_x1_02, Resistance', 
-    #              '638de57568f31919048f189f, 63932c3668f319085df375ab; B4_solar_x1_03, Soil_tension', 
-    #              '638de57568f31919048f189f, 63932c3668f319085df375ad; B4_solar_x1_03, Resistance', 
-    #              '638de57568f31919048f189f, 63932c3668f319085df375af; B4_solar_x1_03, Soil_temperature'
-    #              ]]
 
     # Get weather from weather meteo
     data_weather = get_historical_weather_api(data)
@@ -701,7 +726,8 @@ def prepare_data():
     #data.index = pd.to_datetime(data.index, format='%Y-%m-%dT%H:%M:%S')
 
     # Convert the index to UTC TODO: get an idea of which timezone we use for model: UTC, local?
-    current_timezone = pytz.timezone(get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"]))
+    #current_timezone = pytz.timezone(get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"]))
+    
     #data.index = data.index.tz_convert(get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"]))
     data.index = pd.to_datetime(data.index, utc=True)
     #data.index = data.index.tz_convert('UTC').tz_localize(None)
@@ -718,6 +744,9 @@ def prepare_data():
     
     # create additional features
     data = create_features(data)
+
+    # Drop the first eight columns -> better without raw values-> overfitting
+    data.drop(columns = DeviceAndSensorIdsMoisture + DeviceAndSensorIdsTemp, errors='ignore', inplace=True)
     
     # Normalization
     #data = normalize(data)
@@ -725,38 +754,9 @@ def prepare_data():
     
     print(data.head(0))
     
-    # Plot important data
-    # data_plot = data.drop(['hour','minute','date','month','grouped_soil',
-    #                        'grouped_resistance','grouped_soil_temp',
-    #                        '638de53168f31919048f189d, 63932c6e68f319085df375b5; B2_solar_x2_03, Soil_tension',
-    #                        '638de53168f31919048f189d, 63932c6e68f319085df375b7; B2_solar_x2_03, Resistance',
-    #                        '638de53168f31919048f189d, 63932c6e68f319085df375b9; B2_solar_x2_03, Soil_temperature',
-    #                        '638de56a68f31919048f189e, 63932ce468f319085df375cb; B3_solar_x1_02, Resistance',
-    #                        '638de57568f31919048f189f, 63932c3668f319085df375ab; B4_solar_x1_03, Soil_tension'
-    #                        ,'638de57568f31919048f189f, 63932c3668f319085df375ad; B4_solar_x1_03, Resistance',
-    #                        '638de57568f31919048f189f, 63932c3668f319085df375af; B4_solar_x1_03, Soil_temperature'
-    #                        ], axis=1)
     
-    # data_plot.set_index('Time').plot(figsize = (20,10))
-    
-    # Split data in test and train and show -> not needed any more
+    # Split data in test and train and show
     train, test = split_by_ratio(data, 20) # splitting the data for training by ratio
-    # plt.figure(figsize=(20,10))
-    # plt.xlabel('Time')
-    # plt.ylabel('rolling_mean_grouped_soil')
-    # plt.plot(train.index,train['rolling_mean_grouped_soil'],label='train')
-    # plt.plot(test.index,test['rolling_mean_grouped_soil'],label='test')
-    # plt.legend()
-    # plt.show()
-    
-    # Split according to irrigation times
-    #data, sub_dfs = split_sub_dfs(data, data_plot)
-    
-    # Find global max and min in all sub_dfs and cut them from min to max 
-    #cut_sub_dfs = format_begin_end(sub_dfs)
-    
-    # Combine all cut_sub_dfs to one df_comb
-    #df_comb = combine_dfs(cut_sub_dfs)
     
     return data#, data_plot, df_comb, cut_sub_dfs
 
@@ -809,6 +809,7 @@ def create_and_compare_model_ts(cut_sub_dfs):
     
     return exp, best
 
+# Custom exception hook is need to debug in VSCode
 def custom_exception_hook(exctype, value, traceback):
     # Your custom exception handling code here
     print(f"Exception Type: {exctype}\nValue: {value}")
@@ -825,8 +826,6 @@ def create_and_compare_model_reg(train):
 
     # old: to_be_dropped = ['minute', 'Timestamp','gradient','grouped_soil','grouped_resistance','grouped_soil_temp']
 
-    to_be_dropped = ['Timestamp', 'minute', 'grouped_soil', 'grouped_soil_temp', 'gradient']
-
     # Run the following code with a custom exception hook
     sys.excepthook = custom_exception_hook
 
@@ -835,7 +834,7 @@ def create_and_compare_model_reg(train):
               target = 'rolling_mean_grouped_soil', 
               session_id = 123,
               verbose = True,
-              ignore_features = to_be_dropped, 
+              ignore_features = To_be_dropped, 
               train_size = 0.8
               )
     
@@ -945,11 +944,32 @@ def create_future_values(data, best):
 
     # Fetch data from weather API
     data_weather_api_cut = get_weather_forecast_api(train_end, end)
-    data_weather_api_cut = (data_weather_api.loc[train_end:end])
-    print("Length of data_weather_api_cut:",len(data_weather_api_cut))
-    print(data_weather_api_cut.head(1))
-    print(data_weather_api_cut.tail(1))
-    data_weather_api_cut.head(10)
+    data_weather_api_cut.rename_axis('Timestamp', inplace=True)
+
+    # Create features and merge data from weather API
+    new_data = (pd.DataFrame())
+
+    # weather forecast 
+    new_data.index = all_dates
+    new_data = pd.concat([new_data, data_weather_api_cut], axis=1)
+    new_data.reset_index(inplace=True)  # Reset the index
+    new_data.rename(columns={'index': 'Timestamp'}, inplace=True)
+
+    # dates
+    new_data['hour'] = [i.hour for i in new_data['Timestamp']]
+    new_data['minute'] = [i.minute for i in new_data['Timestamp']] #minute is not important
+    new_data['date'] = [i.day for i in new_data['Timestamp']]
+    new_data['month'] = [i.month for i in new_data['Timestamp']]
+    new_data['day_of_year'] = [i.dayofyear for i in new_data['Timestamp']]
+
+    # make up some other data from weatherAPI
+    new_data['rolling_mean_grouped_soil_vol'] = new_data['Soil_moisture_0-7']
+    new_data['rolling_mean_grouped_soil_temp'] = new_data['Soil_temperature_7-28']
+
+    # also include pump_state
+    new_data = new_data.assign(pump_state=0)
+
+    return new_data
 
 # eval model against formerly split testset
 def evaluate_against_testset(test, exp, best):
@@ -986,8 +1006,6 @@ def train_best(best_model, data):
 
     # old: to_be_dropped = ['minute', 'Timestamp','gradient','grouped_soil','grouped_resistance','grouped_soil_temp']
 
-    to_be_dropped = ['Timestamp', 'minute', 'grouped_soil', 'grouped_soil_temp', 'gradient']
-
     # Run the following code with a custom exception hook 
     sys.excepthook = custom_exception_hook
 
@@ -996,12 +1014,34 @@ def train_best(best_model, data):
               target = 'rolling_mean_grouped_soil', 
               session_id = 123,
               verbose = True,
-              ignore_features = to_be_dropped, 
+              ignore_features = To_be_dropped, 
               train_size = 0.8
               )
     model = re_exp.create_model(Model_mapping[best_model.__class__.__name__])
 
-    return model
+    return model, re_exp
+
+# Compare dataframes cols to be sure that they match, otherwise drop
+def compare_train_predictions_cols(train, future_features):
+    # Identify missing columns in the prediction data
+    missing_columns = set(train.columns) - set(future_features.columns) #data.columns
+    missing_columns.remove('rolling_mean_grouped_soil') # use array from setup function
+    missing_columns.remove('gradient')
+    missing_columns.remove('grouped_soil')
+    missing_columns.remove('grouped_soil_temp')
+
+    print(missing_columns)
+    print(To_be_dropped)
+
+    # drop missing
+    for col in missing_columns:
+        future_features.drop(columns = col, inplace=True)
+
+    # TODO: check if that is right
+    future_features.set_index('Timestamp', inplace=True)
+    future_features.head()
+
+    return future_features
 
 def analyze_performance_old(exp, best):
     # plot forecast
@@ -1024,6 +1064,10 @@ def tune_models(exp, best):
         
     return best
 
+# Generate prediction with best_model and impute generated future_values
+def generate_predictions(best, exp, features):
+    return exp.predict_model(best, data=features)
+
 # Mighty main fuction ;)
 def main() -> int:
     # Check version of pycaret, should be >= 3.0
@@ -1031,6 +1075,9 @@ def main() -> int:
 
     # Read user set config and save to Current_config(global)
     read_config()
+
+    # Generate token if data is not present on GW
+    #token = generate_token()
     
     # Data preparation pipeline, calls other subfunction to perform the task
     data = prepare_data()  
@@ -1053,20 +1100,21 @@ def main() -> int:
     best_eval, results = evaluate_against_testset(test, exp, best)
 
     # Train best model on whole dataset (without slip test)
-    best_model = train_best(best_eval, data)
+    best_model, best_exp = train_best(best_eval, data)
     
     # Create future value set to feed new data to model
     future_features = create_future_values(data, best_model)
-    
-    # Analyze models performance
-    #predictions = analyze_performance_old(exp, best)
-    
-    # Tune hyperparameters
-    tuned_best = tune_models(exp, best)
 
-    # Ensemble, Stacking & ...
+    # Compare dataframes cols to be sure that they match, otherwise drop
+    future_features = compare_train_predictions_cols(train, future_features)
+    
+    # Tune hyperparameters, see notebook
+    #tuned_best = tune_models(exp, best)
+
+    # Ensemble, Stacking & ... not implemented yet, see notebook
 
     # Create predictions to forecast values
+    predictions = generate_predictions(best_model, best_exp, future_features)
     
     return 0
 
