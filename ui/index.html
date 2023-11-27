@@ -78,6 +78,7 @@
             if (data.data.config_present == true) {
               return true;
             } else {
+              // TODO: do not display chart or do display without values
               alert('Please press the settings button and set up the needed Parameters');
             }
             console.log(data);
@@ -93,8 +94,8 @@
     }
 
     // Get data from to display inside chart from backend
-    function fetchChartData() {
-      fetch('../api/getChartData')
+    function fetchHistoricalChartData() {
+      fetch('../api/getHistoricalChartData')
         .then(response => response.json())
         .then(chartData => {
           // Format the data
@@ -133,13 +134,60 @@
             }
           };
 
-          var chart = new ApexCharts(document.querySelector("#chart"), options);
+          var chart = new ApexCharts(document.querySelector("#chart_hist"), options);
           chart.render();
         })
         .catch(error => console.error('Error fetching data:', error));
     }
 
-    //
+    function fetchPredictionChartData() {
+      fetch('../api/getPredictionChartData')
+        .then(response => response.json())
+        .then(chartData => {
+          if (chartData.model == false) {
+            alert('Please start training procedure by pressing the "Start Training" button, after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.');
+          }
+          else {
+            // Format the data
+            var moistureSeriesRounded = chartData.moistureSeries.map(value => parseFloat(value.toFixed(2)));
+            var formattedTimestamps = chartData.timestamps.map(timestamp => formatTimestamp(timestamp));
+
+            var options = {
+              chart: {
+                  type: 'line',
+                  title: 'Prediction Soil Moisture' // Set the title here
+              },
+              series: [
+                  {
+                      name: 'Moisture in cbar',
+                      data: moistureSeriesRounded
+                  }
+              ],
+              xaxis: {
+                  categories: formattedTimestamps,//chartData.timestamps,//formattedTimestamps,
+                  labels: {
+                    rotate: -45, // Rotate labels by -45 degrees to avoid overlapping
+                    minHeight: 40, // Set a minimum height for labels to prevent overlapping
+                    // datetimeFormatter: {
+                    //     year: 'yyyy',
+                    //     month: 'MMM \'yy',
+                    //     day: 'dd MMM',
+                    //     hour: 'HH:mm',
+                    //     minute: 'HH:mm'
+                    // }
+                  }
+              }
+            };
+
+            var chart = new ApexCharts(document.querySelector("#chart_pred"), options);
+            chart.render();
+          }
+      
+        })
+        .catch(error => console.error('Error fetching data:', error));
+    }
+
+    // start training, encapsulated in create_model.py
     function startTraining() {
       fetch(`../api/startTraining`)
         .then(response => response.text())
@@ -160,7 +208,8 @@
           if (ret) {
             // Config is present 
             console.log("Config is already present...");
-            fetchChartData();
+            fetchHistoricalChartData();
+            fetchPredictionChartData();
           }
         }).catch((e) => {
           alert('Please press the settings button and set up the needed Parameters');
@@ -185,7 +234,8 @@
       <h1>WaziUp Irrigation Prediction</h1>
       <p>This application predicts soil moisture values for sensors attached to the WaziGate.</p>
       <div class="display_elements">
-        <div id="chart"></div>
+        <div id="chart_hist"></div>
+        <div id="chart_pred"></div>
         <button class="input_elements" type="button" onclick="startTraining()">Start Training</button>
       </div>
     

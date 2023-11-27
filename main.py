@@ -203,10 +203,12 @@ def getSensorAtTheSameTime(deviceAndSensorIds, dataOfFirstSensor):
 
     return allSensorsDict
 
-
 # Get historical sensor values from WaziGates API
 def setConfig(url, body):
+    global DeviceAndSensorIdsMoisture
+    global DeviceAndSensorIdsTemp
     global Gps_info
+    global Slope
     global Threshold
 
     # Parse the query parameters from Body
@@ -219,7 +221,7 @@ def setConfig(url, body):
     # Get data from forms
     Gps_info = parsed_data.get('gps', [])[0]
     Slope = parsed_data.get('slope', [])[0]
-    Threshold = int(parsed_data.get('thres', [])[0])
+    Threshold = float(parsed_data.get('thres', [])[0])
 
     # Get soil water retention curve
     Soil_water_retention_curve = parsed_data.get('ret', [])[0]
@@ -252,11 +254,35 @@ def setConfig(url, body):
 
 usock.routerPOST("/api/setConfig", setConfig)
 
+def getConfigFromFile():
+    global DeviceAndSensorIdsMoisture
+    global DeviceAndSensorIdsTemp
+    global Gps_info
+    global Slope
+    global Threshold
+
+    with open(ConfigPath, 'r') as file:
+        # Parse JSON from the file
+        data = json.load(file)
+
+    # Get choosen sensors
+    DeviceAndSensorIdsMoisture = data.get('DeviceAndSensorIdsMoisture', [])
+    DeviceAndSensorIdsTemp = data.get('DeviceAndSensorIdsTemp', [])
+
+    # Get data from forms
+    Gps_info = data.get('Gps_info', [])
+    Slope = float(data.get('Slope', []))
+    Threshold = float(data.get('Threshold', []))
+
+    # Get soil water retention curve
+    Soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
+
 
 def checkConfigPresent(url, body):
     if os.path.exists(ConfigPath):
         response_data = {"config_present": True}
         status_code = 200
+        getConfigFromFile()
     else:
         response_data = {"config_present": False}
         status_code = 404
@@ -271,165 +297,72 @@ def checkConfigPresent(url, body):
 
 usock.routerGET("/api/checkConfigPresent", checkConfigPresent)
 
+def extract_and_format(data, key, datatype):
+    values = []
+    for items in data:
+        for item in items:
+            if datatype == "str":
+                values.append(str(item[key]))
+            else:
+                values.append(float(item[key]))
+    
+    return values
 
-def getChartData(url, body): 
-    # Later it has to call a getter of the machine learning data
+
+def getHistoricalChartData(url, body): 
+    # Load data from local wazigate api -> each sensor individually
+    data_moisture = []
+    data_temp = []
+    for moisture in DeviceAndSensorIdsMoisture:
+        data_moisture.append(create_model.load_data_api(moisture))
+    for temp in DeviceAndSensorIdsTemp:
+        data_temp.append(create_model.load_data_api(temp))
+    
+    # extract series from key value pairs
+    f_data_time = extract_and_format(data_moisture, "time", "str")
+    f_data_moisture = extract_and_format(data_moisture, "value", "float")
+    f_data_temp = extract_and_format(data_temp, "value", "float")
+
+    # Create the chart_data dictionary
     chart_data = {
-        "timestamps": [
-            "2023-10-27T00:00:00.000Z",
-            "2023-10-27T00:30:00.000Z",
-            "2023-10-27T01:00:00.000Z",
-            "2023-10-27T01:30:00.000Z",
-            "2023-10-27T02:00:00.000Z",
-            "2023-10-27T02:30:00.000Z",
-            "2023-10-27T03:00:00.000Z",
-            "2023-10-27T03:30:00.000Z",
-            "2023-10-27T04:00:00.000Z",
-            "2023-10-27T04:30:00.000Z",
-            "2023-10-27T05:00:00.000Z",
-            "2023-10-27T05:30:00.000Z",
-            "2023-10-27T06:00:00.000Z",
-            "2023-10-27T06:30:00.000Z",
-            "2023-10-27T07:00:00.000Z",
-            "2023-10-27T07:30:00.000Z",
-            "2023-10-27T08:00:00.000Z",
-            "2023-10-27T08:30:00.000Z",
-            "2023-10-27T09:00:00.000Z",
-            "2023-10-27T09:30:00.000Z",
-            "2023-10-27T10:00:00.000Z",
-            "2023-10-27T10:30:00.000Z",
-            "2023-10-27T11:00:00.000Z",
-            "2023-10-27T11:30:00.000Z",
-            "2023-10-27T12:00:00.000Z",
-            "2023-10-27T12:30:00.000Z",
-            "2023-10-27T13:00:00.000Z",
-            "2023-10-27T13:30:00.000Z",
-            "2023-10-27T14:00:00.000Z",
-            "2023-10-27T14:30:00.000Z",
-            "2023-10-27T15:00:00.000Z",
-            "2023-10-27T15:30:00.000Z",
-            "2023-10-27T16:00:00.000Z",
-            "2023-10-27T16:30:00.000Z",
-            "2023-10-27T17:00:00.000Z",
-            "2023-10-27T17:30:00.000Z",
-            "2023-10-27T18:00:00.000Z",
-            "2023-10-27T18:30:00.000Z",
-            "2023-10-27T19:00:00.000Z",
-            "2023-10-27T19:30:00.000Z",
-            "2023-10-27T20:00:00.000Z",
-            "2023-10-27T20:30:00.000Z",
-            "2023-10-27T21:00:00.000Z",
-            "2023-10-27T21:30:00.000Z",
-            "2023-10-27T22:00:00.000Z",
-            "2023-10-27T22:30:00.000Z",
-            "2023-10-27T23:00:00.000Z",
-            "2023-10-27T23:30:00.000Z"
-        ],
-        "temperatureSeries": [
-            15.600074264548083,
-            24.12311022074752,
-            34.31782173126873,
-            28.455899612440586,
-            16.12128625242102,
-            23.055810993645097,
-            29.21163466829131,
-            31.31963010928032,
-            35.79820931897718,
-            21.85963643704078,
-            38.05857704255487,
-            28.845221760761937,
-            34.40664620713963,
-            38.21868279023465,
-            38.08516218141855,
-            15.696997843665592,
-            33.11393761915116,
-            14.671548716062916,
-            28.32757536227938,
-            29.73616035135298,
-            30.556430321073546,
-            20.69021429672725,
-            32.83523010915863,
-            17.607988136959236,
-            30.312475971110883,
-            22.59268014990768,
-            12.95740713257051,
-            27.194886004678333,
-            14.273240569785174,
-            23.85288886643452,
-            22.500754633198346,
-            34.96481203215509,
-            17.964894248113647,
-            14.617909668774172,
-            30.07231209714445,
-            36.780072214086405,
-            24.66452783813339,
-            31.408879580566053,
-            27.73056381512289,
-            16.53859729126703,
-            25.15145012443309,
-            15.952146199243174,
-            30.275672695479793,
-            31.953425751136933,
-            32.829274976078546,
-            33.55825494742465,
-            31.572225206748648,
-            28.835270228832174,
-            25.298747279279224
-        ],
-        "moistureSeries": [
-            0.46040755653673824,
-            0.15307631289089358,
-            0.7344383899628705,
-            0.4915939195966151,
-            0.23659511015088312,
-            0.09093519982375536,
-            0.37664715459754445,
-            0.4237122751500834,
-            0.3691316521754932,
-            0.3984403418537526,
-            0.05004970485246545,
-            0.792340374841263,
-            0.0841243038000058,
-            0.0365801462653678,
-            0.2871615689658606,
-            0.025398452814999967,
-            0.9473469867073306,
-            0.3732142644085125,
-            0.7855359725754455,
-            0.15921855181173213,
-            0.9001694083044092,
-            0.33678613233576684,
-            0.31221459501438613,
-            0.30949807715724725,
-            0.19377612170966817,
-            0.1400635354092256,
-            0.05391876401440167,
-            0.032767111983625075,
-            0.5427687918905512,
-            0.23482175242466362,
-            0.5366222752260637,
-            0.5026159364933511,
-            0.5873404805482252,
-            0.6651958292964214,
-            0.2527526805055375,
-            0.37820497429278005,
-            0.8558364272798893,
-            0.6360375048840632,
-            0.25877568949818194,
-            0.8524255121027485,
-            0.35477189072721424,
-            0.021328869491668688,
-            0.02544467490308818,
-            0.4468888280350119,
-            0.3301872141132234,
-            0.5702467657886484,
-            0.21657381603095212
-        ]
+        "timestamps": f_data_time,
+        "temperatureSeries": f_data_temp,
+        "moistureSeries": f_data_moisture
     }
 
     return 200, bytes(json.dumps(chart_data), "utf8"), []
 
-usock.routerGET("/api/getChartData", getChartData)
+usock.routerGET("/api/getHistoricalChartData", getHistoricalChartData)
+
+
+# get values from create_model.py if models had been trained
+def getPredictionChartData(url, body): 
+    data_moisture = create_model.get_predictions()
+
+    if data_moisture is False:
+        response_data = {"model": False}
+        status_code = 404
+        
+        return status_code, bytes(json.dumps(response_data), "utf8"), []
+
+    for moisture in DeviceAndSensorIdsMoisture:
+        data_moisture.append(create_model.load_data_api(moisture))
+
+    
+    # extract series from key value pairs
+    f_data_time = extract_and_format(data_moisture, "time", "str")
+    f_data_moisture = extract_and_format(data_moisture, "value", "float")
+
+
+    # Create the chart_data dictionary
+    chart_data = {
+        "timestamps": f_data_time,
+        "moistureSeries": f_data_moisture
+    }
+
+    return 200, bytes(json.dumps(chart_data), "utf8"), []
+
+usock.routerGET("/api/getPredictionChartData", getPredictionChartData)
 
 def startTraining(url, body):
     create_model.main()

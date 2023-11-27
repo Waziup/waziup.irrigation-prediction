@@ -87,12 +87,50 @@
     };
 
     // For debug set custom API path
-    //var Api_path = "/devices"                       // production api path for local fetch
-    var Api_path = "http://192.168.189.2/devices"     // other gw in local network, token!!
+    var Api_path = "/devices"                       // production api path for local fetch
+    //var Api_path = "http://192.168.189.2/devices"     // other gw in local network, token!!
 
     // handle menu button
     function goHome() {
       window.location.href = "index.html";
+    }
+
+    function getToken() {
+      var substring = "http://";
+    
+      if (Api_path.startsWith(substring)) {
+        var options = {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            username: 'admin',
+            password: 'loragateway'
+          })
+        };
+    
+        fetch(Api_path, options)
+          .then(response => {
+            if (!response.ok) {
+              throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            return response.json();
+          })
+          .then(data => {
+            // Handle the token data
+            return data
+          })
+          .catch(error => {
+            // Handle errors during the fetch operation
+            console.error('Error during fetch:', error);
+            alert('Error during fetch:', error.message);
+          });
+      }
+      else {
+        return ""
+      }
     }
 
     // Writes water retention tuples according to select in textarea, for further refinement
@@ -286,7 +324,7 @@
 
     // Main function
     function loadStuff() {
-      $.get(api_path, function (data) {
+      $.get(Api_path/* + getToken()*/, function (data) {
         const sensors = parseSensorData(data);
         console.log("Sensors: ", sensors)
         displaySensorsAndElements(sensors)

@@ -91,6 +91,9 @@ Model_mapping = {
     'DummyRegressor': 'dummy'
 }
 
+# predictions 
+Predictions = pd.DataFrame
+
 
 def read_config():
     global Current_config
@@ -154,7 +157,7 @@ def load_data(path):
     return data
 
 # Load from wazigate API
-def load_data_api(sensor_name, token):
+def load_data_api(sensor_name):#, token):
     # Create URL for API call
     api_url = DeviceApiUrl + sensor_name.split('/')[0] + "/sensors/" + sensor_name.split('/')[1] + "/values"#?from=" + fromObject.isoformat() + "&to=" + toObject.isoformat()
     # Parse the URL
@@ -1068,8 +1071,16 @@ def tune_models(exp, best):
 def generate_predictions(best, exp, features):
     return exp.predict_model(best, data=features)
 
+# 
+def get_predictions():
+    if Predictions.empty:
+        return False
+    else:
+        return Predictions
+
 # Mighty main fuction ;)
 def main() -> int:
+    global Predictions
     # Check version of pycaret, should be >= 3.0
     print("Check version of pycaret:", pycaret.__version__, "should be >= 3.0")
 
@@ -1114,7 +1125,7 @@ def main() -> int:
     # Ensemble, Stacking & ... not implemented yet, see notebook
 
     # Create predictions to forecast values
-    predictions = generate_predictions(best_model, best_exp, future_features)
+    Predictions = generate_predictions(best_model, best_exp, future_features)
     
     return 0
 
