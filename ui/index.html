@@ -140,6 +140,58 @@
         .catch(error => console.error('Error fetching data:', error));
     }
 
+ // TODO: keys are wrong, data missing
+function fetchDatasetChartData() {
+  fetch('../api/getDatasetChartData')
+    .then(response => response.json())
+    .then(chartData => {
+      if (chartData.model == false) {
+        alert('Please start the training procedure by pressing the "Start Training" button after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.');
+      } else {
+        // Initialize variables outside the loop
+        var elementsToDisplay = [];
+        var formattedTimestamps;
+
+        // Iterate through the keys in chartData
+        for (var key in chartData) {
+          if (chartData.hasOwnProperty(key)) {
+            // Check the type for each element in the array
+            var isNumberArray = chartData[key].every(value => typeof value === "number");
+
+            if (isNumberArray) {
+              // If all elements are numbers, push the series data
+              elementsToDisplay.push({
+                name: key,
+                data: chartData[key].map(value => parseFloat(value.toFixed(2)))
+              });
+            } else if (typeof chartData[key][0] === "string") {
+              formattedTimestamps = chartData.timestamps.map(timestamp => formatTimestamp(timestamp));
+            }
+          }
+        }
+
+        var options = {
+          chart: {
+            type: 'line',
+            title: 'All values of the dataset' // Set the title here
+          },
+          series: elementsToDisplay, // Use the prepared series data
+          xaxis: {
+            categories: formattedTimestamps || [], // Use formattedTimestamps if available, otherwise an empty array
+            labels: {
+              rotate: -45,
+              minHeight: 40,
+            }
+          }
+        };
+
+        var chart = new ApexCharts(document.querySelector("#chart_train_data"), options);
+        chart.render();
+      }
+    })
+    .catch(error => console.error('Error fetching data:', error));
+}
+    
     function fetchPredictionChartData() {
       fetch('../api/getPredictionChartData')
         .then(response => response.json())
@@ -176,7 +228,10 @@
                     //     minute: 'HH:mm'
                     // }
                   }
-              }
+              },
+              // Add the annotations property
+              annotations: chartData.annotations
+              
             };
 
             var chart = new ApexCharts(document.querySelector("#chart_pred"), options);
@@ -193,7 +248,8 @@
         .then(response => response.text())
         .then(data => {
             if (data == "") {
-              alert("Training will start")
+              location.reload();
+              alert("Training process is completed!")
             } else {
               alert('Cannot start, see console for more info! Error:', data);
             }
@@ -209,6 +265,7 @@
             // Config is present 
             console.log("Config is already present...");
             fetchHistoricalChartData();
+            fetchDatasetChartData()
             fetchPredictionChartData();
           }
         }).catch((e) => {
@@ -231,15 +288,24 @@
     <button class="input_elements" type="button" onclick="goToSettings()">Settings</button>
   </div>
   <div class="center_full">
-      <h1>WaziUp Irrigation Prediction</h1>
-      <p>This application predicts soil moisture values for sensors attached to the WaziGate.</p>
-      <div class="display_elements">
+    <h1>WaziUp Irrigation Prediction</h1>
+    <p>This application predicts soil moisture values for sensors attached to the WaziGate.</p>
+    <div class="display_elements">
+      <div class="chart-container">
+        <p>Raw captured sensor values:</p>
         <div id="chart_hist"></div>
-        <div id="chart_pred"></div>
-        <button class="input_elements" type="button" onclick="startTraining()">Start Training</button>
       </div>
-    
+      <div class="chart-container">
+        <p>Data as input for machine learning procedure:</p>
+        <div id="chart_train_data"></div>
+      </div>
+      <div class="chart-container">
+        <p>Predicted sensor values</p>
+        <div id="chart_pred"></div>
+      </div>
+      <button class="input_elements" type="button" onclick="startTraining()">Start Training</button>
+    </div>
   </div>
+  <!-- Include your scripts for chart rendering here -->
 </body>
-
 </html>

@@ -12,6 +12,7 @@ import urllib
 import usock
 import os
 import pathlib
+import numpy as np
 
 import create_model
 
@@ -25,7 +26,8 @@ usock.sockAddr = "proxy.sock" # Debug mode
 
 # URL of API to retrive devices
 #DeviceApiUrl = "http://wazigate/devices/" # Production mode
-DeviceApiUrl = "http://localhost:8080/devices/" # Debug mode
+#DeviceApiUrl = "http://localhost:8080/devices/" # Debug mode
+DeviceApiUrl = "http://192.168.189.2/devices/"
 
 # Path to the root of the code
 PATH = os.path.dirname(os.path.abspath(__file__))
@@ -274,8 +276,8 @@ def getConfigFromFile():
     Slope = float(data.get('Slope', []))
     Threshold = float(data.get('Threshold', []))
 
-    # Get soil water retention curve
-    Soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
+    # Get soil water retention curve -> currently not needed here
+    # Soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
 
 
 def checkConfigPresent(url, body):
@@ -297,13 +299,14 @@ def checkConfigPresent(url, body):
 
 usock.routerGET("/api/checkConfigPresent", checkConfigPresent)
 
+# From key-value to series
 def extract_and_format(data, key, datatype):
     values = []
     for items in data:
         for item in items:
             if datatype == "str":
                 values.append(str(item[key]))
-            else:
+            elif datatype == "float":
                 values.append(float(item[key]))
     
     return values
@@ -334,30 +337,79 @@ def getHistoricalChartData(url, body):
 
 usock.routerGET("/api/getHistoricalChartData", getHistoricalChartData)
 
+# get values train + testset and display all elements -> stupid
+def getDatasetChartData(url, body):
+    data_dataset = create_model.get_Data()
+
+    if data_dataset is False:
+        response_data = {"model": False}
+        status_code = 404
+
+        return status_code, bytes(json.dumps(response_data), "utf8"), []
+    
+    # Conversion of dataframe to series 
+    f_data_time = []
+    items_to_render = []
+    col_names = data_dataset.columns
+
+    for col in col_names:
+        if data_dataset[col].dtype == 'datetime64[ns, UTC]':
+            for item in data_dataset[col]:
+                f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S%z')) #TODO:timezone is lost here!!!
+        elif data_dataset[col].dtype == "float64" or data_dataset[col].dtype == "int":
+            items_to_render.append(data_dataset[col].tolist())
+
+    # Create the chart_data dictionary => has to be created in a loop
+    chart_data = {
+        "timestamps": f_data_time,
+    }
+    # Add other cols 
+    for i in range(1, len(items_to_render)):
+        chart_data[col_names[i]] = items_to_render[i]
+
+    return 200, bytes(json.dumps(chart_data), "utf8"), []
+
+usock.routerGET("/api/getDatasetChartData", getDatasetChartData)
+
 
 # get values from create_model.py if models had been trained
 def getPredictionChartData(url, body): 
-    data_moisture = create_model.get_predictions()
+    data_pred = create_model.get_predictions()
 
-    if data_moisture is False:
+    if data_pred is False:
         response_data = {"model": False}
         status_code = 404
-        
+
         return status_code, bytes(json.dumps(response_data), "utf8"), []
 
-    for moisture in DeviceAndSensorIdsMoisture:
-        data_moisture.append(create_model.load_data_api(moisture))
+    # Extract specific columns into lists TODO: timezone lost here!!!
+    f_data_time = []
+    #f_data_time = data_pred.index.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S%z').tolist()=>love python
+    for item in data_pred.index:
+        f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S%z'))
+    f_data_moisture = data_pred["prediction_label"].tolist()
 
-    
-    # extract series from key value pairs
-    f_data_time = extract_and_format(data_moisture, "time", "str")
-    f_data_moisture = extract_and_format(data_moisture, "value", "float")
-
+    # Add a horizontal line at Threshold
+    annotations = {
+        'yaxis': [{
+            'y': Threshold,
+            'borderColor': '#FF4560',
+            'label': {
+                'borderColor': '#FF4560',
+                'style': {
+                    'color': '#fff',
+                    'background': '#FF4560'
+                },
+                'text': 'Threshold'
+            }
+        }]
+    }
 
     # Create the chart_data dictionary
     chart_data = {
         "timestamps": f_data_time,
-        "moistureSeries": f_data_moisture
+        "moistureSeries": f_data_moisture,
+        "annotations": annotations
     }
 
     return 200, bytes(json.dumps(chart_data), "utf8"), []
@@ -365,7 +417,7 @@ def getPredictionChartData(url, body):
 usock.routerGET("/api/getPredictionChartData", getPredictionChartData)
 
 def startTraining(url, body):
-    create_model.main()
+    create_model.main() # TODO: DUDE!!! We need threading here!!!
 
     return 200, b"", []
 

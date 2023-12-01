@@ -30,10 +30,10 @@ import main
 
 
 # URL of API to retrive devices
-#DeviceApiUrl = "http://wazigate/devices/" # Production mode
-DeviceApiUrl = "http://localhost:8080/devices/" # Debug mode
-#DeviceApiUrl = "http://192.168.189.2/devices/" # Debug mode on local gw
-Token = ""
+#ApiUrl = "devices/" # Production mode
+#ApiUrl = "http://localhost:8080/" # Debug mode
+ApiUrl = "http://192.168.189.2/" # Debug mode on local gw
+Token = None
 
 # Initialize an empty dictionary to store the current config
 Current_config = {}
@@ -92,6 +92,7 @@ Model_mapping = {
 }
 
 # predictions 
+Data = pd.DataFrame
 Predictions = pd.DataFrame
 
 
@@ -114,12 +115,12 @@ def read_config():
 def get_token():
     global Token
     # Generate token to fetch data from another gateway
-    if DeviceApiUrl.startswith('http://wazigate/') or DeviceApiUrl.startswith('http://localhost/'):
+    if ApiUrl.startswith('/'):
         print('There is no token needed, fetch data from local gateway.')
     # Get token, important for non localhost devices
     else:
         # curl -X POST "http://192.168.189.2/auth/token" -H "accept: application/json" -d "{\"username\": \"admin\", \"password\": \"loragateway\"}"
-        token_url = DeviceApiUrl + "auth/token" + " -H " + "accept: application/json" + " -d " + "{\"username\": \"admin\", \"password\": \"loragateway\"}"
+        token_url = ApiUrl + "auth/token"
         
         # Parse the URL
         parsed_token_url = urllib.parse.urlsplit(token_url)
@@ -133,9 +134,22 @@ def get_token():
                                             parsed_token_url.path, 
                                             encoded_query, 
                                             parsed_token_url.fragment))
+        
+        # Define headers for the POST request
+        headers = {
+            'accept': 'application/json',
+            #'Content-Type': 'application/json',  # Make sure to set Content-Type
+        }
+        
+        # Define data for the GET request (optional, as it seems to be empty in this case)
+        data = {
+            'username': 'admin',
+            'password': 'loragateway',
+        }
+
         try:
             # Send a GET request to the API
-            response = requests.get(encoded_url)
+            response = requests.post(encoded_url, headers=headers, json=data)
 
             # Check if the request was successful (status code 200)
             if response.status_code == 200:
@@ -158,8 +172,17 @@ def load_data(path):
 
 # Load from wazigate API
 def load_data_api(sensor_name):#, token):
+    if ApiUrl.startswith('/'):
+        print('There is no token needed, fetch data from local gateway.')
+    elif Token != None:
+        print('There is no token needed, already present.')
+    # Get token, important for non localhost devices
+    else:
+        get_token()
+
+
     # Create URL for API call
-    api_url = DeviceApiUrl + sensor_name.split('/')[0] + "/sensors/" + sensor_name.split('/')[1] + "/values"#?from=" + fromObject.isoformat() + "&to=" + toObject.isoformat()
+    api_url = ApiUrl + "devices/" + sensor_name.split('/')[0] + "/sensors/" + sensor_name.split('/')[1] + "/values"#?from=" + fromObject.isoformat() + "&to=" + toObject.isoformat()
     # Parse the URL
     parsed_url = urllib.parse.urlsplit(api_url)
 
@@ -172,10 +195,15 @@ def load_data_api(sensor_name):#, token):
                                             parsed_url.path, 
                                             encoded_query, 
                                             parsed_url.fragment))
+    
+    # Define headers for the GET request
+    headers = {
+        'Authorization': f'Bearer {Token}',
+    }
 
     try:
         # Send a GET request to the API
-        response = requests.get(encoded_url)
+        response = requests.get(encoded_url, headers=headers)
 
         # Check if the request was successful (status code 200)
         if response.status_code == 200:
@@ -198,6 +226,8 @@ def check_gaps(data):
         data.dropna(inplace=True)
         data = resample(data)
         return data.interpolate(method='linear')
+    else:
+        return data
         
 
 
@@ -240,7 +270,7 @@ def get_historical_weather_api(data):
 
     # need to add one day, overlapping have to be cut off later => useless because data is not available to fetch via api
     last_date = data.index[-1]
-    last_day_plus_one = last_date + timedelta(days=1)
+    last_day_plus_one = last_date + timedelta(days=0)
     last_day_plus_one_str = last_day_plus_one.strftime("%Y-%m-%d")
 
     url = (
@@ -267,10 +297,10 @@ def get_historical_weather_api(data):
                           dct['hourly']['soil_moisture_0_to_7cm'], 
                           dct['hourly']['et0_fao_evapotranspiration'],
                           dct['hourly']['time']], 
-                         index = ['Temperature', 'Humidity', 'Rain', 'Cloudcover', 'Shortwave_Radiation', 'Windspeed', 'Winddirection', 'Soil_temperature_7-28', 'Soil_moisture_0-7', 'Et0_evapotranspiration', 'date'])
+                         index = ['Temperature', 'Humidity', 'Rain', 'Cloudcover', 'Shortwave_Radiation', 'Windspeed', 'Winddirection', 'Soil_temperature_7-28', 'Soil_moisture_0-7', 'Et0_evapotranspiration', 'Timestamp'])
             .T
-            .assign(date = lambda x : pd.to_datetime(x.date, format='%Y-%m-%dT%H:%M', utc=True))
-            .set_index(['date'])
+            .assign(Timestamp = lambda x : pd.to_datetime(x.Timestamp, format='%Y-%m-%dT%H:%M', utc=True))
+            .set_index(['Timestamp'])
             .dropna())
 
     return data_w
@@ -304,10 +334,10 @@ def get_weather_forecast_api(start_date, end_date):
                           dct['hourly']['soil_moisture_3_to_9cm'], 
                           dct['hourly']['et0_fao_evapotranspiration'],
                           dct['hourly']['time']], 
-                         index = ['Temperature', 'Humidity', 'Rain', 'Cloudcover', 'Shortwave_Radiation', 'Windspeed', 'Winddirection', 'Soil_temperature_7-28', 'Soil_moisture_0-7', 'Et0_evapotranspiration', 'date'])
+                         index = ['Temperature', 'Humidity', 'Rain', 'Cloudcover', 'Shortwave_Radiation', 'Windspeed', 'Winddirection', 'Soil_temperature_7-28', 'Soil_moisture_0-7', 'Et0_evapotranspiration', 'Timestamp'])
             .T
-            .assign(date = lambda x : pd.to_datetime(x.date, format='%Y-%m-%dT%H:%M', utc=True))
-            .set_index(['date'])
+            .assign(Timestamp = lambda x : pd.to_datetime(x.Timestamp, format='%Y-%m-%dT%H:%M', utc=True))
+            .set_index(['Timestamp'])
             .dropna())
 
     return data_forecast
@@ -373,10 +403,11 @@ def add_volumetric_col_to_df(df, col_name):
     soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in Current_config['Soil_water_retention_curve']]
     for index, row in df.iterrows():
         soil_tension = row[col_name]
-        # Calculate volumetric water content
-        volumetric_water_content = soil_tension_to_volumetric_water_content(soil_tension, soil_water_retention_tupel_list)
-        # Assign the calculated value to a new column in the dataframe
-        df.at[index, col_name + '_vol'] = volumetric_water_content
+        if not pd.isna(soil_tension):
+            # Calculate volumetric water content
+            volumetric_water_content = soil_tension_to_volumetric_water_content(soil_tension, soil_water_retention_tupel_list)
+            # Assign the calculated value to a new column in the dataframe
+            df.at[index, col_name + '_vol'] = volumetric_water_content
 
     return df
 
@@ -421,14 +452,28 @@ def create_features(data):
     # Resample weatherdata before merge => takes a long time
     data_weather = resample(data_weather)
 
-    #Error:  Cannot join tz-naive with tz-aware DatetimeIndex
-    data = pd.merge(data, data_weather, left_index=True, right_index=True, how='outer')
+    # historical weather data is not available for the latest two days, use forecast to account for that!
+    data_weather_endtime = data_weather.index[-1]
+    data_endtime = data.index[-1]
+
+    # Get forecast for the ~last two days
+    data_weather_recent_forecast = get_weather_forecast_api(data_weather_endtime, data_endtime)
+
+    # Merge weather data to one dataframe
+    data_weather_merged = pd.concat([data_weather.loc[data.index[0]:], 
+                                     data_weather_recent_forecast.loc[data_weather_endtime + 
+                                                                      timedelta(minutes=Sample_rate) 
+                                                                      : data_endtime]
+                                                                      ])
+
+    # Merge data_weather_merged into data
+    data = pd.merge(data, data_weather_merged, left_index=True, right_index=True, how='outer')
 
     # Calculate and add volumetric water content
     data = add_volumetric_col_to_df(data, 'rolling_mean_grouped_soil')
 
-    # Check gaps => TODO: not every col should interpolated (month?) 
-    data = check_gaps(data)
+    # Check gaps => TODO: not every col should interpolated (month?), some data is lost here
+    data = check_gaps(data) 
 
     # Add calculated pump state
     f = data.rolling_mean_grouped_soil
@@ -757,10 +802,6 @@ def prepare_data():
     
     print(data.head(0))
     
-    
-    # Split data in test and train and show
-    train, test = split_by_ratio(data, 20) # splitting the data for training by ratio
-    
     return data#, data_plot, df_comb, cut_sub_dfs
 
 # Create model in pycaret (time series)
@@ -1071,7 +1112,14 @@ def tune_models(exp, best):
 def generate_predictions(best, exp, features):
     return exp.predict_model(best, data=features)
 
-# 
+# Data Getter
+def get_Data():
+    if Data.empty:
+        return False
+    else:
+        return Data
+
+# Predictions Getter
 def get_predictions():
     if Predictions.empty:
         return False
@@ -1081,6 +1129,8 @@ def get_predictions():
 # Mighty main fuction ;)
 def main() -> int:
     global Predictions
+    global Data
+
     # Check version of pycaret, should be >= 3.0
     print("Check version of pycaret:", pycaret.__version__, "should be >= 3.0")
 
@@ -1088,11 +1138,11 @@ def main() -> int:
     read_config()
 
     # Generate token if data is not present on GW
-    #token = generate_token()
+    get_token()
     
     # Data preparation pipeline, calls other subfunction to perform the task
-    data = prepare_data()  
-    train, test = split_by_ratio(data, 20)  
+    Data = prepare_data()  
+    train, test = split_by_ratio(Data, 20)  
 
     # Start pycaret pipeline: setup, train models, save the best ones to best-array 
     #exp, best = create_and_compare_model_ts(cut_sub_dfs)
@@ -1111,10 +1161,10 @@ def main() -> int:
     best_eval, results = evaluate_against_testset(test, exp, best)
 
     # Train best model on whole dataset (without slip test)
-    best_model, best_exp = train_best(best_eval, data)
+    best_model, best_exp = train_best(best_eval, Data)
     
     # Create future value set to feed new data to model
-    future_features = create_future_values(data, best_model)
+    future_features = create_future_values(Data, best_model)
 
     # Compare dataframes cols to be sure that they match, otherwise drop
     future_features = compare_train_predictions_cols(train, future_features)
