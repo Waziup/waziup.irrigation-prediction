@@ -16,7 +16,7 @@ from pycaret.regression import *
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import missingno as msno 
+#import missingno as msno 
 import sys
 import pytz
 import requests
@@ -30,7 +30,7 @@ import main
 
 
 # URL of API to retrive devices
-#ApiUrl = "devices/" # Production mode
+#ApiUrl = "/" # Production mode
 #ApiUrl = "http://localhost:8080/" # Debug mode
 ApiUrl = "http://192.168.189.2/" # Debug mode on local gw
 Token = None
@@ -141,7 +141,7 @@ def get_token():
             #'Content-Type': 'application/json',  # Make sure to set Content-Type
         }
         
-        # Define data for the GET request (optional, as it seems to be empty in this case)
+        # Define data for the GET request
         data = {
             'username': 'admin',
             'password': 'loragateway',
@@ -171,7 +171,7 @@ def load_data(path):
     return data
 
 # Load from wazigate API
-def load_data_api(sensor_name):#, token):
+def load_data_api(sensor_name, from_timestamp):#, token):
     if ApiUrl.startswith('/'):
         print('There is no token needed, fetch data from local gateway.')
     elif Token != None:
@@ -182,7 +182,7 @@ def load_data_api(sensor_name):#, token):
 
 
     # Create URL for API call
-    api_url = ApiUrl + "devices/" + sensor_name.split('/')[0] + "/sensors/" + sensor_name.split('/')[1] + "/values"#?from=" + fromObject.isoformat() + "&to=" + toObject.isoformat()
+    api_url = ApiUrl + "devices/" + sensor_name.split('/')[0] + "/sensors/" + sensor_name.split('/')[1] + "/values" + "?from=" + from_timestamp
     # Parse the URL
     parsed_url = urllib.parse.urlsplit(api_url)
 
@@ -302,6 +302,9 @@ def get_historical_weather_api(data):
             .assign(Timestamp = lambda x : pd.to_datetime(x.Timestamp, format='%Y-%m-%dT%H:%M', utc=True))
             .set_index(['Timestamp'])
             .dropna())
+    
+    # convert cols to float64
+    data_w = convert_cols(data_w)
 
     return data_w
 
@@ -339,11 +342,14 @@ def get_weather_forecast_api(start_date, end_date):
             .assign(Timestamp = lambda x : pd.to_datetime(x.Timestamp, format='%Y-%m-%dT%H:%M', utc=True))
             .set_index(['Timestamp'])
             .dropna())
+    
+    # convert cols to float64
+    data_forecast = convert_cols(data_forecast)
 
     return data_forecast
 
 # convert to float64
-def convert_cols(data,ref_dtype):
+def convert_cols(data):
     obj_dtype = 'object'
     
     for col in data.columns:
@@ -371,12 +377,10 @@ def soil_tension_to_volumetric_water_content(soil_tension, soil_water_retention_
     Returns:
         float: Volumetric water content as a fraction (between 0 and 1).
     """
-    # Sort the soil-water retention curve points by soil tension in ascending order
-    sorted_curve = sorted(soil_water_retention_curve, key=lambda x: x[0])
-    
+
     # Find the two points on the curve that bound the given soil tension value
     lower_point, upper_point = None, None
-    for tension, water_content in sorted_curve:
+    for tension, water_content in soil_water_retention_curve:
         if tension <= soil_tension:
             lower_point = (tension, water_content)
         else:
@@ -385,11 +389,11 @@ def soil_tension_to_volumetric_water_content(soil_tension, soil_water_retention_
     
     # If the soil tension is lower than the first point on the curve, use the first point
     if lower_point is None:
-        return sorted_curve[0][1]
+        return soil_water_retention_curve[0][1]
     
     # If the soil tension is higher than the last point on the curve, use the last point
     if upper_point is None:
-        return sorted_curve[-1][1]
+        return soil_water_retention_curve[-1][1]
     
     # Interpolate to find the volumetric water content at the given soil tension
     tension_diff = upper_point[0] - lower_point[0]
@@ -401,11 +405,13 @@ def soil_tension_to_volumetric_water_content(soil_tension, soil_water_retention_
 def add_volumetric_col_to_df(df, col_name):
     # Iterate over the rows of the dataframe and calculate volumetric water content
     soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in Current_config['Soil_water_retention_curve']]
+    # Sort the soil-water retention curve points by soil tension in ascending order => TODO: NOT EFFICIENT HERE, move out
+    sorted_curve = sorted(soil_water_retention_tupel_list, key=lambda x: x[0])
     for index, row in df.iterrows():
         soil_tension = row[col_name]
         if not pd.isna(soil_tension):
             # Calculate volumetric water content
-            volumetric_water_content = soil_tension_to_volumetric_water_content(soil_tension, soil_water_retention_tupel_list)
+            volumetric_water_content = soil_tension_to_volumetric_water_content(soil_tension, sorted_curve)
             # Assign the calculated value to a new column in the dataframe
             df.at[index, col_name + '_vol'] = volumetric_water_content
 
@@ -414,12 +420,20 @@ def add_volumetric_col_to_df(df, col_name):
 # TODO: more sophisticated approach needed: needs to learn from former => introduce model
 def add_pump_state(data):
     slope = float(Current_config["Slope"])
-    for index, row in data.iterrows():
-        if row['gradient'] < slope:
-            #print(index, row['rolling_mean_grouped_soil'], row['gradient'], row['Rain'])
-            # only add if there was no rain in the previous hours
-            if row['Rain'] == 0.0:
-                data.at[index, 'pump_state'] = 1
+    # for index, row in data.iterrows():
+    #     if row['gradient'] < slope:
+    #         #print(index, row['rolling_mean_grouped_soil'], row['gradient'], row['Rain'])
+    #         # only add if there was no rain in the previous hours
+    #         if row['Rain'] == 0.0:
+    #             data.at[index, 'pump_state'] = 1
+
+    for i in range(1,len(data)):
+        # look for two consecutive occurances of high negative slope
+        if data.iloc[i-1]['gradient'] < slope and data.iloc[i]['gradient'] < slope:
+            # and if it rained now and previously
+            if data.iloc[i-1]['Rain'] == 0.0 and data.iloc[i]['Rain'] == 0.0:
+                data.loc[data.index[i], 'pump_state'] = 1
+                data.loc[data.index[i-1], 'pump_state'] = 1
 
     return data
 
@@ -477,9 +491,8 @@ def create_features(data):
 
     # Add calculated pump state
     f = data.rolling_mean_grouped_soil
-    data['gradient'] = np.gradient(f)
+    data['gradient'] = np.gradient(f) #TODO: check gradient calc -> pump state seems to be wrong
     data['pump_state'] = int(0)
-
     data = add_pump_state(data)
     
     return data
@@ -713,9 +726,9 @@ def prepare_data():
     data_moisture = []
     data_temp = []
     for moisture in DeviceAndSensorIdsMoisture:
-        data_moisture.append(load_data_api(moisture))
+        data_moisture.append(load_data_api(moisture, Current_config['Start_date']))
     for temp in DeviceAndSensorIdsTemp:
-        data_temp.append(load_data_api(temp))
+        data_temp.append(load_data_api(temp, Current_config['Start_date']))
     
     # Save JSON data to one dataframe for further processing
     # Create first dataframe with first moisture sensor -> dfs have to be of same length, same timestamps
@@ -748,7 +761,7 @@ def prepare_data():
     # Convert datatype of cols to float64 -> otherwise json parse will parse negative values as object
     #data = data.apply(pd.to_numeric, errors='coerce')
     #data = data.astype(float)
-    data = convert_cols(data, 'float64')
+    data = convert_cols(data)
 
     # Rename index
     data.rename_axis('Timestamp', inplace=True)
@@ -793,7 +806,7 @@ def prepare_data():
     # create additional features
     data = create_features(data)
 
-    # Drop the first eight columns -> better without raw values-> overfitting
+    # Drop the raw values -> better without raw values-> overfitting
     data.drop(columns = DeviceAndSensorIdsMoisture + DeviceAndSensorIdsTemp, errors='ignore', inplace=True)
     
     # Normalization
@@ -888,8 +901,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        #exclude=['lar']
-        include=['xgboost', 'llar']
+        exclude=['lar']
+        #include=['xgboost', 'llar'] #debug
     )
 
     return re_exp, best_re
@@ -1050,7 +1063,7 @@ def train_best(best_model, data):
 
     # old: to_be_dropped = ['minute', 'Timestamp','gradient','grouped_soil','grouped_resistance','grouped_soil_temp']
 
-    # Run the following code with a custom exception hook 
+    # Run the following code with a custom exception hook => maybe only relevant in VSCode
     sys.excepthook = custom_exception_hook
 
     # Run pycarets setup

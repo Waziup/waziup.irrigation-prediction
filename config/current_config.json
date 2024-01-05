@@ -1,34 +1,54 @@
 {
     "DeviceAndSensorIdsMoisture": [
-        "6503049b1d41c82596064e04/Light Intensity",
-        "6503049b1d41c82596064e04/UV Index"
+        "657360e268f319085542e336/657360f468f319085542e337"
     ],
     "DeviceAndSensorIdsTemp": [
-        "6503049b1d41c82596064e04/Wind Speed",
-        "6503049b1d41c82596064e04/Air Temperature"
+        "657360e268f319085542e336/657360f468f319085542e33b"
     ],
     "Gps_info": {
         "lattitude": "51.023591",
         "longitude": "13.744087"
     },
     "Slope": "-0.07",
-    "Threshold": 7,
+    "Threshold": 10.0,
+    "Start_date": "2023-12-12T00:00:00.000Z",
+    "Period": 0,
     "Soil_water_retention_curve": [
         {
-            "Soil tension": "15",
+            "Soil tension": "0",
+            "VWC": " 0.225"
+        },
+        {
+            "Soil tension": "5",
             "VWC": " 0.2"
         },
         {
-            "Soil tension": "25",
-            "VWC": " 0.3"
+            "Soil tension": "10",
+            "VWC": " 0.185"
         },
         {
-            "Soil tension": "35",
-            "VWC": " 0.4"
+            "Soil tension": "20",
+            "VWC": " 0.15"
         },
         {
-            "Soil tension": "45",
-            "VWC": " 0.5"
+            "Soil tension": "50",
+            "VWC": " 0.125"
+        },
+        {
+            "Soil tension": "100",
+            "VWC": " 0.1"
+        },
+        {
+            "Soil tension": "200",
+            "VWC": " 0.075"
+        },
+        {
+            "Soil tension": "500",
+            "VWC": " 0.05"
+        },
+        {
+            "Soil tension": "1000",
+            "VWC": " 0.025"
         }
     ]
 }

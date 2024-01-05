@@ -1,9 +1,20 @@
-FROM python:slim-buster
+FROM python:3.7-slim
 
 COPY . /root/src/
 
-RUN  pip install requests
+RUN apt-get update \
+    && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
+RUN  pip install requests \
+     pycaret \
+     matplotlib \
+     pytz \
+     requests \
+     geopy \
+     timezonefinder
+     
 RUN  apt-get update \
      && apt-get install -y \
      curl \
@@ -19,8 +30,9 @@ RUN  apt-get update \
 
 
 # Uncomment For production
-ENTRYPOINT ["python", "/root/src/main.py"]
+WORKDIR /root/src/
+ENTRYPOINT ["sh", "-c", "python main.py > logs.log"]
 
 
 # Here is how you can access inside your container:
-# sudo docker exec -it waziup.hello-world-python sh
+# sudo docker exec -it waziup.irrigation-prediction bash

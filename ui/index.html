@@ -12,6 +12,8 @@
   <script type="text/javascript" src="libs/apexcharts.min.js"></script> <!-- Include the locally hosted ApexCharts -->
   <script type="text/javascript">
     
+    var waitForTraining = true;
+
     // Nav
     function goToSettings() {
       window.location.href = "settings.html";
@@ -248,13 +250,34 @@ function fetchDatasetChartData() {
         .then(response => response.text())
         .then(data => {
             if (data == "") {
-              location.reload();
-              alert("Training process is completed!")
+              //location.reload();
+              alert("Training process was started, page will reload when procedure is finished!");
+              waitForTraining = true;
+              isTrainingReady();
             } else {
               alert('Cannot start, see console for more info! Error:', data);
             }
             console.log(data);
         })
+    }
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function isTrainingReady() {
+      while(waitForTraining) {
+        fetch(`../api/isTrainingReady`)
+          .then(response => response.json())
+          .then(response_data => {
+            if (response_data.isTrainingFinished == true) {
+              waitForTraining = false;
+              location.reload();
+              alert("Training process is finished!");
+            }
+          })
+        await sleep(2000);
+      }
     }
 
     // Main function

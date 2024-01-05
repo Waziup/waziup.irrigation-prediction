@@ -6,6 +6,8 @@ import csv
 from datetime import datetime, timedelta
 from io import StringIO
 import json
+import threading
+import time
 from urllib.parse import urlparse, parse_qs
 import requests
 import urllib
@@ -48,7 +50,13 @@ Slope = 0
 # Threshold to irrigate plants
 Threshold = 0
 
-# Retention curve 
+# Start date
+Start_date = ""
+
+# Time period to include into the model
+Period = 0
+
+# Retention curve => not needed any more
 Soil_water_retention_curve = [
     (0, 0.45),
     (5, 0.40),
@@ -61,6 +69,11 @@ Soil_water_retention_curve = [
     (1000, 0.05),
 ]
 
+# Array of active threads
+Threads = []
+ThreadId = 0
+
+TrainingFinished = False
 
 #---------------------#
 
@@ -117,7 +130,7 @@ usock.routerPOST("/ui/(.*)", ui)
 
 #------------------#
 
-# Helper to search other sensor values and 
+# Helper to search other sensor values and => TODO: not used any more
 def getSensorAtTheSameTime(deviceAndSensorIds, dataOfFirstSensor):
     # TODO: USE THE DECODER NAMES -> TELL THEM, handle case if there are multiple sensor values for a timespan
     mapping = {
@@ -212,6 +225,8 @@ def setConfig(url, body):
     global Gps_info
     global Slope
     global Threshold
+    global Start_date
+    global Period
 
     # Parse the query parameters from Body
     parsed_data = parse_qs(body.decode('utf-8'))
@@ -224,6 +239,8 @@ def setConfig(url, body):
     Gps_info = parsed_data.get('gps', [])[0]
     Slope = parsed_data.get('slope', [])[0]
     Threshold = float(parsed_data.get('thres', [])[0])
+    Start_date = parsed_data.get('start', [])[0]
+    Period = int(parsed_data.get('period', [])[0])
 
     # Get soil water retention curve
     Soil_water_retention_curve = parsed_data.get('ret', [])[0]
@@ -244,6 +261,8 @@ def setConfig(url, body):
         "Gps_info": {"lattitude": Gps_info.split(',')[0].lstrip(), "longitude": Gps_info.split(',')[1].lstrip()},
         "Slope": Slope,
         "Threshold": Threshold,
+        "Start_date": Start_date,
+        "Period": Period,
         "Soil_water_retention_curve": csv_data  # Use the parsed CSV data
     }
 
@@ -262,6 +281,8 @@ def getConfigFromFile():
     global Gps_info
     global Slope
     global Threshold
+    global Start_date
+    global Period
 
     with open(ConfigPath, 'r') as file:
         # Parse JSON from the file
@@ -275,6 +296,8 @@ def getConfigFromFile():
     Gps_info = data.get('Gps_info', [])
     Slope = float(data.get('Slope', []))
     Threshold = float(data.get('Threshold', []))
+    Start_date = data.get('Start_date', [])
+    Period = int(data.get('Period', []))
 
     # Get soil water retention curve -> currently not needed here
     # Soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
@@ -317,9 +340,9 @@ def getHistoricalChartData(url, body):
     data_moisture = []
     data_temp = []
     for moisture in DeviceAndSensorIdsMoisture:
-        data_moisture.append(create_model.load_data_api(moisture))
+        data_moisture.append(create_model.load_data_api(moisture, Start_date))
     for temp in DeviceAndSensorIdsTemp:
-        data_temp.append(create_model.load_data_api(temp))
+        data_temp.append(create_model.load_data_api(temp, Start_date))
     
     # extract series from key value pairs
     f_data_time = extract_and_format(data_moisture, "time", "str")
@@ -356,16 +379,18 @@ def getDatasetChartData(url, body):
         if data_dataset[col].dtype == 'datetime64[ns, UTC]':
             for item in data_dataset[col]:
                 f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S%z')) #TODO:timezone is lost here!!!
-        elif data_dataset[col].dtype == "float64" or data_dataset[col].dtype == "int":
+        elif data_dataset[col].dtype == "float64" or data_dataset[col].dtype == "int64":
             items_to_render.append(data_dataset[col].tolist())
+        else:
+            print("Missed the col:", col)
 
     # Create the chart_data dictionary => has to be created in a loop
     chart_data = {
         "timestamps": f_data_time,
     }
     # Add other cols 
-    for i in range(1, len(items_to_render)):
-        chart_data[col_names[i]] = items_to_render[i]
+    for i in range(1, len(items_to_render)+ 1):
+        chart_data[col_names[i]] = items_to_render[i-1]
 
     return 200, bytes(json.dumps(chart_data), "utf8"), []
 
@@ -416,8 +441,45 @@ def getPredictionChartData(url, body):
 
 usock.routerGET("/api/getPredictionChartData", getPredictionChartData)
 
+# Frontend polls this to reload page when training is ready => only active for first round of training
+def isTrainingReady(url, body):
+    response_data = {"isTrainingFinished": TrainingFinished}
+
+    return 200, bytes(json.dumps(response_data), "utf8"), []
+
+usock.routerGET("/api/isTrainingReady", isTrainingReady)
+    
+
+def workerToTrain(thread_id, url): # TODO: do we really need threading here?
+    global TrainingFinished
+
+    # Set the time interval in seconds (e.g., 60 seconds for 1 minute)
+    time_interval = 43200 #12h
+
+    while True:
+        print("Training started at:", datetime.now())
+
+        # Call create model function
+        create_model.main()
+
+        # TODO: reload page
+        TrainingFinished = True
+
+        # Send thread to sleep
+        time.sleep(time_interval)  # Wait for the specified time interval
+
 def startTraining(url, body):
-    create_model.main() # TODO: DUDE!!! We need threading here!!!
+    global ThreadId
+
+    # Create a new thread
+    thread = threading.Thread(target=workerToTrain, args=(ThreadId, url))    
+    ThreadId += 1
+
+    # Append thread to list
+    Threads.append(thread)
+
+    # Start the thread
+    thread.start()
 
     return 200, b"", []
 
