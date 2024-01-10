@@ -9,7 +9,10 @@ Created on Wed May  3 10:54:49 2023
 
 from datetime import timedelta
 import json
+import logging
+import os
 import subprocess
+from dotenv import load_dotenv
 import pycaret 
 #from pycaret.time_series import *
 from pycaret.regression import *
@@ -32,7 +35,7 @@ import main
 # URL of API to retrive devices
 #ApiUrl = "/" # Production mode
 #ApiUrl = "http://localhost:8080/" # Debug mode
-ApiUrl = "http://192.168.189.2/" # Debug mode on local gw
+#ApiUrl = "http://192.168.189.2/" # Debug mode on local gw
 Token = None
 
 # Initialize an empty dictionary to store the current config
@@ -115,7 +118,7 @@ def read_config():
 def get_token():
     global Token
     # Generate token to fetch data from another gateway
-    if ApiUrl.startswith('/'):
+    if ApiUrl.startswith('http://wazigate/'):
         print('There is no token needed, fetch data from local gateway.')
     # Get token, important for non localhost devices
     else:
@@ -171,8 +174,14 @@ def load_data(path):
     return data
 
 # Load from wazigate API
-def load_data_api(sensor_name, from_timestamp):#, token):
-    if ApiUrl.startswith('/'):
+def load_data_api(sensor_name, from_timestamp):#, token)
+    global ApiUrl
+
+    load_dotenv()
+    ApiUrl = os.getenv('API_URL')
+
+
+    if ApiUrl.startswith('http://wazigate/'):
         print('There is no token needed, fetch data from local gateway.')
     elif Token != None:
         print('There is no token needed, already present.')
@@ -873,7 +882,11 @@ def custom_exception_hook(exctype, value, traceback):
     print(f"Trace:{traceback}")
 
 # Create and compare models
-def create_and_compare_model_reg(train):   
+def create_and_compare_model_reg(train):
+    # Disable logging to a file
+    #logging.basicConfig(filename=None, level=logging.INFO)
+    logging.basicConfig(filename="logs.log", level=logging.INFO)
+
     # create regression exp
     re_exp = pycaret.regression.RegressionExperiment()
 
@@ -1143,9 +1156,13 @@ def get_predictions():
 def main() -> int:
     global Predictions
     global Data
+    global ApiUrl
 
     # Check version of pycaret, should be >= 3.0
     print("Check version of pycaret:", pycaret.__version__, "should be >= 3.0")
+
+    load_dotenv()
+    ApiUrl = os.getenv("API_URL")
 
     # Read user set config and save to Current_config(global)
     read_config()

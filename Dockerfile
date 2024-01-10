@@ -1,28 +1,29 @@
-FROM python:3.7-slim
-
-COPY . /root/src/
+FROM python:3.7-slim 
+#later alpine to save even more 
 
 RUN apt-get update \
     && apt-get install -y \
     gcc \
-    && rm -rf /var/lib/apt/lists/*
+    curl \
+    zip \
+    expect
 
 RUN  pip install requests \
-     pycaret \
+     pycaret[regression] \
      matplotlib \
      pytz \
      requests \
      geopy \
-     timezonefinder
-     
-RUN  apt-get update \
-     && apt-get install -y \
-     curl \
-     zip \
-     && cd /root/src/ \
-     && mkdir -p /var/lib/waziapp \
-     && zip /index.zip docker-compose.yml package.json
+     timezonefinder \
+     python-dotenv
 
+COPY . /root/src/
+
+RUN rm -rf /var/lib/apt/lists/* \
+    && cd /root/src/ \
+    && mkdir -p /var/lib/waziapp \
+    && zip /index.zip docker-compose.yml package.json
+     
 #----------------------------#
 
 # Uncomment For development
@@ -31,7 +32,7 @@ RUN  apt-get update \
 
 # Uncomment For production
 WORKDIR /root/src/
-ENTRYPOINT ["sh", "-c", "python main.py > logs.log"]
+ENTRYPOINT ["sh", "-c", "unbuffer python main.py 2>&1 | tee -a python_logs.log"]
 
 
 # Here is how you can access inside your container:

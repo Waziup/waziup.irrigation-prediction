@@ -1,0 +1,7 @@
+# .dockerignore
+*.log
+*.pkl
+*.md
+*.txt
+config/current-config.json
+/catboost_info

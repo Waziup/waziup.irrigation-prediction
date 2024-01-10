@@ -24,12 +24,12 @@ import create_model
 
 #usock.sockAddr = "/var/lib/waziapp/proxy.sock" # Production mode
 
-usock.sockAddr = "proxy.sock" # Debug mode
+#usock.sockAddr = "proxy.sock" # Debug mode
 
 # URL of API to retrive devices
-#DeviceApiUrl = "http://wazigate/devices/" # Production mode
-#DeviceApiUrl = "http://localhost:8080/devices/" # Debug mode
-DeviceApiUrl = "http://192.168.189.2/devices/"
+#ApiUrl = "/" # Production mode
+#ApiUrl = "http://localhost:8080/" # Debug mode
+#ApiUrl = "http://192.168.189.2/"
 
 # Path to the root of the code
 PATH = os.path.dirname(os.path.abspath(__file__))
@@ -129,94 +129,6 @@ usock.routerGET("/ui/(.*)", ui)
 usock.routerPOST("/ui/(.*)", ui)
 
 #------------------#
-
-# Helper to search other sensor values and => TODO: not used any more
-def getSensorAtTheSameTime(deviceAndSensorIds, dataOfFirstSensor):
-    # TODO: USE THE DECODER NAMES -> TELL THEM, handle case if there are multiple sensor values for a timespan
-    mapping = {
-        "time": "timeStamp",
-        "sensorId": "sensorId",
-        "lon": "longitude",
-        "lat": "latitude",
-        "Air Temperature": "airTemp",
-        "Air Humidity": "airHum",
-        "Barometric Pressure": "pressure",
-        "Wind Speed": "windSpeed",
-        "Wind Direction Sensor": "windDirection",
-        "Light Intensity": "lightIntensity",
-        "UV Index": "uvIndex",
-        "Rain Gauge": "rainfall"
-    }
-
-    # Dict to return in the end
-    allSensorsDict = {
-            "timeStamp": None,
-            "sensorId": None,
-            "longitude": None,
-            "latitude": None,
-            "airTemp": None,
-            "airHum": None,
-            "pressure": None,
-            "windSpeed": None,
-            "windDirection": None,
-            "lightIntensity": None,
-            "uvIndex": None,
-            "rainfall": None
-    }
-
-    # Get time of first sensor in list
-    time = dataOfFirstSensor['time']
-    # Set time of the first selected sensor as time of the dict
-    allSensorsDict["timeStamp"] = time
-    # Set given sensor id to dict
-    allSensorsDict["sensorId"] = Id
-    # Set GPS coordinates
-    coordinates = Gps_info.split(",")
-    allSensorsDict["longitude"] = coordinates[1]
-    allSensorsDict["latitude"] = coordinates[0]
-    # Parse the ISO string into a datetime object
-    dateObject = datetime.fromisoformat(time)
-    # Subtract and add 5 seconds to get interval
-    fromObject = dateObject - timedelta(seconds=int(Threshold))
-    toObject = dateObject + timedelta(seconds=int(Threshold))
-
-    # Search all other choosen sensors to see if there are occurances too
-    for sensor in deviceAndSensorIds:
-        # Create URL for API call
-        api_url = DeviceApiUrl + sensor.split('/')[0] + "/sensors/" + sensor.split('/')[1] + "/values?from=" + fromObject.isoformat() + "&to=" + toObject.isoformat()
-        # Parse the URL
-        parsed_url = urllib.parse.urlsplit(api_url)
-
-        # Encode the query parameters
-        encoded_query = urllib.parse.quote(parsed_url.query, safe='=&')
-
-        # Reconstruct the URL with the encoded query
-        encoded_url = urllib.parse.urlunsplit((parsed_url.scheme, 
-                                                parsed_url.netloc, 
-                                                parsed_url.path, 
-                                                encoded_query, 
-                                                parsed_url.fragment))
-
-        try:
-            # Send a GET request to the API
-            response = requests.get(encoded_url)
-
-            # Check if the request was successful (status code 200)
-            if response.status_code == 200:
-                # The response content contains the data from the API
-                response_ok = response.json()
-
-                # Add values to the all_Sensors_dict
-                if len(response_ok) != 0:
-                    nameToAdd = mapping[sensor.split("/")[1]]
-                    allSensorsDict[nameToAdd] = response_ok[0]["value"]
-            else:
-                print("Request failed with status code:", response.status_code)
-        except requests.exceptions.RequestException as e:
-            # Handle request exceptions (e.g., connection errors)
-            print("Request error:", e)
-
-    return allSensorsDict
 
 # Get historical sensor values from WaziGates API
 def setConfig(url, body):

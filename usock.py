@@ -5,9 +5,12 @@ import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
+
 
 #sockAddr = "/var/lib/waziapp/proxy.sock"   # Default path
-sockAddr = "proxy.sock"            # For debug mode
+#sockAddr = "proxy.sock"            # For debug mode
+sockAddr = ""
 
 # ----------------- #
 
@@ -124,6 +127,10 @@ class HTTPHandler(BaseHTTPRequestHandler):
 
 
 def start():
+    global sockAddr
+    load_dotenv()
+    sockAddr = os.getenv("Proxy_URL")
+
     # Make sure the socket does not already exist
     try:
         os.unlink(sockAddr)
