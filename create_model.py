@@ -97,6 +97,7 @@ Model_mapping = {
 # predictions 
 Data = pd.DataFrame
 Predictions = pd.DataFrame
+Threshold_timestamp = ""
 
 
 def read_config():
@@ -1138,6 +1139,27 @@ def tune_models(exp, best):
 def generate_predictions(best, exp, features):
     return exp.predict_model(best, data=features)
 
+# Calculates the time when threshold will be meet, according to predictions
+def calc_threshold(Predictions):
+    was_reached = False
+    last_df = Predictions[len(Predictions)-1]
+    last_df_len = len(last_df) # same as forecast horizon
+    threshold = Current_config.Threshold
+
+    # calculate next occurance
+    for i in range(last_df_len):
+        if last_df['y_pred'][i] > threshold:
+            print("Threshold will be reached on", last_df.index[i], "With a value of:", last_df['y_pred'][i])
+            timestamp = last_df.index[i]
+            was_reached = True
+            break
+        # if was_reached == False and last_df_len-1 == i:
+        #     print("Threshold is not expected to reached in the coming 5 days!")
+        #     timestamp = False
+        #     break
+
+    return timestamp
+
 # Data Getter
 def get_Data():
     if Data.empty:
@@ -1151,12 +1173,20 @@ def get_predictions():
         return False
     else:
         return Predictions
+    
+# Predictions Getter
+def get_threshold_timestamp():
+    if not Threshold_timestamp:
+        return False
+    else:
+        return Threshold_timestamp
 
 # Mighty main fuction ;)
 def main() -> int:
     global Predictions
     global Data
     global ApiUrl
+    global Threshold_timestamp
 
     # Check version of pycaret, should be >= 3.0
     print("Check version of pycaret:", pycaret.__version__, "should be >= 3.0")
@@ -1207,6 +1237,9 @@ def main() -> int:
     # Create predictions to forecast values
     Predictions = generate_predictions(best_model, best_exp, future_features)
     
+    # Calculate when threshold will be meet
+    Threshold_timestamp = calc_threshold(Predictions)
+
     return 0
 
 if __name__ == '__main__':

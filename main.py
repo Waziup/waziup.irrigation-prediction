@@ -353,6 +353,25 @@ def getPredictionChartData(url, body):
 
 usock.routerGET("/api/getPredictionChartData", getPredictionChartData)
 
+# get values from create_model.py if models had been trained
+def getThreshold(url, body): 
+    threshold_timestamp = create_model.get_threshold_timestamp()
+
+    if threshold_timestamp is False:
+        response_data = {"threshold": False}
+        status_code = 404
+
+        return status_code, bytes(json.dumps(response_data), "utf8"), []
+    
+    else:
+        timestamp_data = {
+            "timestamp": str(threshold_timestamp)
+        }
+
+        return 200, bytes(json.dumps(timestamp_data), "utf-8"), []
+    
+usock.routerGET("/api/getThreshold", getThreshold)
+
 # Frontend polls this to reload page when training is ready => only active for first round of training
 def isTrainingReady(url, body):
     response_data = {"isTrainingFinished": TrainingFinished}

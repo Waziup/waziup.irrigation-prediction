@@ -1,5 +1,5 @@
 FROM python:3.7-slim 
-#later alpine to save even more 
+#later alpine to save even more, but is it worth it?
 
 RUN apt-get update \
     && apt-get install -y \

@@ -12,7 +12,8 @@
   <script type="text/javascript" src="libs/apexcharts.min.js"></script> <!-- Include the locally hosted ApexCharts -->
   <script type="text/javascript">
     
-    var waitForTraining = true;
+    var waitForTraining = true; 
+    var timestamp = "";
 
     // Nav
     function goToSettings() {
@@ -244,6 +245,21 @@ function fetchDatasetChartData() {
         .catch(error => console.error('Error fetching data:', error));
     }
 
+    function fetchThreshold() {
+      fetch('../api/getThreshold')
+        .then(response => response.json())
+        .then(timestamp_data => {
+          if (timestamp_data.threshold == false) {
+            console.log("No timestamp, when threshold is reached, could be fetched from backend.");
+            document.getElementById("timestamp_txt").innerHTML = "The threshold is not reached in the current forecast horizon."
+          }
+          else {
+            document.getElementById("timestamp_txt").innerHTML = "The threshold will be reached on " + timestamp_data.timestamp;
+          }
+        }
+        )
+      }
+
     // start training, encapsulated in create_model.py
     function startTraining() {
       fetch(`../api/startTraining`)
@@ -290,6 +306,7 @@ function fetchDatasetChartData() {
             fetchHistoricalChartData();
             fetchDatasetChartData()
             fetchPredictionChartData();
+            fetchThreshold();
           }
         }).catch((e) => {
           alert('Please press the settings button and set up the needed Parameters');
@@ -309,11 +326,11 @@ function fetchDatasetChartData() {
 <body>
   <div class="input_elements">
     <button class="input_elements" type="button" onclick="goToSettings()">Settings</button>
+    <button class="input_elements" type="button" onclick="startTraining()">Start Training</button>
   </div>
   <div class="center_full">
     <h1>WaziUp Irrigation Prediction</h1>
     <p>This application predicts soil moisture values for sensors attached to the WaziGate.</p>
-    <div class="display_elements">
       <div class="chart-container">
         <p>Raw captured sensor values:</p>
         <div id="chart_hist"></div>
@@ -323,11 +340,10 @@ function fetchDatasetChartData() {
         <div id="chart_train_data"></div>
       </div>
       <div class="chart-container">
-        <p>Predicted sensor values</p>
+        <p>Predicted sensor values:</p>
         <div id="chart_pred"></div>
+        <p id="timestamp_txt"></p>
       </div>
-      <button class="input_elements" type="button" onclick="startTraining()">Start Training</button>
-    </div>
   </div>
   <!-- Include your scripts for chart rendering here -->
 </body>
