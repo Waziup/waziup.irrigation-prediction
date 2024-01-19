@@ -388,13 +388,18 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
     time_interval = 43200 #12h
 
     while True:
-        print("Training started at:", datetime.now())
+        start_time = datetime.now().replace(microsecond=0)
+        print("Training started at:", start_time)
 
         # Call create model function
         create_model.main()
 
         # TODO: reload page
         TrainingFinished = True
+
+        end_time = datetime.now().replace(microsecond=0)
+        duration = end_time - start_time
+        print("Traning finished at: ", end_time, "The duration was: ", duration)
 
         # Send thread to sleep
         time.sleep(time_interval)  # Wait for the specified time interval

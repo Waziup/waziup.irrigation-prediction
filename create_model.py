@@ -447,6 +447,28 @@ def add_pump_state(data):
 
     return data
 
+def hours_since_pump_was_turned_on(df):    
+    # Find the index of rows where pump state is 1
+    pump_on_indices = df[df['pump_state'] == 1].index
+
+    # Initialize a new column with NaN values
+    df['rows_since_last_pump_on'] = float('nan')
+
+    # Iterate over pump_on_indices and update the new column
+    for i in range(len(pump_on_indices)):
+        if i == 0:
+            # If it's the first occurrence, update with the total rows
+            df.loc[:pump_on_indices[i], 'rows_since_last_pump_on'] = len(df)
+        else:
+            # Update with the difference in rows since the last occurrence
+            df.loc[pump_on_indices[i - 1] + 1:pump_on_indices[i], 'rows_since_last_pump_on'] = \
+                (pump_on_indices[i] - pump_on_indices[i - 1] - pd.Timedelta(seconds=1)) / pd.Timedelta('1 hour')
+
+    # Fill NaN values with 0 for rows where pump state is 1
+    df['rows_since_last_pump_on'] = df['rows_since_last_pump_on'].fillna(0).astype(int)
+
+    return df
+
 # Augment the dataset creating new features
 def create_features(data):
     # Create average cols
@@ -504,6 +526,9 @@ def create_features(data):
     data['gradient'] = np.gradient(f) #TODO: check gradient calc -> pump state seems to be wrong
     data['pump_state'] = int(0)
     data = add_pump_state(data)
+
+    # also add hours since last irrigation => TODO: check later, still an error
+    #data = hours_since_pump_was_turned_on(data)
     
     return data
 
@@ -915,8 +940,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        exclude=['lar']
-        #include=['xgboost', 'llar'] #debug
+        #exclude=['lar'],
+        include=['xgboost', 'llar'] #debug
     )
 
     return re_exp, best_re
@@ -994,7 +1019,7 @@ def evaluate_results_and_choose_best(results_for_one_df, best_for_one_df):
 
     best_model_for_df = best_for_one_df[max_index]
     
-    print("The best model is:", best_model_for_df.__module__)
+    print("The best model after evaluation is:", best_model_for_df.__module__)
     print("Maximum R2 Value:", max_value)
     print('This is the rest of the metrics: mae', results_for_one_df[max_index]['results'][0],  'rmse', results_for_one_df[max_index]['results'][1], 'mpe', results_for_one_df[max_index]['results'][2])
     print("Index of Maximum R2 Value:", max_index,"\n")
@@ -1002,7 +1027,7 @@ def evaluate_results_and_choose_best(results_for_one_df, best_for_one_df):
     return best_model_for_df
 
 # Create future value testset for prediction
-def create_future_values(data, best):
+def create_future_values(data):
     # Create ranges and dataframe with timestamps 
     start = data['Timestamp'].iloc[0]
     print("start: ", start)
@@ -1124,16 +1149,20 @@ def analyze_performance_old(exp, best):
         print("After testset: For the dataset:",i)
         exp[i].plot_model(best[i], plot = 'forecast', data_kwargs = {'fh' : 500}, save = True)
         #before.save("Plot_after_testset_"+str(i)+".png", format='png')
-        
-# Tune hyperparameters
+
+# Tune hyperparameters of one models
+def tune_model(exp, best):        
+    return exp.tune_model(best, choose_better = True)
+
+# Tune hyperparameters of several models
 def tune_models(exp, best):
     # tune hyperparameters of dt
     tuned_best_models = []
     for i in range(len(best)):
         print("This is for the",i,"model:",best[i])
-        tuned_best_models.append(exp[i].tune_model(best[i]))
+        tuned_best_models.append(exp.tune_model(best[i], choose_better = True))
         
-    return best
+    return tuned_best_models
 
 # Generate prediction with best_model and impute generated future_values
 def generate_predictions(best, exp, features):
@@ -1141,24 +1170,15 @@ def generate_predictions(best, exp, features):
 
 # Calculates the time when threshold will be meet, according to predictions
 def calc_threshold(Predictions):
-    was_reached = False
-    last_df = Predictions[len(Predictions)-1]
-    last_df_len = len(last_df) # same as forecast horizon
-    threshold = Current_config.Threshold
+    threshold = Current_config["Threshold"]
 
     # calculate next occurance
-    for i in range(last_df_len):
-        if last_df['y_pred'][i] > threshold:
-            print("Threshold will be reached on", last_df.index[i], "With a value of:", last_df['y_pred'][i])
-            timestamp = last_df.index[i]
-            was_reached = True
-            break
-        # if was_reached == False and last_df_len-1 == i:
-        #     print("Threshold is not expected to reached in the coming 5 days!")
-        #     timestamp = False
-        #     break
+    for i in range(len(Predictions)):
+        if Predictions['prediction_label'][i] > threshold:
+            print("Threshold will be reached on", Predictions.index[i], "With a value of:", Predictions['prediction_label'][i])
+            return Predictions.index[i]
 
-    return timestamp
+    return ""
 
 # Data Getter
 def get_Data():
@@ -1174,7 +1194,7 @@ def get_predictions():
     else:
         return Predictions
     
-# Predictions Getter
+# threshold timestamp Getter
 def get_threshold_timestamp():
     if not Threshold_timestamp:
         return False
@@ -1211,7 +1231,7 @@ def main() -> int:
     # Save the best models for further evaluation
     model_names = save_models(exp, best)
     
-    # Load model from disk  
+    # Load model from disk, if there was a magical error 
     try:
         best
     except NameError:
@@ -1224,18 +1244,38 @@ def main() -> int:
     best_model, best_exp = train_best(best_eval, Data)
     
     # Create future value set to feed new data to model
-    future_features = create_future_values(Data, best_model)
+    future_features = create_future_values(Data)
 
     # Compare dataframes cols to be sure that they match, otherwise drop
     future_features = compare_train_predictions_cols(train, future_features)
-    
-    # Tune hyperparameters, see notebook
-    #tuned_best = tune_models(exp, best)
 
+    # Before tuning
+    #best_model_before_tuning = best_exp.compare_models()
+    
+    # Tune hyperparameters of the 3 best models, see notebook
+    tuned_best = tune_models(best_exp, best_model)
+    
+    # After tuning
+    #best_model_after_tuning = best_exp.compare_models()
+    
+    # Manually compare metrics
+    #metrics_before_tuning = best_exp.get_metrics(model=best_model_before_tuning)
+    #metrics_after_tuning = best_exp.get_metrics(model=best_model_after_tuning)
+
+    # Compare relevant metrics
+    # compare_df = pd.DataFrame({
+    #     'Metric': metrics_before_tuning['Metric'],
+    #     'Before_Tuning': metrics_before_tuning['Value'],
+    #     'After_Tuning': metrics_after_tuning['Value']
+    # })
+
+    # print(compare_df)
+    
     # Ensemble, Stacking & ... not implemented yet, see notebook
 
+
     # Create predictions to forecast values
-    Predictions = generate_predictions(best_model, best_exp, future_features)
+    Predictions = generate_predictions(tuned_best, best_exp, future_features)
     
     # Calculate when threshold will be meet
     Threshold_timestamp = calc_threshold(Predictions)
