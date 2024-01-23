@@ -33,6 +33,7 @@ import main
 
 
 # URL of API to retrive devices
+ApiUrl = ""
 #ApiUrl = "/" # Production mode
 #ApiUrl = "http://localhost:8080/" # Debug mode
 #ApiUrl = "http://192.168.189.2/" # Debug mode on local gw

@@ -9,6 +9,7 @@ import json
 import threading
 import time
 from urllib.parse import urlparse, parse_qs
+from dotenv import load_dotenv
 import requests
 import urllib
 import usock
@@ -21,15 +22,8 @@ import create_model
 
 
 #---------------------#
-
-#usock.sockAddr = "/var/lib/waziapp/proxy.sock" # Production mode
-
-#usock.sockAddr = "proxy.sock" # Debug mode
-
-# URL of API to retrive devices
-#ApiUrl = "/" # Production mode
-#ApiUrl = "http://localhost:8080/" # Debug mode
-#ApiUrl = "http://192.168.189.2/"
+# Path for proxy.sock, set by .env
+#usock.sockAddr = ""
 
 # Path to the root of the code
 PATH = os.path.dirname(os.path.abspath(__file__))
@@ -425,4 +419,6 @@ usock.routerGET("/api/startTraining", startTraining)
 
 
 if __name__ == "__main__":
+    load_dotenv()
+    usock.sockAddr = os.getenv("Proxy_URL")
     usock.start()
