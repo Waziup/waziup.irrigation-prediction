@@ -124,6 +124,27 @@ usock.routerPOST("/ui/(.*)", ui)
 
 #------------------#
 
+# Get URL of API from .env file => TODO: better with try catch than locals, getenv can still stop backend
+def getApiUrl(url, body):
+    #load_dotenv()
+    url = os.getenv("API_URL")
+    if url not in (None, ''):
+        data = url
+        status_code = 200
+    else:
+        data=False,
+        status_code = 400
+
+    response = {
+        "data": data,
+        "status_code": status_code
+    }
+
+    return status_code, bytes(json.dumps(response), "utf8"), []
+
+usock.routerGET("/api/getApiUrl", getApiUrl)
+
+
 # Get historical sensor values from WaziGates API
 def setConfig(url, body):
     global DeviceAndSensorIdsMoisture

@@ -33,10 +33,8 @@ import main
 
 
 # URL of API to retrive devices
-ApiUrl = ""
-#ApiUrl = "/" # Production mode
-#ApiUrl = "http://localhost:8080/" # Debug mode
-#ApiUrl = "http://192.168.189.2/" # Debug mode on local gw
+ApiUrl = "/" # Production mode
+
 Token = None
 
 # Initialize an empty dictionary to store the current config
@@ -183,7 +181,7 @@ def load_data_api(sensor_name, from_timestamp):#, token)
     ApiUrl = os.getenv('API_URL')
 
 
-    if ApiUrl.startswith('http://wazigate/'):
+    if ApiUrl.startswith('/'):
         print('There is no token needed, fetch data from local gateway.')
     elif Token != None:
         print('There is no token needed, already present.')
@@ -1254,7 +1252,7 @@ def main() -> int:
     #best_model_before_tuning = best_exp.compare_models()
     
     # Tune hyperparameters of the 3 best models, see notebook
-    tuned_best = tune_models(best_exp, best_model)
+    tuned_best = tune_model(best_exp, best_model)
     
     # After tuning
     #best_model_after_tuning = best_exp.compare_models()
