@@ -85,6 +85,10 @@ div .soil-type {
   color: #fff;
 }
 
+.soil-type option {
+  color: #fff;
+}
+
 .input_elements {
   display: block;
 }
