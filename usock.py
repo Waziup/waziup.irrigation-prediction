@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 
 
 #sockAddr = "/var/lib/waziapp/proxy.sock"   # Default path
-sockAddr = "proxy.sock"            # For debug mode
-#sockAddr = ""
+#sockAddr = "proxy.sock"            # For debug mode
+sockAddr = ""
 
 # ----------------- #
 

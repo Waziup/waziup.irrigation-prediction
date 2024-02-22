@@ -15,6 +15,8 @@
   <script type="text/javascript">
 
     // Soil water retention tuples for various soil types
+    // TODO: enhance with cubic interpolation
+    // TODO: get more values in range of 10-30 cb, we are always in that range, needs to be more accurate
     var soil_retention_tuples = {
       "Sandy_Soil": {
           waterRetention: [0.4, 0.3, 0.2, 0.1],
@@ -333,7 +335,18 @@
     }
 
     // Main function
-    async function loadStuff() {
+    function loadStuff() {
+      $.get("/devices", function (data) {
+        const sensors = parseSensorData(data);
+        console.log("Sensors: ", sensors)
+        displaySensorsAndElements(sensors)
+        //$("#sensor_list").html(sensors).fadeIn();
+        //autoR = setTimeout(function () { loadStuff() }, 2000);
+      });
+    }
+
+    // Main function
+    async function loadStuff_remote() {
       try {
         // Get API path from backend
         await getApiPath();

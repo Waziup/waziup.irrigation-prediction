@@ -1,4 +1,4 @@
-FROM python:3.7-slim 
+FROM python:3.8-slim 
 #later alpine to save even more, but is it worth it?
 
 RUN apt-get update \
@@ -9,13 +9,14 @@ RUN apt-get update \
     expect
 
 RUN  pip install requests \
-     pycaret[regression] \
+     pycaret \
      matplotlib \
      pytz \
      requests \
      geopy \
      timezonefinder \
-     python-dotenv
+     python-dotenv \
+     xgboost
 
 COPY . /root/src/
 

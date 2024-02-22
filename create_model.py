@@ -33,7 +33,7 @@ import main
 
 
 # URL of API to retrive devices
-ApiUrl = "/" # Production mode
+ApiUrl = "http://wazigate/" # Production mode
 
 Token = None
 
@@ -181,7 +181,7 @@ def load_data_api(sensor_name, from_timestamp):#, token)
     ApiUrl = os.getenv('API_URL')
 
 
-    if ApiUrl.startswith('/'):
+    if ApiUrl.startswith('http://wazigate/'):
         print('There is no token needed, fetch data from local gateway.')
     elif Token != None:
         print('There is no token needed, already present.')
@@ -933,14 +933,17 @@ def create_and_compare_model_reg(train):
               train_size = 0.8
               )
     
+    # Print available models
+    re_exp.models()
+    
     # Run compare_models function TODO: configure setup accordingly
     best_re = re_exp.compare_models(
         n_select = 19, 
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        #exclude=['lar'],
-        include=['xgboost', 'llar'] #debug
+        exclude=['lar'],
+        #include=['xgboost', 'llar'] #debug
     )
 
     return re_exp, best_re
