@@ -1,128 +1,145 @@
 <!DOCTYPE html>
 <html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Settings of the "Irrigation Prediction" WaziApp</title>
+    <meta name="description" content="" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-<head>
-  <meta charset="utf-8" />
-  <title>Settings of the "Irrigation Prediction" WaziApp</title>
-  <meta name="description" content="" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="main.css" type="text/css" />
+    <link
+      href="https://fonts.googleapis.com/css?family=Poppins"
+      rel="stylesheet"
+    />
+    <script type="text/javascript" src="libs/jquery-3.2.1.min.js"></script>
+    <script type="text/javascript" src="libs/apexcharts.min.js"></script>
+    <!-- Include the locally hosted ApexCharts -->
+    <script type="text/javascript">
+      var waitForTraining = true;
+      var timestamp = "";
 
-  <link rel="stylesheet" href="main.css" type="text/css" />
-  <script type="text/javascript" src="libs/jquery-3.2.1.min.js"></script>
-  <script type="text/javascript" src="libs/apexcharts.min.js"></script> <!-- Include the locally hosted ApexCharts -->
-  <script type="text/javascript">
-    
-    var waitForTraining = true; 
-    var timestamp = "";
+      // Nav
+      function goToSettings() {
+        window.location.href = "settings.html";
+      }
 
-    // Nav
-    function goToSettings() {
-      window.location.href = "settings.html";
-    }
+      // JavaScript function to toggle visibility
+      function showElements() {
+        var inputElements = document.querySelector(".input_elements");
+        inputElements.style.display = "block";
+      }
 
-    // JavaScript function to toggle visibility
-    function showElements() {
-      var inputElements = document.querySelector('.input_elements');
-      inputElements.style.display = "block";
-    }
+      // Display Snesor values and other elements
+      function displaySensorsAndElements(sensorList) {
+        // Get the <select> element by its ID
+        const selectElement = document.getElementById("sensor_list");
+        showElements();
 
-    // Display Snesor values and other elements
-    function displaySensorsAndElements(sensorList) {
-      // Get the <select> element by its ID
-      const selectElement = document.getElementById("sensor_list");
-      showElements()
+        // Loop through the sensor names and create <option> elements
+        sensorList.forEach((sensor) => {
+          // Create an <option> element
+          const optionElement = document.createElement("option");
 
-      // Loop through the sensor names and create <option> elements
-      sensorList.forEach(sensor => {
-        // Create an <option> element
-        const optionElement = document.createElement("option");
+          // Set the value and text of the <option> element
+          optionElement.value = sensor.deviceId + "/" + sensor.sensorId;
+          optionElement.text = sensor.deviceName + " / " + sensor.sensorName;
 
-        // Set the value and text of the <option> element
-        optionElement.value = sensor.deviceId + "/" + sensor.sensorId;
-        optionElement.text = sensor.deviceName + " / " + sensor.sensorName;
+          // Append the <option> element to the <select> element
+          selectElement.appendChild(optionElement);
+        });
+      }
 
-        // Append the <option> element to the <select> element
-        selectElement.appendChild(optionElement);
-      });
-    }
+      // Creates List of sensors
+      function parseSensorData(jsonData) {
+        const sensorList = [];
 
-    // Creates List of sensors
-    function parseSensorData(jsonData) {
-      const sensorList = [];
+        // Loop through the array of objects (devices) in jsonData
+        jsonData.forEach((device) => {
+          // Check if the device has a "sensors" property
+          if (device.sensors && Array.isArray(device.sensors)) {
+            // Loop through the sensors array of the device
+            device.sensors.forEach((sensor) => {
+              // Extract sensor information
+              const sensorInfo = {
+                deviceId: device.id,
+                deviceName: device.name,
+                sensorId: sensor.id,
+                sensorName: sensor.name,
+                sensorValue: sensor.value,
+              };
 
-      // Loop through the array of objects (devices) in jsonData
-      jsonData.forEach(device => {
-        // Check if the device has a "sensors" property
-        if (device.sensors && Array.isArray(device.sensors)) {
-          // Loop through the sensors array of the device
-          device.sensors.forEach(sensor => {
-            // Extract sensor information
-            const sensorInfo = {
-              deviceId: device.id,
-              deviceName: device.name,
-              sensorId: sensor.id,
-              sensorName: sensor.name,
-              sensorValue: sensor.value,
-            };
+              // Push the sensor information to the sensorList
+              sensorList.push(sensorInfo);
+            });
+          }
+        });
+        return sensorList;
+      }
 
-            // Push the sensor information to the sensorList
-            sensorList.push(sensorInfo);
-          });
-        }
-      });
-      return sensorList;
-    }
-
-    // To confirm that user had run the config
-    function checkConfigPresent() {
-      return fetch(`../api/checkConfigPresent`)
-        .then(response => response.json())
-        .then(data => {
+      // To confirm that user had run the config
+      function checkConfigPresent() {
+        return fetch(`../api/checkConfigPresent`)
+          .then((response) => response.json())
+          .then((data) => {
             if (data.data.config_present == true) {
               return true;
             } else {
               // TODO: do not display chart or do display without values
-              alert('Please press the settings button and set up the needed Parameters');
+              // alert(
+              //   "Please press the settings button and set up the needed Parameters"
+              // );
             }
             console.log(data);
             return false;
-        })
-    }
+          });
+      }
 
-    // Function to format ISO timestamp to a readable format
-    function formatTimestamp(isoTimestamp) {
+      // Function to format ISO timestamp to a readable format
+      function formatTimestamp(isoTimestamp) {
         const date = new Date(isoTimestamp);
-        const options = { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit'/*, second: '2-digit'*/ };
-        return date.toLocaleString('de-DE', options);
-    }
+        const options = {
+          year: "numeric",
+          month: "short",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit" /*, second: '2-digit'*/,
+        };
+        return date.toLocaleString("de-DE", options);
+      }
 
-    // Get data from to display inside chart from backend
-    function fetchHistoricalChartData() {
-      fetch('../api/getHistoricalChartData')
-        .then(response => response.json())
-        .then(chartData => {
-          // Format the data
-          var temperatureSeriesRounded = chartData.temperatureSeries.map(value => parseFloat(value.toFixed(1)));
-          var moistureSeriesRounded = chartData.moistureSeries.map(value => parseFloat(value.toFixed(2)));
-          var formattedTimestamps = chartData.timestamps.map(timestamp => formatTimestamp(timestamp));
+      // Get data from to display inside chart from backend
+      function fetchHistoricalChartData() {
+        fetch("../api/getHistoricalChartData")
+          .then((response) => response.json())
+          .then((chartData) => {
+            // Format the data
+            var temperatureSeriesRounded = chartData.temperatureSeries.map(
+              (value) => parseFloat(value.toFixed(1))
+            );
+            var moistureSeriesRounded = chartData.moistureSeries.map((value) =>
+              parseFloat(value.toFixed(2))
+            );
+            var formattedTimestamps = chartData.timestamps.map((timestamp) =>
+              formatTimestamp(timestamp)
+            );
 
-          var options = {
-            chart: {
-                type: 'line',
-                title: 'Temperature and Soil Moisture' // Set the title here
-            },
-            series: [
+            var options = {
+              chart: {
+                type: "line",
+                title: "Temperature and Soil Moisture", // Set the title here
+              },
+              series: [
                 {
-                    name: 'Temperature in °C',
-                    data: temperatureSeriesRounded
+                  name: "Temperature in °C",
+                  data: temperatureSeriesRounded,
                 },
                 {
-                    name: 'Moisture in cbar',
-                    data: moistureSeriesRounded
-                }
-            ],
-            xaxis: {
-                categories: formattedTimestamps,//chartData.timestamps,//formattedTimestamps,
+                  name: "Moisture in cbar",
+                  data: moistureSeriesRounded,
+                },
+              ],
+              xaxis: {
+                categories: formattedTimestamps, //chartData.timestamps,//formattedTimestamps,
                 labels: {
                   rotate: -45, // Rotate labels by -45 degrees to avoid overlapping
                   minHeight: 40, // Set a minimum height for labels to prevent overlapping
@@ -133,93 +150,112 @@
                   //     hour: 'HH:mm',
                   //     minute: 'HH:mm'
                   // }
-                }
-            }
-          };
-
-          var chart = new ApexCharts(document.querySelector("#chart_hist"), options);
-          chart.render();
-        })
-        .catch(error => console.error('Error fetching data:', error));
-    }
-
- // TODO: keys are wrong, data missing
-function fetchDatasetChartData() {
-  fetch('../api/getDatasetChartData')
-    .then(response => response.json())
-    .then(chartData => {
-      if (chartData.model == false) {
-        alert('Please start the training procedure by pressing the "Start Training" button after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.');
-      } else {
-        // Initialize variables outside the loop
-        var elementsToDisplay = [];
-        var formattedTimestamps;
-
-        // Iterate through the keys in chartData
-        for (var key in chartData) {
-          if (chartData.hasOwnProperty(key)) {
-            // Check the type for each element in the array
-            var isNumberArray = chartData[key].every(value => typeof value === "number");
-
-            if (isNumberArray) {
-              // If all elements are numbers, push the series data
-              elementsToDisplay.push({
-                name: key,
-                data: chartData[key].map(value => parseFloat(value.toFixed(2)))
-              });
-            } else if (typeof chartData[key][0] === "string") {
-              formattedTimestamps = chartData.timestamps.map(timestamp => formatTimestamp(timestamp));
-            }
-          }
-        }
-
-        var options = {
-          chart: {
-            type: 'line',
-            title: 'All values of the dataset' // Set the title here
-          },
-          series: elementsToDisplay, // Use the prepared series data
-          xaxis: {
-            categories: formattedTimestamps || [], // Use formattedTimestamps if available, otherwise an empty array
-            labels: {
-              rotate: -45,
-              minHeight: 40,
-            }
-          }
-        };
-
-        var chart = new ApexCharts(document.querySelector("#chart_train_data"), options);
-        chart.render();
-      }
-    })
-    .catch(error => console.error('Error fetching data:', error));
-}
-    
-    function fetchPredictionChartData() {
-      fetch('../api/getPredictionChartData')
-        .then(response => response.json())
-        .then(chartData => {
-          if (chartData.model == false) {
-            alert('Please start training procedure by pressing the "Start Training" button, after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.');
-          }
-          else {
-            // Format the data
-            var moistureSeriesRounded = chartData.moistureSeries.map(value => parseFloat(value.toFixed(2)));
-            var formattedTimestamps = chartData.timestamps.map(timestamp => formatTimestamp(timestamp));
-
-            var options = {
-              chart: {
-                  type: 'line',
-                  title: 'Prediction Soil Moisture' // Set the title here
+                },
               },
-              series: [
-                  {
-                      name: 'Moisture in cbar',
-                      data: moistureSeriesRounded
+            };
+
+            var chart = new ApexCharts(
+              document.querySelector("#chart_hist"),
+              options
+            );
+            chart.render();
+          })
+          .catch((error) => console.error("Error fetching data:", error));
+      }
+
+      // TODO: keys are wrong, data missing
+      function fetchDatasetChartData() {
+        fetch("../api/getDatasetChartData")
+          .then((response) => response.json())
+          .then((chartData) => {
+            if (chartData.model == false) {
+              // alert(
+              //   'Please start the training procedure by pressing the "Start Training" button after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.'
+              // );
+            } else {
+              // Initialize variables outside the loop
+              var elementsToDisplay = [];
+              var formattedTimestamps;
+
+              // Iterate through the keys in chartData
+              for (var key in chartData) {
+                if (chartData.hasOwnProperty(key)) {
+                  // Check the type for each element in the array
+                  var isNumberArray = chartData[key].every(
+                    (value) => typeof value === "number"
+                  );
+
+                  if (isNumberArray) {
+                    // If all elements are numbers, push the series data
+                    elementsToDisplay.push({
+                      name: key,
+                      data: chartData[key].map((value) =>
+                        parseFloat(value.toFixed(2))
+                      ),
+                    });
+                  } else if (typeof chartData[key][0] === "string") {
+                    formattedTimestamps = chartData.timestamps.map(
+                      (timestamp) => formatTimestamp(timestamp)
+                    );
                   }
-              ],
-              xaxis: {
-                  categories: formattedTimestamps,//chartData.timestamps,//formattedTimestamps,
+                }
+              }
+
+              var options = {
+                chart: {
+                  type: "line",
+                  title: "All values of the dataset", // Set the title here
+                },
+                series: elementsToDisplay, // Use the prepared series data
+                xaxis: {
+                  categories: formattedTimestamps || [], // Use formattedTimestamps if available, otherwise an empty array
+                  labels: {
+                    rotate: -45,
+                    minHeight: 40,
+                  },
+                },
+              };
+
+              var chart = new ApexCharts(
+                document.querySelector("#chart_train_data"),
+                options
+              );
+              chart.render();
+            }
+          })
+          .catch((error) => console.error("Error fetching data:", error));
+      }
+
+      function fetchPredictionChartData() {
+        fetch("../api/getPredictionChartData")
+          .then((response) => response.json())
+          .then((chartData) => {
+            if (chartData.model == false) {
+              // alert(
+              //   'Please start training procedure by pressing the "Start Training" button, after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.'
+              // );
+            } else {
+              // Format the data
+              var moistureSeriesRounded = chartData.moistureSeries.map(
+                (value) => parseFloat(value.toFixed(2))
+              );
+              var formattedTimestamps = chartData.timestamps.map((timestamp) =>
+                formatTimestamp(timestamp)
+              );
+
+              var options = {
+                chart: {
+                  type: "line",
+                  title: "Prediction Soil Moisture", // Set the title here
+                },
+                series: [
+                  {
+                    name: "Moisture in cbar",
+                    data: moistureSeriesRounded,
+                  },
+                ],
+                xaxis: {
+                  categories: formattedTimestamps, //chartData.timestamps,//formattedTimestamps,
                   labels: {
                     rotate: -45, // Rotate labels by -45 degrees to avoid overlapping
                     minHeight: 40, // Set a minimum height for labels to prevent overlapping
@@ -230,107 +266,125 @@ function fetchDatasetChartData() {
                     //     hour: 'HH:mm',
                     //     minute: 'HH:mm'
                     // }
-                  }
-              },
-              // Add the annotations property
-              annotations: chartData.annotations
-              
-            };
+                  },
+                },
+                // Add the annotations property
+                annotations: chartData.annotations,
+              };
 
-            var chart = new ApexCharts(document.querySelector("#chart_pred"), options);
-            chart.render();
-          }
-      
-        })
-        .catch(error => console.error('Error fetching data:', error));
-    }
-
-    function fetchThreshold() {
-      fetch('../api/getThreshold')
-        .then(response => response.json())
-        .then(timestamp_data => {
-          if (timestamp_data.threshold == false) {
-            console.log("No timestamp, when threshold is reached, could be fetched from backend.");
-            document.getElementById("timestamp_txt").innerHTML = "The threshold is not reached in the current forecast horizon."
-          }
-          else {
-            document.getElementById("timestamp_txt").innerHTML = "The threshold will be reached on " + timestamp_data.timestamp;
-          }
-        }
-        )
+              var chart = new ApexCharts(
+                document.querySelector("#chart_pred"),
+                options
+              );
+              chart.render();
+            }
+          })
+          .catch((error) => console.error("Error fetching data:", error));
       }
 
-    // start training, encapsulated in create_model.py
-    function startTraining() {
-      fetch(`../api/startTraining`)
-        .then(response => response.text())
-        .then(data => {
+      function fetchThreshold() {
+        fetch("../api/getThreshold")
+          .then((response) => response.json())
+          .then((timestamp_data) => {
+            if (timestamp_data.threshold == false) {
+              console.log(
+                "No timestamp, when threshold is reached, could be fetched from backend."
+              );
+              document.getElementById("timestamp_txt").innerHTML =
+                "The threshold is not reached in the current forecast horizon.";
+            } else {
+              document.getElementById("timestamp_txt").innerHTML =
+                "The threshold will be reached on " + timestamp_data.timestamp;
+            }
+          });
+      }
+
+      // start training, encapsulated in create_model.py
+      function startTraining() {
+        fetch(`../api/startTraining`)
+          .then((response) => response.text())
+          .then((data) => {
             if (data == "") {
               //location.reload();
-              alert("Training process was started, page will reload when procedure is finished!");
+              alert(
+                "Training process was started, page will reload when procedure is finished!"
+              );
               waitForTraining = true;
               isTrainingReady();
             } else {
-              alert('Cannot start, see console for more info! Error:', data);
+              alert("Cannot start, see console for more info! Error:", data);
             }
             console.log(data);
-        })
-    }
-
-    function sleep(ms) {
-      return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    async function isTrainingReady() {
-      while(waitForTraining) {
-        fetch(`../api/isTrainingReady`)
-          .then(response => response.json())
-          .then(response_data => {
-            if (response_data.isTrainingFinished == true) {
-              waitForTraining = false;
-              location.reload();
-              alert("Training process is finished!");
-            }
-          })
-        await sleep(2000);
+          });
       }
-    }
 
-    // Main function
-    function loadStuff() {
-      $.get("/devices", function (data) {
-        checkConfigPresent().then((ret) => {
-          if (ret) {
-            // Config is present 
-            console.log("Config is already present...");
-            fetchHistoricalChartData();
-            fetchDatasetChartData()
-            fetchPredictionChartData();
-            fetchThreshold();
-          }
-        }).catch((e) => {
-          alert('Please press the settings button and set up the needed Parameters');
-          console.log("Config is not present... Error: ", e);
-        })
+      function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+
+      async function isTrainingReady() {
+        while (waitForTraining) {
+          fetch(`../api/isTrainingReady`)
+            .then((response) => response.json())
+            .then((response_data) => {
+              if (response_data.isTrainingFinished == true) {
+                waitForTraining = false;
+                location.reload();
+                alert("Training process is finished!");
+              }
+            });
+          await sleep(2000);
+        }
+      }
+
+      // Main function
+      function loadStuff() {
+        $.get("/devices", function (data) {
+          checkConfigPresent()
+            .then((ret) => {
+              if (ret) {
+                // Config is present
+                console.log("Config is already present...");
+                fetchHistoricalChartData();
+                fetchDatasetChartData();
+                fetchPredictionChartData();
+                fetchThreshold();
+              }
+            })
+            .catch((e) => {
+              // alert(
+              //   "Please press the settings button and set up the needed Parameters"
+              // );
+              console.log("Config is not present... Error: ", e);
+            });
+        });
+      }
+
+      // Called on page load => shows loading animation
+      $(function () {
+        $("#sensor_list")
+          .html('<img src="./loading.gif" /> Loading...')
+          .fadeIn();
+        loadStuff();
       });
-    }
+    </script>
+  </head>
 
-    // Called on page load => shows loading animation
-    $(function () {
-      $("#sensor_list").html("<img src=\"./loading.gif\" /> Loading...").fadeIn();
-      loadStuff();
-    });
-  </script>
-</head>
-
-<body>
-  <div class="input_elements">
-    <button class="input_elements" type="button" onclick="goToSettings()">Settings</button>
-    <button class="input_elements" type="button" onclick="startTraining()">Start Training</button>
-  </div>
-  <div class="center_full">
-    <h1>WaziUp Irrigation Prediction</h1>
-    <p>This application predicts soil moisture values for sensors attached to the WaziGate.</p>
+  <body>
+    <div class="action-buttons">
+      <button class="settings" type="button" onclick="goToSettings()">
+        Settings
+      </button>
+      <button class="training" type="button" onclick="startTraining()">
+        Start Training
+      </button>
+    </div>
+    <div class="center_full">
+      <h1>WaziUp Irrigation Prediction</h1>
+      <p>
+        This application predicts soil moisture values for sensors attached to
+        the WaziGate.
+      </p>
       <div class="chart-container">
         <p>Raw captured sensor values:</p>
         <div id="chart_hist"></div>
@@ -344,7 +398,7 @@ function fetchDatasetChartData() {
         <div id="chart_pred"></div>
         <p id="timestamp_txt"></p>
       </div>
-  </div>
-  <!-- Include your scripts for chart rendering here -->
-</body>
+    </div>
+    <!-- Include your scripts for chart rendering here -->
+  </body>
 </html>
