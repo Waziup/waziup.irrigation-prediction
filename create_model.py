@@ -7,10 +7,12 @@ Created on Wed May  3 10:54:49 2023
 
 #TODO:general names in csv export
 
-from datetime import timedelta
+from datetime import timedelta, datetime
+import datetime
 import json
 import logging
 import os
+from dateutil import parser
 import subprocess
 from dotenv import load_dotenv
 import pycaret 
@@ -33,7 +35,7 @@ import main
 
 
 # URL of API to retrive devices
-ApiUrl = "http://wazigate/" # Production mode
+ApiUrl = ""#"http://wazigate/" # Production mode
 
 Token = None
 
@@ -61,7 +63,9 @@ Sample_rate = 60
 Forcast_horizon = 5 #days
 
 # Created features that are dropped later
-To_be_dropped = ['Timestamp', 'minute', 'grouped_soil', 'grouped_soil_temp', 'gradient']
+#To_be_dropped = ['Timestamp', 'minute', 'grouped_soil', 'grouped_soil_temp', 'gradient']
+To_be_dropped = ['minute', 'Timestamp','gradient','grouped_soil','grouped_soil_temp','Winddirection','month','day_of_year','date']
+
 
 # Mapping to identify models TODO: check for correctness
 Model_mapping = {
@@ -177,9 +181,20 @@ def load_data(path):
 def load_data_api(sensor_name, from_timestamp):#, token)
     global ApiUrl
 
+    # Load config to obtain GPS coordinates
+    read_config()
+
+    # Token
     load_dotenv()
     ApiUrl = os.getenv('API_URL')
 
+    # Convert timestamp
+    if type(from_timestamp) != str:
+        from_timestamp = from_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+
+    # Correct timestamp for timezone
+    timezone = get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"])
+    from_timestamp = (datetime.datetime.strptime(from_timestamp, "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(hours=get_timezone_offset(timezone))).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
     if ApiUrl.startswith('http://wazigate/'):
         print('There is no token needed, fetch data from local gateway.')
@@ -255,7 +270,9 @@ def fill_gaps(data):
 # Get offset to UTC time
 def get_timezone_offset(timezone_str):
     timezone = pytz.timezone(timezone_str)
-    utc_offset = timezone.utcoffset(None).total_seconds() / 3600.0
+    current_time = datetime.datetime.now(tz=timezone)
+
+    utc_offset = current_time.utcoffset().total_seconds() / 3600.0
 
     return utc_offset
 
@@ -282,14 +299,18 @@ def get_historical_weather_api(data):
     last_day_plus_one = last_date + timedelta(days=0)
     last_day_plus_one_str = last_day_plus_one.strftime("%Y-%m-%d")
 
+    lat = Current_config["Gps_info"]["lattitude"]
+    long = Current_config["Gps_info"]["longitude"]
+    timezone = get_timezone(lat, long)
+
     url = (
         f'https://archive-api.open-meteo.com/v1/archive'
-        f'?latitude={Current_config["Gps_info"]["lattitude"]}'
-        f'&longitude={Current_config["Gps_info"]["longitude"]}'
+        f'?latitude={lat}'
+        f'&longitude={long}'
         f'&start_date={data.index[0].strftime("%Y-%m-%d")}'
         f'&end_date={last_day_plus_one_str}'
         f'&hourly=temperature_2m,relativehumidity_2m,rain,cloudcover,shortwave_radiation,windspeed_10m,winddirection_10m,soil_temperature_7_to_28cm,soil_moisture_0_to_7cm,et0_fao_evapotranspiration'
-        f'&timezone=UTC'
+        f'&timezone={timezone}'
     )
     dct = subprocess.check_output(['curl', url]).decode()
     dct = json.loads(dct)
@@ -303,14 +324,18 @@ def get_historical_weather_api(data):
                           dct['hourly']['windspeed_10m'], 
                           dct['hourly']['winddirection_10m'], 
                           dct['hourly']['soil_temperature_7_to_28cm'], 
-                          dct['hourly']['soil_moisture_0_to_7cm'], 
+                          dct['hourly']['soil_moisture_0_to_7cm'],  
                           dct['hourly']['et0_fao_evapotranspiration'],
                           dct['hourly']['time']], 
                          index = ['Temperature', 'Humidity', 'Rain', 'Cloudcover', 'Shortwave_Radiation', 'Windspeed', 'Winddirection', 'Soil_temperature_7-28', 'Soil_moisture_0-7', 'Et0_evapotranspiration', 'Timestamp'])
             .T
-            .assign(Timestamp = lambda x : pd.to_datetime(x.Timestamp, format='%Y-%m-%dT%H:%M', utc=True))
+            .assign(Timestamp = lambda x : pd.to_datetime(x.Timestamp, format='%Y-%m-%dT%H:%M'))
             .set_index(['Timestamp'])
             .dropna())
+
+    # Add timezone information without converting 
+    data_w.index = data_w.index.map(lambda x: x.replace(tzinfo=pytz.timezone(timezone)))
+    data_w.index = pd.to_datetime(data_w.index) + pd.DateOffset(hours=get_timezone_offset(timezone))
     
     # convert cols to float64
     data_w = convert_cols(data_w)
@@ -319,15 +344,21 @@ def get_historical_weather_api(data):
 
 # Get weather forecast from open-meteo
 def get_weather_forecast_api(start_date, end_date):
+
+    # Timezone and geo_location
+    lat = Current_config["Gps_info"]["lattitude"]
+    long = Current_config["Gps_info"]["longitude"]
+    timezone = get_timezone(lat, long)
+
     # Define the API URL for weather forecast
     url = (
         f'https://api.open-meteo.com/v1/forecast'
-        f'?latitude={Current_config["Gps_info"]["lattitude"]}'
-        f'&longitude={Current_config["Gps_info"]["longitude"]}'
+        f'?latitude={lat}'
+        f'&longitude={long}'
         f'&hourly=temperature_2m,relative_humidity_2m,precipitation,cloud_cover,et0_fao_evapotranspiration,wind_speed_10m,wind_direction_10m,soil_temperature_18cm,soil_moisture_3_to_9cm,shortwave_radiation'
         f'&start_date={start_date.strftime("%Y-%m-%d")}'
         f'&end_date={end_date.strftime("%Y-%m-%d")}'
-        f'&timezone=UTC'
+        f'&timezone={timezone}'
     )
 
     # Use subprocess to run the curl command and decode the output
@@ -348,9 +379,16 @@ def get_weather_forecast_api(start_date, end_date):
                           dct['hourly']['time']], 
                          index = ['Temperature', 'Humidity', 'Rain', 'Cloudcover', 'Shortwave_Radiation', 'Windspeed', 'Winddirection', 'Soil_temperature_7-28', 'Soil_moisture_0-7', 'Et0_evapotranspiration', 'Timestamp'])
             .T
-            .assign(Timestamp = lambda x : pd.to_datetime(x.Timestamp, format='%Y-%m-%dT%H:%M', utc=True))
+            .assign(Timestamp = lambda x : pd.to_datetime(x.Timestamp, format='%Y-%m-%dT%H:%M'))
             .set_index(['Timestamp'])
             .dropna())
+    
+    # Add timezone information without converting 
+    #data_forecast.index = data_forecast.index.tz_localize('UTC').tz_convert(timezone)
+    #data_forecast.index = data_forecast.index.tz_localize(timezone, utc=True)
+    #data_forecast.index = pd.DatetimeIndex(data_forecast.index).tz_localize('UTC').tz_convert('Europe/Berlin')
+    data_forecast.index = data_forecast.index.map(lambda x: x.replace(tzinfo=pytz.timezone(timezone)))
+    data_forecast.index = pd.to_datetime(data_forecast.index) + pd.DateOffset(hours=get_timezone_offset(timezone))
     
     # convert cols to float64
     data_forecast = convert_cols(data_forecast)
@@ -411,6 +449,19 @@ def soil_tension_to_volumetric_water_content(soil_tension, soil_water_retention_
     
     return interpolated_water_content
 
+def soil_tension_to_volumetric_water_content_log(soil_tension, soil_water_retention_curve):
+    # Transform the tension and content values to logarithmic space
+    tensions_log = np.log10([point[0] for point in soil_water_retention_curve])
+    content_log = np.log10([point[1] for point in soil_water_retention_curve])
+
+    # Interpolate in logarithmic space
+    interpolated_content_log = np.interp(np.log10(soil_tension), tensions_log, content_log)
+
+    # Transform back to linear space
+    interpolated_content = 10 ** interpolated_content_log
+    
+    return interpolated_content
+
 def add_volumetric_col_to_df(df, col_name):
     # Iterate over the rows of the dataframe and calculate volumetric water content
     soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in Current_config['Soil_water_retention_curve']]
@@ -418,13 +469,26 @@ def add_volumetric_col_to_df(df, col_name):
     sorted_curve = sorted(soil_water_retention_tupel_list, key=lambda x: x[0])
     for index, row in df.iterrows():
         soil_tension = row[col_name]
-        if not pd.isna(soil_tension):
-            # Calculate volumetric water content
-            volumetric_water_content = soil_tension_to_volumetric_water_content(soil_tension, sorted_curve)
-            # Assign the calculated value to a new column in the dataframe
-            df.at[index, col_name + '_vol'] = volumetric_water_content
+        # Calculate volumetric water content
+        volumetric_water_content = soil_tension_to_volumetric_water_content_log(soil_tension, sorted_curve)
+        # Assign the calculated value to a new column in the dataframe
+        df.at[index, col_name + '_vol'] = round(volumetric_water_content, 4)
 
     return df
+
+def align_retention_curve_with_api(data, data_weather_api):
+    soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in Current_config['Soil_water_retention_curve']]
+    # Sort the soil-water retention curve points by soil tension in ascending order => TODO: NOT EFFICIENT HERE, move out
+    sorted_curve = sorted(soil_water_retention_tupel_list, key=lambda x: x[0])
+    # compare weatherdata from past against messured values more expressive:
+    mean_recorded_sensor_values = data["rolling_mean_grouped_soil_vol"].mean()
+    mean_open_meteo_past_vol = data_weather_api["Soil_moisture_0-7"].mean()
+    factor = mean_open_meteo_past_vol / mean_recorded_sensor_values
+    print("mean_recorded_sensor_values: ", mean_recorded_sensor_values, " mean_open_meteo_past_vol: ", mean_open_meteo_past_vol, " factor: ", factor)
+    # Multiply the second column by factor
+    modified_curve = [(x, y * factor) for x, y in sorted_curve]
+
+    return modified_curve
 
 # TODO: more sophisticated approach needed: needs to learn from former => introduce model
 def add_pump_state(data):
@@ -514,8 +578,14 @@ def create_features(data):
     # Merge data_weather_merged into data
     data = pd.merge(data, data_weather_merged, left_index=True, right_index=True, how='outer')
 
-    # Calculate and add volumetric water content
-    data = add_volumetric_col_to_df(data, 'rolling_mean_grouped_soil')
+    # # Calculate and add volumetric water content => do not use this approach, does not yield better results
+    # data = add_volumetric_col_to_df(data, 'rolling_mean_grouped_soil')
+    # # align soil water retention curve with data from API => do not use this approach, does not yield better results
+    # corrected_water_retention_curve = align_retention_curve_with_api(data, data_weather)
+    # # Drop not aligned curve
+    # data = data.drop(columns=['rolling_mean_grouped_soil_vol'])
+    # # Calculate and add CORRECTED volumetric water content
+    # data = add_volumetric_col_to_df(data, 'rolling_mean_grouped_soil', corrected_water_retention_curve)
 
     # Check gaps => TODO: not every col should interpolated (month?), some data is lost here
     data = check_gaps(data) 
@@ -759,10 +829,19 @@ def prepare_data():
     # Load data from local wazigate api -> each sensor individually
     data_moisture = []
     data_temp = []
+
+    # start date is in UTC, but user expects it in his timezone
+    start_date = Current_config['Start_date']
+    lat = Current_config["Gps_info"]["lattitude"]
+    long = Current_config["Gps_info"]["longitude"]
+    timezone = get_timezone(lat, long)
+    start_date = parser.parse(start_date)
+    start_date = start_date.replace(tzinfo=pytz.timezone(timezone))
+
     for moisture in DeviceAndSensorIdsMoisture:
-        data_moisture.append(load_data_api(moisture, Current_config['Start_date']))
+        data_moisture.append(load_data_api(moisture, start_date))
     for temp in DeviceAndSensorIdsTemp:
-        data_temp.append(load_data_api(temp, Current_config['Start_date']))
+        data_temp.append(load_data_api(temp, start_date))
     
     # Save JSON data to one dataframe for further processing
     # Create first dataframe with first moisture sensor -> dfs have to be of same length, same timestamps
@@ -802,6 +881,10 @@ def prepare_data():
         
     # Impute gaps in data TODO: have a look for evenly distributed timestamps
     data = fill_gaps(data)
+
+    # Timezones, love them
+    data.index = data.index.tz_convert(timezone)
+
     
     # cut timezones from time string to convert to datetime64 => TODO: somehow it does not work like in the notebook.
     #data.index = data.index.tz_convert(None)
@@ -820,11 +903,11 @@ def prepare_data():
     #data.index = data.index.tz_convert('UTC')
     #data.index = pd.to_datetime(data.index, format='%Y-%m-%dT%H:%M:%S')
 
-    # Convert the index to UTC TODO: get an idea of which timezone we use for model: UTC, local?
+    # Convert the index to UTC TODO: get an idea of which timezone we use for model: UTC, local? ...we need local, because gateway aoi is returned in local
     #current_timezone = pytz.timezone(get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"]))
     
     #data.index = data.index.tz_convert(get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"]))
-    data.index = pd.to_datetime(data.index, utc=True)
+    ########################################data.index = pd.to_datetime(data.index, utc=True)
     #data.index = data.index.tz_convert('UTC').tz_localize(None)
     #data.index = pd.to_datetime(data.index)
     # Set the 'Time' column as the index
@@ -942,8 +1025,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        exclude=['lar'],
-        #include=['xgboost', 'llar'] #debug
+        #exclude=['lar'],
+        include=['xgboost', 'llar'] #debug
     )
 
     return re_exp, best_re
@@ -1061,10 +1144,10 @@ def create_future_values(data):
     new_data['day_of_year'] = [i.dayofyear for i in new_data['Timestamp']]
 
     # make up some other data from weatherAPI
-    new_data['rolling_mean_grouped_soil_vol'] = new_data['Soil_moisture_0-7']
+    #new_data['rolling_mean_grouped_soil_vol'] = new_data['Soil_moisture_0-7'] #Approach is not any more used
     new_data['rolling_mean_grouped_soil_temp'] = new_data['Soil_temperature_7-28']
 
-    # also include pump_state
+    # also include pump_state, set to zero as we want to assume the behavior without watering
     new_data = new_data.assign(pump_state=0)
 
     return new_data
@@ -1135,7 +1218,7 @@ def compare_train_predictions_cols(train, future_features):
     for col in missing_columns:
         future_features.drop(columns = col, inplace=True)
 
-    # TODO: check if that is right
+    # set_index again on timestamp
     future_features.set_index('Timestamp', inplace=True)
     future_features.head()
 
@@ -1187,7 +1270,7 @@ def get_Data():
     if Data.empty:
         return False
     else:
-        return Data
+        return Data.drop([item for item in To_be_dropped if item != "Timestamp"], axis=1) # This is needed to prevent the timestamp is being omitted
 
 # Predictions Getter
 def get_predictions():

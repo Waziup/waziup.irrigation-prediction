@@ -372,7 +372,7 @@
         return sensorList;
       }
 
-    // Main function
+    // Main function for from same device fetching
     function loadStuff() {
       $.get("/devices", function (data) {
         const sensors = parseSensorData(data);
@@ -383,7 +383,7 @@
       });
     }
 
-    // Main function
+    // Main function for remote fetching
     async function loadStuff_remote() {
       try {
         // Get API path from backend
@@ -423,6 +423,7 @@
           .html('<img src="./loading.gif" /> Loading...')
           .fadeIn();
         loadStuff();
+        //loadStuff_remote() 
       });
     </script>
   </head>

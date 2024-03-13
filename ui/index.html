@@ -17,6 +17,9 @@
     <script type="text/javascript">
       var waitForTraining = true;
       var timestamp = "";
+      // Apex charts is rather slow in handeling many datapoints => needs to be restricted
+      var MaxValuesToBeDisplayed = 2500
+      
 
       // Nav
       function goToSettings() {
@@ -112,6 +115,16 @@
         fetch("../api/getHistoricalChartData")
           .then((response) => response.json())
           .then((chartData) => {
+            // Limit the number of values to display
+            const totalValues = chartData.timestamps.length;
+
+            if (totalValues > MaxValuesToBeDisplayed) {
+                const step = Math.ceil(totalValues / MaxValuesToBeDisplayed);
+                
+                chartData.timestamps = chartData.timestamps.filter((timestamp, index) => index % step === 0);
+                chartData.temperatureSeries = chartData.temperatureSeries.filter((value, index) => index % step === 0);
+                chartData.moistureSeries = chartData.moistureSeries.filter((value, index) => index % step === 0);
+            }
             // Format the data
             var temperatureSeriesRounded = chartData.temperatureSeries.map(
               (value) => parseFloat(value.toFixed(1))

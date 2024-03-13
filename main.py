@@ -265,7 +265,8 @@ def extract_and_format(data, key, datatype):
 def getHistoricalChartData(url, body): 
     # Load data from local wazigate api -> each sensor individually
     data_moisture = []
-    data_temp = []
+    data_temp = []    
+
     for moisture in DeviceAndSensorIdsMoisture:
         data_moisture.append(create_model.load_data_api(moisture, Start_date))
     for temp in DeviceAndSensorIdsTemp:
@@ -300,12 +301,14 @@ def getDatasetChartData(url, body):
     # Conversion of dataframe to series 
     f_data_time = []
     items_to_render = []
+    #data_dataset.set_index('Timestamp', inplace=True)
     col_names = data_dataset.columns
 
+
     for col in col_names:
-        if data_dataset[col].dtype == 'datetime64[ns, UTC]':
+        if col == 'Timestamp':
             for item in data_dataset[col]:
-                f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S%z')) #TODO:timezone is lost here!!!
+                f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S')) #TODO:timezone is lost here!!!
         elif data_dataset[col].dtype == "float64" or data_dataset[col].dtype == "int64":
             items_to_render.append(data_dataset[col].tolist())
         else:
@@ -316,7 +319,7 @@ def getDatasetChartData(url, body):
         "timestamps": f_data_time,
     }
     # Add other cols 
-    for i in range(1, len(items_to_render)+ 1):
+    for i in range(1, len(items_to_render)):
         chart_data[col_names[i]] = items_to_render[i-1]
 
     return 200, bytes(json.dumps(chart_data), "utf8"), []
@@ -421,6 +424,10 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
 
 def startTraining(url, body):
     global ThreadId
+    global TrainingFinished
+
+    # Switch off for 2nd, ... round
+    TrainingFinished = False
 
     # Create a new thread
     thread = threading.Thread(target=workerToTrain, args=(ThreadId, url))    
