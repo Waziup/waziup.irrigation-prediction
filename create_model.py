@@ -1025,8 +1025,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        #exclude=['lar'],
-        include=['xgboost', 'llar'] #debug
+        exclude=['lar'],
+        #include=['xgboost', 'llar'] #debug
     )
 
     return re_exp, best_re
