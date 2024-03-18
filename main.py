@@ -319,7 +319,7 @@ def getDatasetChartData(url, body):
         "timestamps": f_data_time,
     }
     # Add other cols 
-    for i in range(1, len(items_to_render)):
+    for i in range(1, len(items_to_render) + 1):
         chart_data[col_names[i]] = items_to_render[i-1]
 
     return 200, bytes(json.dumps(chart_data), "utf8"), []

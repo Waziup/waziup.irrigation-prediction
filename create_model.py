@@ -294,6 +294,8 @@ def get_timezone(latitude_str, longitude_str):
 # Get historical values from open-meteo TODO: include timezone service: https://stackoverflow.com/questions/16086962/how-to-get-a-time-zone-from-a-location-using-latitude-and-longitude-coordinates
 def get_historical_weather_api(data):
 
+    first_day_minus_one_str = (data.index[0] - timedelta(days = 1)).strftime("%Y-%m-%d")
+
     # need to add one day, overlapping have to be cut off later => useless because data is not available to fetch via api
     last_date = data.index[-1]
     last_day_plus_one = last_date + timedelta(days=0)
@@ -307,7 +309,7 @@ def get_historical_weather_api(data):
         f'https://archive-api.open-meteo.com/v1/archive'
         f'?latitude={lat}'
         f'&longitude={long}'
-        f'&start_date={data.index[0].strftime("%Y-%m-%d")}'
+        f'&start_date={first_day_minus_one_str}'
         f'&end_date={last_day_plus_one_str}'
         f'&hourly=temperature_2m,relativehumidity_2m,rain,cloudcover,shortwave_radiation,windspeed_10m,winddirection_10m,soil_temperature_7_to_28cm,soil_moisture_0_to_7cm,et0_fao_evapotranspiration'
         f'&timezone={timezone}'
@@ -388,7 +390,7 @@ def get_weather_forecast_api(start_date, end_date):
     #data_forecast.index = data_forecast.index.tz_localize(timezone, utc=True)
     #data_forecast.index = pd.DatetimeIndex(data_forecast.index).tz_localize('UTC').tz_convert('Europe/Berlin')
     data_forecast.index = data_forecast.index.map(lambda x: x.replace(tzinfo=pytz.timezone(timezone)))
-    data_forecast.index = pd.to_datetime(data_forecast.index) + pd.DateOffset(hours=get_timezone_offset(timezone))
+    #data_forecast.index = pd.to_datetime(data_forecast.index) + pd.DateOffset(hours=get_timezone_offset(timezone)) + pd.DateOffset(hours=1.0)
     
     # convert cols to float64
     data_forecast = convert_cols(data_forecast)
@@ -510,6 +512,8 @@ def add_pump_state(data):
 
     return data
 
+# Calculate time since pump was on (time since last irrigation)
+# TODO: need to be included, but is not tested yet
 def hours_since_pump_was_turned_on(df):    
     # Find the index of rows where pump state is 1
     pump_on_indices = df[df['pump_state'] == 1].index
@@ -592,7 +596,7 @@ def create_features(data):
 
     # Add calculated pump state
     f = data.rolling_mean_grouped_soil
-    data['gradient'] = np.gradient(f) #TODO: check gradient calc -> pump state seems to be wrong
+    data['gradient'] = np.gradient(f)
     data['pump_state'] = int(0)
     data = add_pump_state(data)
 
@@ -1145,7 +1149,7 @@ def create_future_values(data):
 
     # make up some other data from weatherAPI
     #new_data['rolling_mean_grouped_soil_vol'] = new_data['Soil_moisture_0-7'] #Approach is not any more used
-    new_data['rolling_mean_grouped_soil_temp'] = new_data['Soil_temperature_7-28']
+    new_data['rolling_mean_grouped_soil_temp'] = new_data['Soil_temperature_7-28'] # TODO: calculate/calibrate diviation for better alignment
 
     # also include pump_state, set to zero as we want to assume the behavior without watering
     new_data = new_data.assign(pump_state=0)

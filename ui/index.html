@@ -107,7 +107,8 @@
           hour: "2-digit",
           minute: "2-digit" /*, second: '2-digit'*/,
         };
-        return date.toLocaleString("de-DE", options);
+        const formatter = new Intl.DateTimeFormat("de-DE", options);
+        return formatter.format(date);
       }
 
       // Get data from to display inside chart from backend
@@ -186,6 +187,7 @@
               //   'Please start the training procedure by pressing the "Start Training" button after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.'
               // );
             } else {
+              // TODO: also limit the amount of values here!!!!!!!!!!!!!!
               // Initialize variables outside the loop
               var elementsToDisplay = [];
               var formattedTimestamps;
