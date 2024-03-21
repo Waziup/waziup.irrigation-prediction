@@ -102,11 +102,16 @@ Data = pd.DataFrame
 Predictions = pd.DataFrame
 Threshold_timestamp = ""
 
+# Load data from CSV, is set if there is a file in the root directory
+CSVFile = "test_dataset_multiple.csv"
+LoadDataFromCSV = False
+
 
 def read_config():
     global Current_config
     global DeviceAndSensorIdsMoisture
     global DeviceAndSensorIdsTemp
+    global LoadDataFromCSV
 
     # Specify the path to the JSON file you want to read
     json_file_path = 'config/current_config.json'
@@ -115,8 +120,24 @@ def read_config():
     with open(json_file_path, 'r') as json_file:
         Current_config = json.load(json_file)
 
-    DeviceAndSensorIdsMoisture = Current_config["DeviceAndSensorIdsMoisture"]
-    DeviceAndSensorIdsTemp = Current_config["DeviceAndSensorIdsTemp"]
+    try:
+        with open(CSVFile, "r") as file:
+            # Perform operations on the file
+            data = pd.read_csv(file, header=0)
+            DeviceAndSensorIdsMoisture = []
+            DeviceAndSensorIdsTemp = []
+            # create array with sensors strings
+            for col in data.columns:
+                if col.startswith("tension"):
+                    DeviceAndSensorIdsMoisture.append(col)
+                elif col.startswith("soil_temp"):
+                    DeviceAndSensorIdsTemp.append(col)
+            LoadDataFromCSV = True
+    except FileNotFoundError:
+        DeviceAndSensorIdsMoisture = Current_config["DeviceAndSensorIdsMoisture"]
+        DeviceAndSensorIdsTemp = Current_config["DeviceAndSensorIdsTemp"]
+    except Exception as e:
+        print("An error occurred:", e)
 
 # not ready
 def get_token():
@@ -842,38 +863,51 @@ def prepare_data():
     start_date = parser.parse(start_date)
     start_date = start_date.replace(tzinfo=pytz.timezone(timezone))
 
-    for moisture in DeviceAndSensorIdsMoisture:
-        data_moisture.append(load_data_api(moisture, start_date))
-    for temp in DeviceAndSensorIdsTemp:
-        data_temp.append(load_data_api(temp, start_date))
+    if LoadDataFromCSV:
+        # Load from CSV
+        data = pd.read_csv(CSVFile, header=0)
+        data.rename(columns={'timestamp': 'Time'}, inplace=True)
+        data['Time'] = pd.to_datetime(data['Time'])
+        data.set_index('Time', inplace=True)
+        # Correct timestamp for timezone
+        timezone = get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"])
+        # Add timezone information without converting 
+        data.index = data.index.map(lambda x: x.replace(tzinfo=pytz.timezone(timezone)))
+        data.index = pd.to_datetime(data.index) + pd.DateOffset(hours=get_timezone_offset(timezone))
+    else:
+        # Load data from API
+        for moisture in DeviceAndSensorIdsMoisture:
+            data_moisture.append(load_data_api(moisture, start_date))
+        for temp in DeviceAndSensorIdsTemp:
+            data_temp.append(load_data_api(temp, start_date))
     
-    # Save JSON data to one dataframe for further processing
-    # Create first dataframe with first moisture sensor -> dfs have to be of same length, same timestamps
-    data = pd.DataFrame(data_moisture[0])
-    data.rename(columns={'time': 'Time'}, inplace=True)
-    data.rename(columns={'value': DeviceAndSensorIdsMoisture[0]}, inplace=True)
-    data['Time'] = pd.to_datetime(data['Time'])
-    data.set_index('Time', inplace=True)
-    
-    # Append the other cols and match timestamps
-    for i in range(len(DeviceAndSensorIdsMoisture)):
-        if i==0:
-            continue
-        else:
-            d = pd.DataFrame(data_moisture[i])
+        # Save JSON data to one dataframe for further processing
+        # Create first dataframe with first moisture sensor -> dfs have to be of same length, same timestamps
+        data = pd.DataFrame(data_moisture[0])
+        data.rename(columns={'time': 'Time'}, inplace=True)
+        data.rename(columns={'value': DeviceAndSensorIdsMoisture[0]}, inplace=True)
+        data['Time'] = pd.to_datetime(data['Time'])
+        data.set_index('Time', inplace=True)
+        
+        # Append the other cols and match timestamps
+        for i in range(len(DeviceAndSensorIdsMoisture)):
+            if i==0:
+                continue
+            else:
+                d = pd.DataFrame(data_moisture[i])
+                d.rename(columns={'time': 'Time'}, inplace=True)
+                d.rename(columns={'value': DeviceAndSensorIdsMoisture[i]}, inplace=True)
+                d['Time'] = pd.to_datetime(d['Time'])
+                d.set_index('Time', inplace=True)
+                data = pd.merge(data, d, left_index=True, right_index=True, how='outer')
+                
+        for i in range(len(DeviceAndSensorIdsTemp)):
+            d = pd.DataFrame(data_temp[i])
             d.rename(columns={'time': 'Time'}, inplace=True)
-            d.rename(columns={'value': DeviceAndSensorIdsMoisture[i]}, inplace=True)
+            d.rename(columns={'value': DeviceAndSensorIdsTemp[i]}, inplace=True)
             d['Time'] = pd.to_datetime(d['Time'])
             d.set_index('Time', inplace=True)
             data = pd.merge(data, d, left_index=True, right_index=True, how='outer')
-            
-    for i in range(len(DeviceAndSensorIdsTemp)):
-        d = pd.DataFrame(data_temp[i])
-        d.rename(columns={'time': 'Time'}, inplace=True)
-        d.rename(columns={'value': DeviceAndSensorIdsTemp[i]}, inplace=True)
-        d['Time'] = pd.to_datetime(d['Time'])
-        d.set_index('Time', inplace=True)
-        data = pd.merge(data, d, left_index=True, right_index=True, how='outer')
 
     # Convert datatype of cols to float64 -> otherwise json parse will parse negative values as object
     #data = data.apply(pd.to_numeric, errors='coerce')
@@ -932,6 +966,7 @@ def prepare_data():
     
     # Normalization
     #data = normalize(data)
+
     print(data.iloc[0])
     
     print(data.head(0))
@@ -1029,8 +1064,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        exclude=['lar'],
-        #include=['xgboost', 'llar'] #debug
+        #exclude=['lar'],
+        include=['xgboost', 'llar'] #debug
     )
 
     return re_exp, best_re
