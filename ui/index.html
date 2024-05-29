@@ -191,6 +191,8 @@
               // Initialize variables outside the loop
               var elementsToDisplay = [];
               var formattedTimestamps;
+              const totalValues = chartData.timestamps.length;
+              const step = Math.ceil(totalValues / MaxValuesToBeDisplayed);
 
               // Iterate through the keys in chartData
               for (var key in chartData) {
@@ -201,6 +203,9 @@
                   );
 
                   if (isNumberArray) {
+                    if (totalValues > MaxValuesToBeDisplayed) {
+                      chartData[key] = chartData[key].filter((value, index) => index % step === 0);
+                    }
                     // If all elements are numbers, push the series data
                     elementsToDisplay.push({
                       name: key,
@@ -209,6 +214,9 @@
                       ),
                     });
                   } else if (typeof chartData[key][0] === "string") {
+                    if (totalValues > MaxValuesToBeDisplayed) {
+                      chartData[key] = chartData[key].filter((value, index) => index % step === 0);
+                    }
                     formattedTimestamps = chartData.timestamps.map(
                       (timestamp) => formatTimestamp(timestamp)
                     );
@@ -236,6 +244,15 @@
                 options
               );
               chart.render();
+
+              // Hide some series after rendering
+              chart.hideSeries("hour");
+              chart.hideSeries("Cloudcover");
+              chart.hideSeries("Shortwave_Radiation");
+              chart.hideSeries("Soil_temperature_7-28");
+              chart.hideSeries("Soil_moisture_0-7");
+              chart.hideSeries("Et0_evapotranspiration");
+              chart.hideSeries("pump_state");
             }
           })
           .catch((error) => console.error("Error fetching data:", error));
@@ -254,6 +271,9 @@
               var moistureSeriesRounded = chartData.moistureSeries.map(
                 (value) => parseFloat(value.toFixed(2))
               );
+              var moistureSeriesVolRounded = chartData.moistureSeriesVol.map(
+                (value) => parseFloat(value.toFixed(2))
+              );
               var formattedTimestamps = chartData.timestamps.map((timestamp) =>
                 formatTimestamp(timestamp)
               );
@@ -267,6 +287,10 @@
                   {
                     name: "Moisture in cbar",
                     data: moistureSeriesRounded,
+                  },
+                  {
+                    name: "Volumetric Water Content",
+                    data: moistureSeriesVolRounded,
                   },
                 ],
                 xaxis: {
@@ -292,6 +316,9 @@
                 options
               );
               chart.render();
+
+              // Hide the "Volumetric Water Content" series after rendering
+              chart.hideSeries("Volumetric Water Content");
             }
           })
           .catch((error) => console.error("Error fetching data:", error));

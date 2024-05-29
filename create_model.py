@@ -103,7 +103,7 @@ Predictions = pd.DataFrame
 Threshold_timestamp = ""
 
 # Load data from CSV, is set if there is a file in the root directory
-CSVFile = "test_dataset_multiple.csv"
+CSVFile = "test_dataset_multiple_fu.csv"
 LoadDataFromCSV = False
 
 
@@ -137,7 +137,7 @@ def read_config():
         DeviceAndSensorIdsMoisture = Current_config["DeviceAndSensorIdsMoisture"]
         DeviceAndSensorIdsTemp = Current_config["DeviceAndSensorIdsTemp"]
     except Exception as e:
-        print("An error occurred:", e)
+        print("An error occurred: No devices are set in settings, there is also no local CSV file.", e)
 
 # not ready
 def get_token():
@@ -1290,7 +1290,10 @@ def tune_models(exp, best):
 
 # Generate prediction with best_model and impute generated future_values
 def generate_predictions(best, exp, features):
-    return exp.predict_model(best, data=features)
+    predictions = exp.predict_model(best, data=features)
+    predictions.loc[predictions['prediction_label'] < 0, 'prediction_label'] = 0
+
+    return predictions
 
 # Calculates the time when threshold will be meet, according to predictions
 def calc_threshold(Predictions):
@@ -1403,6 +1406,9 @@ def main() -> int:
     
     # Calculate when threshold will be meet
     Threshold_timestamp = calc_threshold(Predictions)
+
+    # Add volumetric water content
+    Predictions = add_volumetric_col_to_df(Predictions, "prediction_label")
 
     return 0
 

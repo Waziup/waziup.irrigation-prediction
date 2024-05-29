@@ -68,6 +68,7 @@ Threads = []
 ThreadId = 0
 
 TrainingFinished = False
+CurrentlyTraining = False
 
 #---------------------#
 
@@ -343,6 +344,7 @@ def getPredictionChartData(url, body):
     for item in data_pred.index:
         f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S%z'))
     f_data_moisture = data_pred["prediction_label"].tolist()
+    f_data_moisture_vol = data_pred["prediction_label_vol"].tolist()
 
     # Add a horizontal line at Threshold
     annotations = {
@@ -364,6 +366,7 @@ def getPredictionChartData(url, body):
     chart_data = {
         "timestamps": f_data_time,
         "moistureSeries": f_data_moisture,
+        "moistureSeriesVol": f_data_moisture_vol,
         "annotations": annotations
     }
 
@@ -401,6 +404,7 @@ usock.routerGET("/api/isTrainingReady", isTrainingReady)
 
 def workerToTrain(thread_id, url): # TODO: do we really need threading here?
     global TrainingFinished
+    global CurrentlyTraining
 
     # Set the time interval in seconds (e.g., 60 seconds for 1 minute)
     time_interval = 43200 #12h
@@ -414,6 +418,7 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
 
         # TODO: reload page
         TrainingFinished = True
+        CurrentlyTraining = False
 
         end_time = datetime.now().replace(microsecond=0)
         duration = end_time - start_time
@@ -425,19 +430,22 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
 def startTraining(url, body):
     global ThreadId
     global TrainingFinished
+    global CurrentlyTraining
 
-    # Switch off for 2nd, ... round
-    TrainingFinished = False
+    if not CurrentlyTraining:
+        # Switch off for 2nd, ... round
+        TrainingFinished = False
+        CurrentlyTraining = True
 
-    # Create a new thread
-    thread = threading.Thread(target=workerToTrain, args=(ThreadId, url))    
-    ThreadId += 1
+        # Create a new thread
+        thread = threading.Thread(target=workerToTrain, args=(ThreadId, url))    
+        ThreadId += 1
 
-    # Append thread to list
-    Threads.append(thread)
+        # Append thread to list
+        Threads.append(thread)
 
-    # Start the thread
-    thread.start()
+        # Start the thread
+        thread.start()
 
     return 200, b"", []
 
