@@ -305,7 +305,6 @@ def getDatasetChartData(url, body):
     #data_dataset.set_index('Timestamp', inplace=True)
     col_names = data_dataset.columns
 
-
     for col in col_names:
         if col == 'Timestamp':
             for item in data_dataset[col]:

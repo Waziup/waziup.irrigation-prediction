@@ -30,6 +30,22 @@ import urllib
 from geopy.geocoders import Nominatim
 from timezonefinder import TimezoneFinder
 
+# new imports nn
+import tensorflow as tf
+from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.layers import Dense, Conv1D, MaxPooling1D, Flatten, Dense, LSTM, GRU, Bidirectional, Dropout
+from tensorflow.keras.optimizers import Adam, SGD, RMSprop
+from tensorflow.keras.callbacks import Callback
+from tensorflow.keras.backend import floatx
+#from transformers import TFAutoModel, AutoTokenizer
+from scikeras.wrappers import KerasRegressor
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+
 # local
 import main
 
@@ -41,6 +57,9 @@ Token = None
 
 # Initialize an empty dictionary to store the current config
 Current_config = {}
+
+# Current timezone
+Timezone = ''
 
 # Extracted variables from Current_config
 DeviceAndSensorIdsMoisture = []
@@ -214,8 +233,7 @@ def load_data_api(sensor_name, from_timestamp):#, token)
         from_timestamp = from_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
     # Correct timestamp for timezone
-    timezone = get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"])
-    from_timestamp = (datetime.datetime.strptime(from_timestamp, "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(hours=get_timezone_offset(timezone))).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    from_timestamp = (datetime.datetime.strptime(from_timestamp, "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(hours=get_timezone_offset(Timezone))).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
     if ApiUrl.startswith('http://wazigate/'):
         print('There is no token needed, fetch data from local gateway.')
@@ -324,7 +342,6 @@ def get_historical_weather_api(data):
 
     lat = Current_config["Gps_info"]["lattitude"]
     long = Current_config["Gps_info"]["longitude"]
-    timezone = get_timezone(lat, long)
 
     url = (
         f'https://archive-api.open-meteo.com/v1/archive'
@@ -333,7 +350,7 @@ def get_historical_weather_api(data):
         f'&start_date={first_day_minus_one_str}'
         f'&end_date={last_day_plus_one_str}'
         f'&hourly=temperature_2m,relativehumidity_2m,rain,cloudcover,shortwave_radiation,windspeed_10m,winddirection_10m,soil_temperature_7_to_28cm,soil_moisture_0_to_7cm,et0_fao_evapotranspiration'
-        f'&timezone={timezone}'
+        f'&timezone={Timezone}'
     )
     dct = subprocess.check_output(['curl', url]).decode()
     dct = json.loads(dct)
@@ -357,8 +374,8 @@ def get_historical_weather_api(data):
             .dropna())
 
     # Add timezone information without converting 
-    data_w.index = data_w.index.map(lambda x: x.replace(tzinfo=pytz.timezone(timezone)))
-    data_w.index = pd.to_datetime(data_w.index) + pd.DateOffset(hours=get_timezone_offset(timezone))
+    data_w.index = data_w.index.map(lambda x: x.replace(tzinfo=pytz.timezone(Timezone)))
+    #data_w.index = pd.to_datetime(data_w.index) + pd.DateOffset(hours=get_timezone_offset(timezone))
     
     # convert cols to float64
     data_w = convert_cols(data_w)
@@ -371,7 +388,6 @@ def get_weather_forecast_api(start_date, end_date):
     # Timezone and geo_location
     lat = Current_config["Gps_info"]["lattitude"]
     long = Current_config["Gps_info"]["longitude"]
-    timezone = get_timezone(lat, long)
 
     # Define the API URL for weather forecast
     url = (
@@ -381,7 +397,7 @@ def get_weather_forecast_api(start_date, end_date):
         f'&hourly=temperature_2m,relative_humidity_2m,precipitation,cloud_cover,et0_fao_evapotranspiration,wind_speed_10m,wind_direction_10m,soil_temperature_18cm,soil_moisture_3_to_9cm,shortwave_radiation'
         f'&start_date={start_date.strftime("%Y-%m-%d")}'
         f'&end_date={end_date.strftime("%Y-%m-%d")}'
-        f'&timezone={timezone}'
+        f'&timezone={Timezone}'
     )
 
     # Use subprocess to run the curl command and decode the output
@@ -410,7 +426,7 @@ def get_weather_forecast_api(start_date, end_date):
     #data_forecast.index = data_forecast.index.tz_localize('UTC').tz_convert(timezone)
     #data_forecast.index = data_forecast.index.tz_localize(timezone, utc=True)
     #data_forecast.index = pd.DatetimeIndex(data_forecast.index).tz_localize('UTC').tz_convert('Europe/Berlin')
-    data_forecast.index = data_forecast.index.map(lambda x: x.replace(tzinfo=pytz.timezone(timezone)))
+    data_forecast.index = data_forecast.index.map(lambda x: x.replace(tzinfo=pytz.timezone(Timezone)))
     #data_forecast.index = pd.to_datetime(data_forecast.index) + pd.DateOffset(hours=get_timezone_offset(timezone)) + pd.DateOffset(hours=1.0)
     
     # convert cols to float64
@@ -851,6 +867,8 @@ def combine_dfs(cut_sub_dfs):
 
 # Data preparation pipeline, calls other subfunction to perform the task
 def prepare_data():
+    global Timezone
+
     # Load data from local wazigate api -> each sensor individually
     data_moisture = []
     data_temp = []
@@ -859,9 +877,9 @@ def prepare_data():
     start_date = Current_config['Start_date']
     lat = Current_config["Gps_info"]["lattitude"]
     long = Current_config["Gps_info"]["longitude"]
-    timezone = get_timezone(lat, long)
+    Timezone = get_timezone(lat, long)
     start_date = parser.parse(start_date)
-    start_date = start_date.replace(tzinfo=pytz.timezone(timezone))
+    start_date = start_date.replace(tzinfo=pytz.timezone(Timezone))
 
     if LoadDataFromCSV:
         # Load from CSV
@@ -870,10 +888,9 @@ def prepare_data():
         data['Time'] = pd.to_datetime(data['Time'])
         data.set_index('Time', inplace=True)
         # Correct timestamp for timezone
-        timezone = get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"])
         # Add timezone information without converting 
-        data.index = data.index.map(lambda x: x.replace(tzinfo=pytz.timezone(timezone)))
-        data.index = pd.to_datetime(data.index) + pd.DateOffset(hours=get_timezone_offset(timezone))
+        data.index = data.index.map(lambda x: x.replace(tzinfo=pytz.timezone(Timezone)))
+        data.index = pd.to_datetime(data.index) + pd.DateOffset(hours=get_timezone_offset(Timezone))
     else:
         # Load data from API
         for moisture in DeviceAndSensorIdsMoisture:
@@ -916,40 +933,13 @@ def prepare_data():
 
     # Rename index
     data.rename_axis('Timestamp', inplace=True)
+
+    # Convert index
+    data.index = pd.to_datetime(data.index, utc=True)
+    data.index = data.index.tz_convert(Timezone)
         
     # Impute gaps in data TODO: have a look for evenly distributed timestamps
     data = fill_gaps(data)
-
-    # Timezones, love them
-    data.index = data.index.tz_convert(timezone)
-
-    
-    # cut timezones from time string to convert to datetime64 => TODO: somehow it does not work like in the notebook.
-    #data.index = data.index.tz_convert(None)
-    #data.index = data.index.floor('S')
-    #data.index = data.index.strftime('%Y-%m-%dT%H:%M:%S')
-    #data.index = pd.to_datetime(data.index, format='%Y-%m-%dT%H:%M:%S.%fZ').floor('S')
-    #data.index = data.index.floor('S')
-    
-    #data.index = pd.to_datetime(data.index, format='%Y-%m-%dT%H:%M:%S.%fZ')
-    #data.index = data.index.map(lambda x: x.replace(microsecond=0))
-    
-    #data.index = data.index.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-    #data.index = data.index.str[:-8]
-
-    #data = data.set_index('Time')
-    #data.index = data.index.tz_convert('UTC')
-    #data.index = pd.to_datetime(data.index, format='%Y-%m-%dT%H:%M:%S')
-
-    # Convert the index to UTC TODO: get an idea of which timezone we use for model: UTC, local? ...we need local, because gateway aoi is returned in local
-    #current_timezone = pytz.timezone(get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"]))
-    
-    #data.index = data.index.tz_convert(get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"]))
-    ########################################data.index = pd.to_datetime(data.index, utc=True)
-    #data.index = data.index.tz_convert('UTC').tz_localize(None)
-    #data.index = pd.to_datetime(data.index)
-    # Set the 'Time' column as the index
-    #data.set_index('Time', inplace=True)
 
     print(data.index.dtype)
     
@@ -1064,8 +1054,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        #exclude=['lar'],
-        include=['xgboost', 'llar'] #debug
+        exclude=['lar']
+        #include=['xgboost', 'llar'] #debug
     )
 
     return re_exp, best_re
@@ -1241,6 +1231,65 @@ def train_best(best_model, data):
 
     return model, re_exp
 
+# create nn
+def create_nn_model(units_hidden1=64, units_hidden2=32):
+    # Define the neural network architecture
+    model = Sequential()
+    model.add(Dense(units_hidden1, activation='relu', input_shape=(X_train.shape[1],)))
+    model.add(Dense(units_hidden2, activation='relu'))
+    model.add(Dense(1))  # Output layer with one neuron for regression
+    
+    # Compile the model
+    model.compile(optimizer=Adam(), loss='mean_squared_error')
+
+    return model
+
+# create cnn
+def create_cnn_model(units_hidden1=64, units_hidden2=32): #incooperate units_hidden
+    model = Sequential()
+    model.add(Conv1D(filters=64, kernel_size=3, activation='relu', input_shape=(X_train_cnn.shape[1], 1)))
+    model.add(MaxPooling1D(pool_size=2))
+    model.add(Flatten())
+    model.add(Dense(100, activation='relu'))
+    model.add(Dense(1))
+
+    # Compile the model
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+
+    return model
+
+
+# prepare data for (conv) neural nets and other model architechtures
+def prepare_data_for_cnn(data_re, to_be_dropped):
+    data_nn = data_re.drop(to_be_dropped, axis=1) #dropping yields worse results (val_loss in training)
+
+    # Split the dataset into features (X) and target variable (y)
+    X = data_nn.drop('rolling_mean_grouped_soil', axis=1)  # Assuming 'soil_tension' is the target variable
+    y = data_nn['rolling_mean_grouped_soil']
+
+    # Split the data into training and testing sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Standardize features by removing the mean and scaling to unit variance
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+
+    numerical_columns = X_test.select_dtypes(include=np.number).columns
+    X_test_numerical = X_test[numerical_columns]
+
+    # Scale the test features using the same scaler used for training data
+    X_test_scaled = scaler.transform(X_test_numerical)
+
+    # Ensure input data is correctly reshaped for Conv1D
+    X_train_cnn = X_train_scaled[..., np.newaxis]
+    X_test_cnn = X_test_scaled[..., np.newaxis]
+
+    return X_train, X_test, y_train, y_test, X_train_cnn, X_test_cnn
+
+
+
+
 # Compare dataframes cols to be sure that they match, otherwise drop
 def compare_train_predictions_cols(train, future_features):
     # Identify missing columns in the prediction data
@@ -1350,6 +1399,7 @@ def main() -> int:
     # Data preparation pipeline, calls other subfunction to perform the task
     Data = prepare_data()  
     train, test = split_by_ratio(Data, 20)  
+    X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled = prepare_data_for_cnn(train, To_be_dropped)
 
     # Start pycaret pipeline: setup, train models, save the best ones to best-array 
     #exp, best = create_and_compare_model_ts(cut_sub_dfs)
@@ -1379,7 +1429,7 @@ def main() -> int:
     # Before tuning
     #best_model_before_tuning = best_exp.compare_models()
     
-    # Tune hyperparameters of the 3 best models, see notebook
+    # Tune hyperparameters of the 3 best models, see notebook TODO: better use try catch
     tuned_best = tune_model(best_exp, best_model)
     
     # After tuning

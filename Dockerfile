@@ -1,12 +1,19 @@
-FROM python:3.8-slim 
+FROM python:3.8-slim
 #later alpine to save even more, but is it worth it?
 
+# Set environment variables to ensure non-interactive apt-get and prevent cache busting
+ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update \
-    && apt-get install -y \
+    && apt-get install -y --no-install-recommends \
     gcc \
     curl \
     zip \
-    expect
+    expect \
+    build-essential \
+    pkg-config \
+    libhdf5-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN  pip install requests \
      pycaret \
@@ -16,7 +23,11 @@ RUN  pip install requests \
      geopy \
      timezonefinder \
      python-dotenv \
-     xgboost
+     xgboost \
+     tensorflow \
+     scikeras \
+     scikit-learn \
+     joblib
 
 COPY . /root/src/
 
