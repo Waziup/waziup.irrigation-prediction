@@ -45,6 +45,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+import kerastuner as kt
 
 # local
 import main
@@ -1231,11 +1232,11 @@ def train_best(best_model, data):
 
     return model, re_exp
 
-# create nn
-def create_nn_model(units_hidden1=64, units_hidden2=32):
+# Create NN
+def create_nn_model(shape, units_hidden1=64, units_hidden2=32):
     # Define the neural network architecture
     model = Sequential()
-    model.add(Dense(units_hidden1, activation='relu', input_shape=(X_train.shape[1],)))
+    model.add(Dense(units_hidden1, activation='relu', input_shape=shape))
     model.add(Dense(units_hidden2, activation='relu'))
     model.add(Dense(1))  # Output layer with one neuron for regression
     
@@ -1244,10 +1245,10 @@ def create_nn_model(units_hidden1=64, units_hidden2=32):
 
     return model
 
-# create cnn
-def create_cnn_model(units_hidden1=64, units_hidden2=32): #incooperate units_hidden
+# Create CNN
+def create_cnn_model(shape, units_hidden1=64): #incooperate units_hidden
     model = Sequential()
-    model.add(Conv1D(filters=64, kernel_size=3, activation='relu', input_shape=(X_train_cnn.shape[1], 1)))
+    model.add(Conv1D(filters=units_hidden1, kernel_size=3, activation='relu', input_shape=shape))
     model.add(MaxPooling1D(pool_size=2))
     model.add(Flatten())
     model.add(Dense(100, activation='relu'))
@@ -1258,10 +1259,56 @@ def create_cnn_model(units_hidden1=64, units_hidden2=32): #incooperate units_hid
 
     return model
 
+# Create RNN
+def create_rnn_model(shape, units=50):
+    # Define the RNN architecture
+    model = Sequential()
+    model.add(LSTM(units=units, activation='relu', input_shape=shape))
+    model.add(Dense(1))
+
+    # Compile the model
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+
+    return model
+
+# Create GRU
+def create_gru_model(shape, units=50):
+    # Define the GRU architecture
+    model = Sequential()
+    model.add(GRU(units=units, activation='relu', input_shape=shape))
+    model.add(Dense(1))
+
+    # Compile the model
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+
+    return model
+
+# Create bi-LSTM
+def create_lstm_model(shape, units=50):
+    # Define the Bidirectional LSTM architecture
+    model = Sequential()
+    model.add(Bidirectional(LSTM(units=units, activation='relu', input_shape=shape)))
+    model.add(Dense(1))
+
+    # Compile the model
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+
+    return model
+
+def build_model(hp, shape):
+    model = Sequential()
+    model.add(Bidirectional(LSTM(units=hp.Int('units', min_value=32, max_value=512, step=32),
+                                 activation=hp.Choice('activation', values=['relu', 'tanh']),
+                                 input_shape=shape)))
+    model.add(Dense(1))
+    model.compile(optimizer=hp.Choice('optimizer', values=['adam', 'sgd']),
+                  loss='mse',
+                  metrics=['mae'])
+    return model
 
 # prepare data for (conv) neural nets and other model architechtures
-def prepare_data_for_cnn(data_re, to_be_dropped):
-    data_nn = data_re.drop(to_be_dropped, axis=1) #dropping yields worse results (val_loss in training)
+def prepare_data_for_cnn(data_re):
+    data_nn = data_re.drop(To_be_dropped, axis=1) #dropping yields worse results (val_loss in training)
 
     # Split the dataset into features (X) and target variable (y)
     X = data_nn.drop('rolling_mean_grouped_soil', axis=1)  # Assuming 'soil_tension' is the target variable
@@ -1285,9 +1332,215 @@ def prepare_data_for_cnn(data_re, to_be_dropped):
     X_train_cnn = X_train_scaled[..., np.newaxis]
     X_test_cnn = X_test_scaled[..., np.newaxis]
 
-    return X_train, X_test, y_train, y_test, X_train_cnn, X_test_cnn
+    return X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler
 
+def train_networks(X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn):
+    
+    # Create an array to store all the models
+    nn_models = []
+    
+    # Create neural network
+    model_nn = create_nn_model((X_train.shape[1],), units_hidden1=32, units_hidden2=16)
+    # Train the model
+    history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_nn)
 
+    # Create conv neural network
+    model_cnn = create_cnn_model((X_train_cnn.shape[1], 1), units_hidden1=64)
+    # Train the model
+    history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_cnn)
+
+    # RNN architecture
+    # Create RNN model
+    model_rnn = create_rnn_model((X_train.shape[1], 1), 50)
+    # Train the model
+    history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_rnn)
+
+    # RNN architecture
+    # Create RNN model
+    model_gru = create_gru_model((X_train.shape[1], 1), 50)
+    # Train the model
+    history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_gru)
+
+    # LSTM architecture
+    # Create LSTM model
+    model_bilstm = create_lstm_model((X_train.shape[1], 1), 50)
+    # Train the model
+    history_bilstm = model_bilstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_bilstm)
+
+    # Keras regressor and grid search
+    # Param grid to big -> not supported
+    param_grid = {
+        'units_hidden1': [32, 64],  # Number of units in the first hidden layer
+        'units_hidden2': [16, 32],  # Number of units in the second hidden layer
+        'batch_size': [32, 64],  # Batch size for training
+        'epochs': [50, 100],  # Number of epochs for training
+        'optimizer': ['adam', 'rmsprop'],  # Optimizer algorithm
+        'loss': ['mean_squared_error', 'binary_crossentropy'],  # Loss function
+    }
+    # Define parameter grid => works and improves the result!
+    param_grid = {
+        'epochs': [50, 100],
+        'batch_size': [32, 64],
+    }
+    # Wrap the Keras model in a scikit-learn estimator => TODO: !!!!!!!!!!!!!!!!!!!!!!!!!!!!tune (bi)LSTM or gru instead!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    keras_estimator = KerasRegressor(build_fn=create_nn_model)
+    # Create GridSearchCV
+    grid = GridSearchCV(estimator=keras_estimator, param_grid=param_grid, cv=3)
+    # Fit the model
+    grid_result = grid.fit(X_train_cnn, y_train)
+    # Print best parameters
+    print("Best parameters:", grid_result.best_params_)
+    # Get the best model
+    best_model = grid_result.best_estimator_
+    # Append best model for comparision
+    nn_models.append(best_model)
+
+    # Leverage keras tuner with bi-LSTM model, can also use other models 
+    tuner = kt.Hyperband(build_model,
+                     objective='val_mae',
+                     max_epochs=50,
+                     factor=3,
+                     directory='hyperband_dir',
+                     project_name='bilstm_tuning')
+
+    tuner.search(X_train_scaled[..., np.newaxis], y_train, epochs=50, validation_split=0.2)
+    best_model = tuner.get_best_models(num_models=1)[0]
+    # Append best model
+    nn_models.append(best_model)
+
+    return nn_models
+
+# Perform evaluation, create predictions on testset (X_test) and save models
+def eval_predictions_save_models(nn_models, X_test_scaled, y_test):
+    for i in range(len(nn_models)):
+        # Evaluate the model on the test set
+        try:
+            loss = nn_models[i].evaluate(X_test_scaled[..., np.newaxis], y_test)
+            print(f'Model: {i}  Test Loss: {loss}')
+        except Exception as e:
+            print(f"Evaluate is not available for the model. {e}")
+        
+        # # Make predictions, it is only a test, not saved -> change it
+        # try:
+        #     predictions = nn_models[i].predict(X_test_scaled[..., np.newaxis])
+        # except Exception as e:
+        #     print(f"Predict is not available for the model.")
+            
+        # Optionally, you can save the trained model for future use
+        try:
+            nn_models[i].save('soil_tension_prediction_nn_model_' + str(i) + '.h5')
+        except Exception as e:
+            print(f"Save is not available for the model.")
+
+# Create evalset, not seen during training
+def prepare_evalset(scaler, new_data, test, X_test):
+    # drop not needed features
+    new_data.drop(set(new_data.columns) - set(X_test.columns), axis=1, inplace=True)
+    # Align columns of df1 to match df2
+    new_data_aligned = new_data.reindex(columns=X_test.columns)
+
+    # scale evaltestset
+    Z = new_data_aligned
+    ZZ = test['rolling_mean_grouped_soil']
+
+    numerical_columns = Z.select_dtypes(include=np.number).columns
+    Z_numerical = Z[numerical_columns]
+
+    # Scale the test features using the SAME scaler used for training data
+    Z_scaled = scaler.transform(Z_numerical)
+
+    Z_cnn = Z_scaled[..., np.newaxis]
+
+    return new_data, Z, ZZ, Z_numerical, Z_scaled, Z_cnn
+
+# Symmetric mean absolute percentage error (SMAPE or sMAPE) is an accuracy measure based on percentage (or relative) errors.
+def smape(y_true, y_pred):
+    return 100 * np.mean(2 * np.abs(y_pred - y_true) / (np.abs(y_pred) + np.abs(y_true)))
+
+# Quantile Loss can be defined as a custom loss function, which can be trained to minimize Quantile Loss. If the set percentile values are close to 0 or 1, the training results do not follow the trend of the training data and are relatively flat
+def quantile_loss(y_true, y_pred, q):
+    e = y_true - y_pred
+    return np.mean(np.maximum(q * e, (q - 1) * e))
+
+# Calculate mse, rmse, mae, mpe, r2, quantile_loss, SMAPE
+def evaluate_target_variable_nd(series1, series2, quantiles=[0.2, 0.4, 0.6, 0.8]):
+    # Step 1: Compute the differences between the two series
+    differences = series1 - series2
+    
+    # Step 2: Compute MSE, RMSE, MPE, and R2 score based on the differences
+    mse = mean_squared_error(series1, series2)
+    rmse = np.sqrt(mse)
+    mae = mean_absolute_error(series1, series2)
+    mpe = np.mean(differences / series1) * 100
+    r2 = r2_score(series1, series2)
+    smape_score = smape(series1, series2)
+    quantile_losses = [quantile_loss(series1, series2, q) for q in quantiles]
+    # Compute the average quantile loss
+    avg_quantile_loss = np.mean(quantile_losses)
+    
+    # Print the results
+    print(f"Mean Squared Error (MSE): {mse:.2f}")
+    print(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
+    print(f"Mean Absolute Error (MAE): {mae:.2f}")
+    print(f"Mean Percentage Error (MPE): {mpe:.2f}%")
+    print(f"R-squared (R2) Score: {r2:.2f}")
+    print(f"Symmetric Mean Absolute Percentage Error (SMAPE): {smape_score:.2f}%")
+    for q, loss in zip(quantiles, quantile_losses):
+        print(f"Quantile Loss (q={q}): {loss:.2f}")
+    print(f"Average Quantile Loss: {avg_quantile_loss:.2f}")
+
+    return mse, rmse, mae, mpe, r2, smape_score, quantile_losses, avg_quantile_loss
+
+def compare_models_on_test(nn_models, ZZ, Z_cnn):
+    best_r2 = -1000
+    best_model_index  = -1
+    for i in range(len(nn_models)):
+        print("This is the " + str(i+1) + ". model in the pipeline")
+        # print summary
+        if isinstance(nn_models[i], Sequential) or isinstance(nn_models[i], Model):
+            nn_models[i].summary()
+        else:
+            print('For this model there is no summary\n')
+            
+        try:
+            # Make predictions
+            predictions = nn_models[i].predict(Z_cnn)
+        
+            # Evaluate model performance
+            print("Metrics:", predictions.shape)
+            evaluation_result = evaluate_target_variable_nd(ZZ.values, predictions.reshape(predictions.shape[0], predictions.shape[1]))
+            
+            # Check if evaluation result is not None
+            if evaluation_result is not None:
+                mse, rmse, mae, mpe, r2, smape_score, quantile_losses, avg_quantile_loss = evaluation_result
+                # select best
+                if r2 > best_r2:
+                    best_r2 = r2
+                    best_model_index = i
+            else:
+                print("Evaluation result is None. Skipping metrics printing.")
+
+            print("\n*****************************************************************")
+        except Exception as e:
+            print(f"Is not available for the model. {e}")
+            
+    if best_model_index != -1:
+        print("The best model after evaluation on unseen data during training is:", best_model_index)
+        best_model = nn_models[best_model_index]
+    else:
+        print("No model met the criteria for selection.")   
+
+    return best_model_index
 
 
 # Compare dataframes cols to be sure that they match, otherwise drop
@@ -1397,27 +1650,39 @@ def main() -> int:
     get_token()
     
     # Data preparation pipeline, calls other subfunction to perform the task
+    # Regression
     Data = prepare_data()  
-    train, test = split_by_ratio(Data, 20)  
-    X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled = prepare_data_for_cnn(train, To_be_dropped)
+    train, test = split_by_ratio(Data, 20) # here a split is done to rule out the models that are overfitting
+    # NN
+    X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = prepare_data_for_cnn(train)
 
-    # Start pycaret pipeline: setup, train models, save the best ones to best-array 
+    # Start training pipeline: setup, train models the best ones to best-array
+    # Regression
     #exp, best = create_and_compare_model_ts(cut_sub_dfs)
     exp, best = create_and_compare_model_reg(train)
+    # NN
+    nn_models = train_networks(X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn)
     
-    # Save the best models for further evaluation
+    # Save the best regression models for further evaluation
+    # Regression:
     model_names = save_models(exp, best)
+    # NN: (print eval(on X_test) and save to disk)
+    eval_predictions_save_models(nn_models, X_test_scaled, y_test)
     
-    # Load model from disk, if there was a magical error 
+    # Load model from disk, if there was a magical error => TODO: useless, because it would stop before, surround more with try except
     try:
         best
     except NameError:
         best = load_models(model_names)
 
     # Evaluate with testset
+    # Regression
     best_eval, results = evaluate_against_testset(test, exp, best)
+    # NN
+    prepare_evalset(scaler, test, X_test)
 
-    # Train best model on whole dataset (without slip test)
+
+    # Train best model on whole dataset (without skipping "test-set")
     best_model, best_exp = train_best(best_eval, Data)
     
     # Create future value set to feed new data to model
