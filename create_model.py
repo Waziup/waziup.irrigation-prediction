@@ -45,7 +45,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
-import kerastuner as kt
+#import kerastuner as kt
 
 # local
 import main
@@ -123,7 +123,7 @@ Predictions = pd.DataFrame
 Threshold_timestamp = ""
 
 # Load data from CSV, is set if there is a file in the root directory
-CSVFile = "test_dataset_multiple_fu.csv"
+CSVFile = "binned_removed_new_for_app_nono.csv"
 LoadDataFromCSV = False
 
 
@@ -233,7 +233,7 @@ def load_data_api(sensor_name, from_timestamp):#, token)
     if type(from_timestamp) != str:
         from_timestamp = from_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
-    # Correct timestamp for timezone
+    # Correct timestamp for timezone => TODO: here is an ERROR
     from_timestamp = (datetime.datetime.strptime(from_timestamp, "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(hours=get_timezone_offset(Timezone))).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
     if ApiUrl.startswith('http://wazigate/'):
@@ -891,7 +891,7 @@ def prepare_data():
         # Correct timestamp for timezone
         # Add timezone information without converting 
         data.index = data.index.map(lambda x: x.replace(tzinfo=pytz.timezone(Timezone)))
-        data.index = pd.to_datetime(data.index) + pd.DateOffset(hours=get_timezone_offset(Timezone))
+        #data.index = pd.to_datetime(data.index) + pd.DateOffset(hours=get_timezone_offset(Timezone))
     else:
         # Load data from API
         for moisture in DeviceAndSensorIdsMoisture:
@@ -1055,8 +1055,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        exclude=['lar']
-        #include=['xgboost', 'llar'] #debug
+        #exclude=['lar']
+        include=['xgboost', 'llar'] #debug
     )
 
     return re_exp, best_re
@@ -1212,7 +1212,7 @@ def train_best(best_model, data):
     re_exp = pycaret.regression.RegressionExperiment()
 
     # to rangeindex => do not use timestamps!
-    data.reset_index(drop=False, inplace=True)
+    data.reset_index(drop=True, inplace=True) #TODO: maybe problems here with live data from gw
     data.rename(columns={'index': 'Timestamp'}, inplace=True)
 
     # old: to_be_dropped = ['minute', 'Timestamp','gradient','grouped_soil','grouped_resistance','grouped_soil_temp']
@@ -1228,6 +1228,8 @@ def train_best(best_model, data):
               ignore_features = To_be_dropped, 
               train_size = 0.8
               )
+ 
+    # Create model 
     model = re_exp.create_model(Model_mapping[best_model.__class__.__name__])
 
     return model, re_exp
@@ -1239,7 +1241,12 @@ def create_nn_model(shape, units_hidden1=64, units_hidden2=32):
     model.add(Dense(units_hidden1, activation='relu', input_shape=shape))
     model.add(Dense(units_hidden2, activation='relu'))
     model.add(Dense(1))  # Output layer with one neuron for regression
-    
+
+    # Add a custom attribute to identify the model
+    model.model_name = "nn_model"
+    model.units_hidden1 = units_hidden1
+    model.units_hidden2 = units_hidden2
+
     # Compile the model
     model.compile(optimizer=Adam(), loss='mean_squared_error')
 
@@ -1254,6 +1261,10 @@ def create_cnn_model(shape, units_hidden1=64): #incooperate units_hidden
     model.add(Dense(100, activation='relu'))
     model.add(Dense(1))
 
+    # Add a custom attribute to identify the model
+    model.model_name = "cnn_model"
+    model.units_hidden1 = units_hidden1
+
     # Compile the model
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 
@@ -1265,6 +1276,10 @@ def create_rnn_model(shape, units=50):
     model = Sequential()
     model.add(LSTM(units=units, activation='relu', input_shape=shape))
     model.add(Dense(1))
+
+    # Add a custom attribute to identify the model
+    model.model_name = "rnn_model"
+    model.units_hidden1 = units
 
     # Compile the model
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])
@@ -1278,6 +1293,10 @@ def create_gru_model(shape, units=50):
     model.add(GRU(units=units, activation='relu', input_shape=shape))
     model.add(Dense(1))
 
+    # Add a custom attribute to identify the model
+    model.model_name = "gru_model"
+    model.units_hidden1 = units
+
     # Compile the model
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 
@@ -1289,6 +1308,10 @@ def create_lstm_model(shape, units=50):
     model = Sequential()
     model.add(Bidirectional(LSTM(units=units, activation='relu', input_shape=shape)))
     model.add(Dense(1))
+
+    # Add a custom attribute to identify the model
+    model.model_name = "lstm_model"
+    model.units_hidden1 = units
 
     # Compile the model
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])
@@ -1307,8 +1330,13 @@ def build_model(hp, shape):
     return model
 
 # prepare data for (conv) neural nets and other model architechtures
-def prepare_data_for_cnn(data_re):
-    data_nn = data_re.drop(To_be_dropped, axis=1) #dropping yields worse results (val_loss in training)
+def prepare_data_for_cnn(data):
+    # to rangeindex => do not use timestamps!
+    data.reset_index(drop=False, inplace=True)
+    data.rename(columns={'index': 'Timestamp'}, inplace=True)
+
+    # Drop non important
+    data_nn = data.drop(To_be_dropped, axis=1) #dropping yields worse results (val_loss in training)
 
     # Split the dataset into features (X) and target variable (y)
     X = data_nn.drop('rolling_mean_grouped_soil', axis=1)  # Assuming 'soil_tension' is the target variable
@@ -1334,11 +1362,12 @@ def prepare_data_for_cnn(data_re):
 
     return X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler
 
-def train_networks(X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn):
+# Models being trained on different architectures
+def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     
     # Create an array to store all the models
     nn_models = []
-    
+
     # Create neural network
     model_nn = create_nn_model((X_train.shape[1],), units_hidden1=32, units_hidden2=16)
     # Train the model
@@ -1369,7 +1398,7 @@ def train_networks(X_train, X_test, y_train, y_test, X_train_scaled, X_test_scal
     # Append for comparison
     nn_models.append(model_gru)
 
-    # LSTM architecture
+    # LSTM architecture => TODO: error in eval
     # Create LSTM model
     model_bilstm = create_lstm_model((X_train.shape[1], 1), 50)
     # Train the model
@@ -1377,59 +1406,62 @@ def train_networks(X_train, X_test, y_train, y_test, X_train_scaled, X_test_scal
     # Append for comparison
     nn_models.append(model_bilstm)
 
-    # Keras regressor and grid search
-    # Param grid to big -> not supported
-    param_grid = {
-        'units_hidden1': [32, 64],  # Number of units in the first hidden layer
-        'units_hidden2': [16, 32],  # Number of units in the second hidden layer
-        'batch_size': [32, 64],  # Batch size for training
-        'epochs': [50, 100],  # Number of epochs for training
-        'optimizer': ['adam', 'rmsprop'],  # Optimizer algorithm
-        'loss': ['mean_squared_error', 'binary_crossentropy'],  # Loss function
-    }
-    # Define parameter grid => works and improves the result!
-    param_grid = {
-        'epochs': [50, 100],
-        'batch_size': [32, 64],
-    }
-    # Wrap the Keras model in a scikit-learn estimator => TODO: !!!!!!!!!!!!!!!!!!!!!!!!!!!!tune (bi)LSTM or gru instead!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    keras_estimator = KerasRegressor(build_fn=create_nn_model)
-    # Create GridSearchCV
-    grid = GridSearchCV(estimator=keras_estimator, param_grid=param_grid, cv=3)
-    # Fit the model
-    grid_result = grid.fit(X_train_cnn, y_train)
-    # Print best parameters
-    print("Best parameters:", grid_result.best_params_)
-    # Get the best model
-    best_model = grid_result.best_estimator_
-    # Append best model for comparision
-    nn_models.append(best_model)
+    # # Keras regressor and grid search -> TODO: Kerastuner does not work, package conflict, try optuna hyperopt
+    # # Param grid to big -> not supported
+    # param_grid = {
+    #     'units_hidden1': [32, 64],  # Number of units in the first hidden layer
+    #     'units_hidden2': [16, 32],  # Number of units in the second hidden layer
+    #     'batch_size': [32, 64],  # Batch size for training
+    #     'epochs': [50, 100],  # Number of epochs for training
+    #     'optimizer': ['adam', 'rmsprop'],  # Optimizer algorithm
+    #     'loss': ['mean_squared_error', 'binary_crossentropy'],  # Loss function
+    # }
+    # # Define parameter grid => works and improves the result!
+    # param_grid = {
+    #     'epochs': [50, 100],
+    #     'batch_size': [32, 64],
+    # }
+    # # Wrap the Keras model in a scikit-learn estimator => TODO: !!!!!!!!!!!!!!!!!!!!!!!!!!!!tune (bi)LSTM or gru instead!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # keras_estimator = KerasRegressor(build_fn=create_nn_model)
+    # # Create GridSearchCV
+    # grid = GridSearchCV(estimator=keras_estimator, param_grid=param_grid, cv=3)
+    # # Fit the model
+    # grid_result = grid.fit(X_train_cnn, y_train)
+    # # Print best parameters
+    # print("Best parameters:", grid_result.best_params_)
+    # # Get the best model
+    # best_model = grid_result.best_estimator_
+    # # Append best model for comparision
+    # nn_models.append(best_model)
 
-    # Leverage keras tuner with bi-LSTM model, can also use other models 
-    tuner = kt.Hyperband(build_model,
-                     objective='val_mae',
-                     max_epochs=50,
-                     factor=3,
-                     directory='hyperband_dir',
-                     project_name='bilstm_tuning')
+    # # Leverage keras tuner with bi-LSTM model, can also use other models 
+    # tuner = kt.Hyperband(build_model,
+    #                  objective='val_mae',
+    #                  max_epochs=50,
+    #                  factor=3,
+    #                  directory='hyperband_dir',
+    #                  project_name='bilstm_tuning')
 
-    tuner.search(X_train_scaled[..., np.newaxis], y_train, epochs=50, validation_split=0.2)
-    best_model = tuner.get_best_models(num_models=1)[0]
-    # Append best model
-    nn_models.append(best_model)
+    # tuner.search(X_train_scaled[..., np.newaxis], y_train, epochs=50, validation_split=0.2)
+    # best_model = tuner.get_best_models(num_models=1)[0]
+    # # Append best model
+    # nn_models.append(best_model)
 
     return nn_models
 
+# keras Models available functions to train => add new models here!!!
+Model_functions = {
+    "nn_model" : create_nn_model,
+    "cnn_model" : create_cnn_model,
+    "rnn_model" : create_rnn_model,
+    "gru_model" : create_gru_model,
+    "lstm_model" : create_lstm_model
+}
+
+
 # Perform evaluation, create predictions on testset (X_test) and save models
-def eval_predictions_save_models(nn_models, X_test_scaled, y_test):
-    for i in range(len(nn_models)):
-        # Evaluate the model on the test set
-        try:
-            loss = nn_models[i].evaluate(X_test_scaled[..., np.newaxis], y_test)
-            print(f'Model: {i}  Test Loss: {loss}')
-        except Exception as e:
-            print(f"Evaluate is not available for the model. {e}")
-        
+def save_models_nn(nn_models, X_test_scaled, y_test):
+    for i in range(len(nn_models)):     
         # # Make predictions, it is only a test, not saved -> change it
         # try:
         #     predictions = nn_models[i].predict(X_test_scaled[..., np.newaxis])
@@ -1440,16 +1472,77 @@ def eval_predictions_save_models(nn_models, X_test_scaled, y_test):
         try:
             nn_models[i].save('soil_tension_prediction_nn_model_' + str(i) + '.h5')
         except Exception as e:
-            print(f"Save is not available for the model.")
+            print(f"Save is not available for the model. {e}")
 
-# Create evalset, not seen during training
-def prepare_evalset(scaler, new_data, test, X_test):
+# Perform a evaluation of the models against the testset(X_test), slit before 
+def evaluate_against_testset_nn(nn_models, X_test_scaled, y_test):
+    predictions = []
+    results_for_model = []
+    for i in range(len(nn_models)):
+    #     # Evaluate the model on the test set
+    #     try:
+    #         loss = nn_models[i].evaluate(X_test_scaled, y_test.to_numpy()[...,np.newaxis])
+    #         print(f'Model: {i}  Test Loss: {loss}')
+    #     except Exception as e:
+    #         print(f"Evaluate is not available for the model. {e}")
+        # Make predictions
+        try:
+            predictions.append(nn_models[i].predict(X_test_scaled[..., np.newaxis]))
+        except Exception as e:
+            print(f"Predict is not available for the model.")
+
+        # evaluate predictions against testset 
+        results_for_model.append(evaluate_target_variable(y_test, pd.Series(predictions[i].flatten()), ""))
+    
+    # Sort models in new dataframe according to performance on testset
+    best_eval = evaluate_results_and_choose_best(results_for_model, nn_models)
+
+    return best_eval, results_for_model
+
+def train_best_nn(best_eval, data, scaler):
+    # to rangeindex => do not use timestamps!
+    data.reset_index(drop=False, inplace=True)
+    data.rename(columns={'index': 'Timestamp'}, inplace=True)
+
+    # Drop non important
+    data_nn = data.drop(To_be_dropped, axis=1) #dropping yields worse results (val_loss in training)
+
+    # Split the dataset into features (X) and target variable (y)
+    X = data_nn.drop('rolling_mean_grouped_soil', axis=1)  # Assuming 'soil_tension' is the target variable
+    y = data_nn['rolling_mean_grouped_soil']
+
+    # Standardize features by removing the mean and scaling to unit variance
+    X_scaled = scaler.fit_transform(X)
+
+    numerical_columns = X.select_dtypes(include=np.number).columns
+    X_numerical = X[numerical_columns]
+
+    # Scale the test features using the same scaler used for training data
+    X_scaled = scaler.transform(X_numerical)
+
+    # Ensure input data is correctly reshaped for Conv1D
+    X_cnn = X_scaled[..., np.newaxis]
+
+    function_name = best_eval.model_name
+
+    if function_name in Model_functions: 
+        # Create best model TODO: check, bad metrics, compared to other models
+        model = Model_functions[function_name]((X_cnn.shape[1], 1))
+        # Train the model
+        history_rnn = model.fit(X_cnn, y, epochs=50, batch_size=32, validation_split=0.2)
+    else:
+        print(f"Function '{function_name}' not found")
+
+    return model
+    
+# Create testset, not seen during training=>should be fur
+def prepare_future_values(scaler, new_data):
     # drop not needed features
     new_data.drop(set(new_data.columns) - set(X_test.columns), axis=1, inplace=True)
     # Align columns of df1 to match df2
     new_data_aligned = new_data.reindex(columns=X_test.columns)
 
-    # scale evaltestset
+    # scale testset
     Z = new_data_aligned
     ZZ = test['rolling_mean_grouped_soil']
 
@@ -1461,7 +1554,7 @@ def prepare_evalset(scaler, new_data, test, X_test):
 
     Z_cnn = Z_scaled[..., np.newaxis]
 
-    return new_data, Z, ZZ, Z_numerical, Z_scaled, Z_cnn
+    return Z, ZZ, Z_numerical, Z_scaled, Z_cnn
 
 # Symmetric mean absolute percentage error (SMAPE or sMAPE) is an accuracy measure based on percentage (or relative) errors.
 def smape(y_true, y_pred):
@@ -1654,22 +1747,22 @@ def main() -> int:
     Data = prepare_data()  
     train, test = split_by_ratio(Data, 20) # here a split is done to rule out the models that are overfitting
     # NN
-    X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = prepare_data_for_cnn(train)
+    X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = prepare_data_for_cnn(Data)
 
     # Start training pipeline: setup, train models the best ones to best-array
     # Regression
     #exp, best = create_and_compare_model_ts(cut_sub_dfs)
     exp, best = create_and_compare_model_reg(train)
     # NN
-    nn_models = train_networks(X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn)
+    nn_models = train_models(X_train, y_train, X_train_scaled, X_train_cnn)
     
-    # Save the best regression models for further evaluation
+    # Save the best models for further evaluation
     # Regression:
     model_names = save_models(exp, best)
     # NN: (print eval(on X_test) and save to disk)
-    eval_predictions_save_models(nn_models, X_test_scaled, y_test)
+    save_models_nn(nn_models, X_test_scaled, y_test)
     
-    # Load model from disk, if there was a magical error => TODO: useless, because it would stop before, surround more with try except
+    # Load regression model from disk, if there was a magical error => TODO: useless, because it would stop before, surround more with try except
     try:
         best
     except NameError:
@@ -1679,14 +1772,19 @@ def main() -> int:
     # Regression
     best_eval, results = evaluate_against_testset(test, exp, best)
     # NN
-    prepare_evalset(scaler, test, X_test)
-
+    best_eval_nn, results_nn = evaluate_against_testset_nn(nn_models, X_test_scaled, y_test)
 
     # Train best model on whole dataset (without skipping "test-set")
+    # Regression
     best_model, best_exp = train_best(best_eval, Data)
+    # NN
+    best_model = train_best_nn(best_eval_nn, Data, scaler)
+
     
     # Create future value set to feed new data to model
     future_features = create_future_values(Data)
+    # NN
+    prepare_future_values(scaler, future_features)
 
     # Compare dataframes cols to be sure that they match, otherwise drop
     future_features = compare_train_predictions_cols(train, future_features)
