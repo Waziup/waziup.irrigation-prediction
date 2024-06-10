@@ -1144,9 +1144,9 @@ def evaluate_results_and_choose_best(results_for_one_df, best_for_one_df):
 # Create future value testset for prediction
 def create_future_values(data):
     # Create ranges and dataframe with timestamps 
-    start = data['Timestamp'].iloc[0]
+    start = data.index[0]
     print("start: ", start)
-    train_end = data['Timestamp'].iloc[-1] #+ timedelta(minutes=sample_rate)
+    train_end = data.index[-1] #+ timedelta(minutes=sample_rate)
     print("train end before adding: ", train_end)
     end = train_end+pd.Timedelta(days=Forcast_horizon)
     print("end after adding: ", end,"\n")
@@ -1212,8 +1212,8 @@ def train_best(best_model, data):
     re_exp = pycaret.regression.RegressionExperiment()
 
     # to rangeindex => do not use timestamps!
-    data.reset_index(drop=True, inplace=True) #TODO: maybe problems here with live data from gw
-    data.rename(columns={'index': 'Timestamp'}, inplace=True)
+    data = data.reset_index(drop=True, inplace=False) #TODO: maybe problems here with live data from gw
+    data = data.rename(columns={'index': 'Timestamp'}, inplace=False)
 
     # old: to_be_dropped = ['minute', 'Timestamp','gradient','grouped_soil','grouped_resistance','grouped_soil_temp']
 
@@ -1332,11 +1332,11 @@ def build_model(hp, shape):
 # prepare data for (conv) neural nets and other model architechtures
 def prepare_data_for_cnn(data):
     # to rangeindex => do not use timestamps!
-    data.reset_index(drop=False, inplace=True)
-    data.rename(columns={'index': 'Timestamp'}, inplace=True)
+    data = data.reset_index(drop=False, inplace=False)
+    #data.rename(columns={'index': 'Timestamp'}, inplace=True)
 
     # Drop non important
-    data_nn = data.drop(To_be_dropped, axis=1) #dropping yields worse results (val_loss in training)
+    data_nn = data.drop(columns=To_be_dropped, axis=1, inplace=False) #dropping yields worse results (val_loss in training)
 
     # Split the dataset into features (X) and target variable (y)
     X = data_nn.drop('rolling_mean_grouped_soil', axis=1)  # Assuming 'soil_tension' is the target variable
@@ -1375,36 +1375,36 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Append for comparison
     nn_models.append(model_nn)
 
-    # Create conv neural network
-    model_cnn = create_cnn_model((X_train_cnn.shape[1], 1), units_hidden1=64)
-    # Train the model
-    history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_cnn)
+    # # Create conv neural network
+    # model_cnn = create_cnn_model((X_train_cnn.shape[1], 1), units_hidden1=64)
+    # # Train the model
+    # history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_cnn)
 
-    # RNN architecture
-    # Create RNN model
-    model_rnn = create_rnn_model((X_train.shape[1], 1), 50)
-    # Train the model
-    history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_rnn)
+    # # RNN architecture
+    # # Create RNN model
+    # model_rnn = create_rnn_model((X_train.shape[1], 1), 50)
+    # # Train the model
+    # history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_rnn)
 
-    # RNN architecture
-    # Create RNN model
-    model_gru = create_gru_model((X_train.shape[1], 1), 50)
-    # Train the model
-    history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_gru)
+    # # RNN architecture
+    # # Create RNN model
+    # model_gru = create_gru_model((X_train.shape[1], 1), 50)
+    # # Train the model
+    # history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_gru)
 
-    # LSTM architecture => TODO: error in eval
-    # Create LSTM model
-    model_bilstm = create_lstm_model((X_train.shape[1], 1), 50)
-    # Train the model
-    history_bilstm = model_bilstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_bilstm)
+    # # LSTM architecture => TODO: error in eval
+    # # Create LSTM model
+    # model_bilstm = create_lstm_model((X_train.shape[1], 1), 50)
+    # # Train the model
+    # history_bilstm = model_bilstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_bilstm)
 
     # # Keras regressor and grid search -> TODO: Kerastuner does not work, package conflict, try optuna hyperopt
     # # Param grid to big -> not supported
@@ -1501,11 +1501,11 @@ def evaluate_against_testset_nn(nn_models, X_test_scaled, y_test):
 
 def train_best_nn(best_eval, data, scaler):
     # to rangeindex => do not use timestamps!
-    data.reset_index(drop=False, inplace=True)
-    data.rename(columns={'index': 'Timestamp'}, inplace=True)
+    data = data.reset_index(drop=False, inplace=False)
+    data = data.rename(columns={'index': 'Timestamp'}, inplace=False)
 
     # Drop non important
-    data_nn = data.drop(To_be_dropped, axis=1) #dropping yields worse results (val_loss in training)
+    data_nn = data.drop(To_be_dropped, axis=1, inplace=False) #dropping yields worse results (val_loss in training)
 
     # Split the dataset into features (X) and target variable (y)
     X = data_nn.drop('rolling_mean_grouped_soil', axis=1)  # Assuming 'soil_tension' is the target variable
@@ -1544,7 +1544,7 @@ def prepare_future_values(scaler, new_data):
 
     # scale testset
     Z = new_data_aligned
-    ZZ = test['rolling_mean_grouped_soil']
+    ZZ = new_data['rolling_mean_grouped_soil']
 
     numerical_columns = Z.select_dtypes(include=np.number).columns
     Z_numerical = Z[numerical_columns]
@@ -1784,7 +1784,7 @@ def main() -> int:
     # Create future value set to feed new data to model
     future_features = create_future_values(Data)
     # NN
-    prepare_future_values(scaler, future_features)
+    future_features_nn = prepare_future_values(scaler, future_features)
 
     # Compare dataframes cols to be sure that they match, otherwise drop
     future_features = compare_train_predictions_cols(train, future_features)
