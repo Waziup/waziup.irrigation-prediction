@@ -123,7 +123,7 @@ Predictions = pd.DataFrame
 Threshold_timestamp = ""
 
 # Load data from CSV, is set if there is a file in the root directory
-CSVFile = "binned_removed_new_for_app_nono.csv"
+CSVFile = "binned_removed_new_for_app.csv"
 LoadDataFromCSV = False
 
 
@@ -1350,11 +1350,11 @@ def prepare_data_for_cnn(data):
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
 
-    numerical_columns = X_test.select_dtypes(include=np.number).columns
-    X_test_numerical = X_test[numerical_columns]
+    # numerical_columns = X_test.select_dtypes(include=np.number).columns
+    # X_test_numerical = X_test[numerical_columns]
 
-    # Scale the test features using the same scaler used for training data
-    X_test_scaled = scaler.transform(X_test_numerical)
+    # # Scale the test features using the same scaler used for training data
+    # X_test_scaled = scaler.transform(X_test_numerical)
 
     # Ensure input data is correctly reshaped for Conv1D
     X_train_cnn = X_train_scaled[..., np.newaxis]
@@ -1499,6 +1499,7 @@ def evaluate_against_testset_nn(nn_models, X_test_scaled, y_test):
 
     return best_eval, results_for_model
 
+# Train the best model on the full dataset TODO: metrics bad check again!
 def train_best_nn(best_eval, data, scaler):
     # to rangeindex => do not use timestamps!
     data = data.reset_index(drop=False, inplace=False)
@@ -1512,13 +1513,13 @@ def train_best_nn(best_eval, data, scaler):
     y = data_nn['rolling_mean_grouped_soil']
 
     # Standardize features by removing the mean and scaling to unit variance
-    X_scaled = scaler.fit_transform(X)
+    X_scaled = scaler.transform(X)
 
-    numerical_columns = X.select_dtypes(include=np.number).columns
-    X_numerical = X[numerical_columns]
+    # numerical_columns = X.select_dtypes(include=np.number).columns
+    # X_numerical = X[numerical_columns]
 
-    # Scale the test features using the same scaler used for training data
-    X_scaled = scaler.transform(X_numerical)
+    # # Scale the test features using the same scaler used for training data
+    # X_scaled = scaler.transform(X_numerical)
 
     # Ensure input data is correctly reshaped for Conv1D
     X_cnn = X_scaled[..., np.newaxis]
@@ -1536,25 +1537,28 @@ def train_best_nn(best_eval, data, scaler):
     return model
     
 # Create testset, not seen during training=>should be fur
-def prepare_future_values(scaler, new_data):
+def prepare_future_values(scaler, new_data, X_train_c):
+    # Filter the list to include only columns that are present in the DataFrame
+    columns_to_drop = [col for col in To_be_dropped if col in new_data.columns]
     # drop not needed features
-    new_data.drop(set(new_data.columns) - set(X_test.columns), axis=1, inplace=True)
-    # Align columns of df1 to match df2
-    new_data_aligned = new_data.reindex(columns=X_test.columns)
+    new_data_nn = new_data.drop(columns_to_drop, axis=1, inplace=False)
+    # Align columns of df1 to match df2 -> in most cases not needed
+    new_data_aligned = new_data_nn.reindex(columns=X_train_c)
 
     # scale testset
     Z = new_data_aligned
-    ZZ = new_data['rolling_mean_grouped_soil']
 
-    numerical_columns = Z.select_dtypes(include=np.number).columns
-    Z_numerical = Z[numerical_columns]
+    Z_scaled = scaler.transform(Z)
 
-    # Scale the test features using the SAME scaler used for training data
-    Z_scaled = scaler.transform(Z_numerical)
+    # numerical_columns = Z.select_dtypes(include=np.number).columns
+    # Z_numerical = Z[numerical_columns]
+
+    # # Scale the test features using the SAME scaler used for training data
+    # Z_scaled = scaler.transform(Z_numerical)
 
     Z_cnn = Z_scaled[..., np.newaxis]
 
-    return Z, ZZ, Z_numerical, Z_scaled, Z_cnn
+    return Z, Z_scaled, Z_cnn
 
 # Symmetric mean absolute percentage error (SMAPE or sMAPE) is an accuracy measure based on percentage (or relative) errors.
 def smape(y_true, y_pred):
@@ -1778,13 +1782,13 @@ def main() -> int:
     # Regression
     best_model, best_exp = train_best(best_eval, Data)
     # NN
-    best_model = train_best_nn(best_eval_nn, Data, scaler)
+    best_model_nn = train_best_nn(best_eval_nn, Data, scaler)
 
     
     # Create future value set to feed new data to model
     future_features = create_future_values(Data)
     # NN
-    future_features_nn = prepare_future_values(scaler, future_features)
+    Z, Z_scaled, Z_cnn = prepare_future_values(scaler, future_features, X_train.columns)
 
     # Compare dataframes cols to be sure that they match, otherwise drop
     future_features = compare_train_predictions_cols(train, future_features)

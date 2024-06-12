@@ -305,11 +305,13 @@ def getDatasetChartData(url, body):
     #data_dataset.set_index('Timestamp', inplace=True)
     col_names = data_dataset.columns
 
+    # index
+    for item in data_dataset.index:
+        f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S')) #TODO:timezone is lost here!!!
+
+    # other cols
     for col in col_names:
-        if col == 'Timestamp':
-            for item in data_dataset[col]:
-                f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S')) #TODO:timezone is lost here!!!
-        elif data_dataset[col].dtype == "float64" or data_dataset[col].dtype == "int64":
+        if data_dataset[col].dtype == "float64" or data_dataset[col].dtype == "int64":
             items_to_render.append(data_dataset[col].tolist())
         else:
             print("Missed the col:", col)
@@ -319,8 +321,8 @@ def getDatasetChartData(url, body):
         "timestamps": f_data_time,
     }
     # Add other cols 
-    for i in range(1, len(items_to_render) + 1):
-        chart_data[col_names[i]] = items_to_render[i-1]
+    for i in range(0, len(items_to_render)):
+        chart_data[col_names[i]] = items_to_render[i]
 
     return 200, bytes(json.dumps(chart_data), "utf8"), []
 
