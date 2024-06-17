@@ -18,6 +18,7 @@ import pathlib
 import numpy as np
 
 import create_model
+import actuation
 
 
 
@@ -415,7 +416,7 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
         print("Training started at:", start_time)
 
         # Call create model function
-        create_model.main()
+        currentSoilTension, threshold_timestamp = create_model.main()
 
         # TODO: reload page
         TrainingFinished = True
@@ -424,6 +425,9 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
         end_time = datetime.now().replace(microsecond=0)
         duration = end_time - start_time
         print("Traning finished at: ", end_time, "The duration was: ", duration)
+
+        # Call routine to irrgate
+        actuation.main(currentSoilTension, threshold_timestamp)
 
         # Send thread to sleep
         time.sleep(time_interval)  # Wait for the specified time interval

@@ -123,7 +123,7 @@ Predictions = pd.DataFrame
 Threshold_timestamp = ""
 
 # Load data from CSV, is set if there is a file in the root directory
-CSVFile = "binned_removed_new_for_app.csv"
+CSVFile = "binned_removed_new_for_app_ww.csv"
 LoadDataFromCSV = False
 
 
@@ -221,6 +221,7 @@ def load_data(path):
 # Load from wazigate API
 def load_data_api(sensor_name, from_timestamp):#, token)
     global ApiUrl
+    global Timezone
 
     # Load config to obtain GPS coordinates
     read_config()
@@ -233,9 +234,13 @@ def load_data_api(sensor_name, from_timestamp):#, token)
     if type(from_timestamp) != str:
         from_timestamp = from_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
-    # Correct timestamp for timezone => TODO: here is an ERROR
-    from_timestamp = (datetime.datetime.strptime(from_timestamp, "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(hours=get_timezone_offset(Timezone))).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    # Get timezone if no information avalable
+    if Timezone == '':
+        Timezone = get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"])
 
+    # Correct timestamp for timezone => TODO: here is an ERROR, timezone var is not available in first start
+    from_timestamp = (datetime.datetime.strptime(from_timestamp, "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(hours=get_timezone_offset(Timezone))).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    
     if ApiUrl.startswith('http://wazigate/'):
         print('There is no token needed, fetch data from local gateway.')
     elif Token != None:
@@ -1330,7 +1335,7 @@ def build_model(hp, shape):
     return model
 
 # prepare data for (conv) neural nets and other model architechtures
-def prepare_data_for_cnn(data):
+def prepare_data_for_cnn(data, target_variable):
     # to rangeindex => do not use timestamps!
     data = data.reset_index(drop=False, inplace=False)
     #data.rename(columns={'index': 'Timestamp'}, inplace=True)
@@ -1339,11 +1344,15 @@ def prepare_data_for_cnn(data):
     data_nn = data.drop(columns=To_be_dropped, axis=1, inplace=False) #dropping yields worse results (val_loss in training)
 
     # Split the dataset into features (X) and target variable (y)
-    X = data_nn.drop('rolling_mean_grouped_soil', axis=1)  # Assuming 'soil_tension' is the target variable
-    y = data_nn['rolling_mean_grouped_soil']
+    X = data_nn.drop(target_variable, axis=1)  # Assuming 'target_variable' is the target variable
+    y = data_nn[target_variable]
 
-    # Split the data into training and testing sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # Determine the split point (80% training, 20% testing)
+    split_point = int(len(X) * 0.8)
+
+    # Split the data into training and testing sets based on the split point
+    X_train, X_test = X[:split_point], X[split_point:]
+    y_train, y_test = y[:split_point], y[split_point:]
 
     # Standardize features by removing the mean and scaling to unit variance
     scaler = StandardScaler()
@@ -1375,36 +1384,36 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Append for comparison
     nn_models.append(model_nn)
 
-    # # Create conv neural network
-    # model_cnn = create_cnn_model((X_train_cnn.shape[1], 1), units_hidden1=64)
-    # # Train the model
-    # history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_cnn)
+    # Create conv neural network
+    model_cnn = create_cnn_model((X_train_cnn.shape[1], 1), units_hidden1=64)
+    # Train the model
+    history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_cnn)
 
-    # # RNN architecture
-    # # Create RNN model
-    # model_rnn = create_rnn_model((X_train.shape[1], 1), 50)
-    # # Train the model
-    # history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_rnn)
+    # RNN architecture
+    # Create RNN model
+    model_rnn = create_rnn_model((X_train.shape[1], 1), 50)
+    # Train the model
+    history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_rnn)
 
-    # # RNN architecture
-    # # Create RNN model
-    # model_gru = create_gru_model((X_train.shape[1], 1), 50)
-    # # Train the model
-    # history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_gru)
+    # RNN architecture
+    # Create RNN model
+    model_gru = create_gru_model((X_train.shape[1], 1), 50)
+    # Train the model
+    history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_gru)
 
-    # # LSTM architecture => TODO: error in eval
-    # # Create LSTM model
-    # model_bilstm = create_lstm_model((X_train.shape[1], 1), 50)
-    # # Train the model
-    # history_bilstm = model_bilstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_bilstm)
+    # LSTM architecture => TODO: error in eval
+    # Create LSTM model
+    model_bilstm = create_lstm_model((X_train.shape[1], 1), 50)
+    # Train the model
+    history_bilstm = model_bilstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_bilstm)
 
     # # Keras regressor and grid search -> TODO: Kerastuner does not work, package conflict, try optuna hyperopt
     # # Param grid to big -> not supported
@@ -1529,6 +1538,7 @@ def train_best_nn(best_eval, data, scaler):
     if function_name in Model_functions: 
         # Create best model TODO: check, bad metrics, compared to other models
         model = Model_functions[function_name]((X_cnn.shape[1], 1))
+        print(f"Will train the '{model.model_name}' as best model for neural nets.")
         # Train the model
         history_rnn = model.fit(X_cnn, y, epochs=50, batch_size=32, validation_split=0.2)
     else:
@@ -1747,21 +1757,21 @@ def main() -> int:
     get_token()
     
     # Data preparation pipeline, calls other subfunction to perform the task
-    # Regression
+    # Classical regression
     Data = prepare_data()  
     train, test = split_by_ratio(Data, 20) # here a split is done to rule out the models that are overfitting
     # NN
-    X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = prepare_data_for_cnn(Data)
+    X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = prepare_data_for_cnn(Data, 'rolling_mean_grouped_soil')
 
     # Start training pipeline: setup, train models the best ones to best-array
-    # Regression
+    # Classical regression
     #exp, best = create_and_compare_model_ts(cut_sub_dfs)
     exp, best = create_and_compare_model_reg(train)
     # NN
     nn_models = train_models(X_train, y_train, X_train_scaled, X_train_cnn)
     
     # Save the best models for further evaluation
-    # Regression:
+    # Classical regression:
     model_names = save_models(exp, best)
     # NN: (print eval(on X_test) and save to disk)
     save_models_nn(nn_models, X_test_scaled, y_test)
@@ -1773,13 +1783,13 @@ def main() -> int:
         best = load_models(model_names)
 
     # Evaluate with testset
-    # Regression
+    # Classical regression
     best_eval, results = evaluate_against_testset(test, exp, best)
     # NN
     best_eval_nn, results_nn = evaluate_against_testset_nn(nn_models, X_test_scaled, y_test)
 
     # Train best model on whole dataset (without skipping "test-set")
-    # Regression
+    # Classical regression
     best_model, best_exp = train_best(best_eval, Data)
     # NN
     best_model_nn = train_best_nn(best_eval_nn, Data, scaler)
@@ -1819,7 +1829,10 @@ def main() -> int:
 
 
     # Create predictions to forecast values
+    # Classical regression
     Predictions = generate_predictions(tuned_best, best_exp, future_features)
+    # NN
+
     
     # Calculate when threshold will be meet
     Threshold_timestamp = calc_threshold(Predictions)
@@ -1827,7 +1840,8 @@ def main() -> int:
     # Add volumetric water content
     Predictions = add_volumetric_col_to_df(Predictions, "prediction_label")
 
-    return 0
+    # Return last accumulated reading and threshold timestamp
+    return Data['rolling_mean_grouped_soil'][-1], Threshold_timestamp
 
 if __name__ == '__main__':
     sys.exit(main())  # next section explains the use of sys.exit
