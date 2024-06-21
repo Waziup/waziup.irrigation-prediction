@@ -6,6 +6,7 @@ import csv
 from datetime import datetime, timedelta
 from io import StringIO
 import json
+import pickle
 import threading
 import time
 from urllib.parse import urlparse, parse_qs
@@ -70,6 +71,9 @@ ThreadId = 0
 
 TrainingFinished = False
 CurrentlyTraining = False
+
+# Load variables of training from file, to debugactuation part
+Perform_training = False
 
 #---------------------#
 
@@ -415,8 +419,29 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
         start_time = datetime.now().replace(microsecond=0)
         print("Training started at:", start_time)
 
-        # Call create model function
-        currentSoilTension, threshold_timestamp = create_model.main()
+        file_path = pathlib.Path('saved_variables.pkl')
+
+        if (Perform_training):
+            # Call create model function
+            currentSoilTension, threshold_timestamp, predictions = create_model.main()
+
+            # Create object to save
+            variables_to_save = {
+                'currentSoilTension': currentSoilTension,
+                'threshold_timestamp': threshold_timestamp,
+                'predictions': predictions
+            }
+            # Save the variables to a file
+            with open(file_path, 'wb') as f:
+                pickle.dump(variables_to_save, f)
+        else:
+            # Load the saved variables from the file
+            with open(file_path, 'rb') as f:
+                loaded_variables = pickle.load(f)
+            currentSoilTension = loaded_variables['currentSoilTension']
+            threshold_timestamp = loaded_variables['threshold_timestamp']
+            predictions = loaded_variables['predictions']
+
 
         # TODO: reload page
         TrainingFinished = True
@@ -427,7 +452,7 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
         print("Traning finished at: ", end_time, "The duration was: ", duration)
 
         # Call routine to irrgate
-        actuation.main(currentSoilTension, threshold_timestamp)
+        actuation.main(currentSoilTension, threshold_timestamp, predictions)
 
         # Send thread to sleep
         time.sleep(time_interval)  # Wait for the specified time interval

@@ -1841,7 +1841,7 @@ def main() -> int:
     Predictions = add_volumetric_col_to_df(Predictions, "prediction_label")
 
     # Return last accumulated reading and threshold timestamp
-    return Data['rolling_mean_grouped_soil'][-1], Threshold_timestamp
+    return Data['rolling_mean_grouped_soil'][-1], Threshold_timestamp, Predictions
 
 if __name__ == '__main__':
     sys.exit(main())  # next section explains the use of sys.exit
