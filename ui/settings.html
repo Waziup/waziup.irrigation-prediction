@@ -266,6 +266,7 @@
       function setConfig() {
         selectedOptionsMoisture = evalSelected("sensor_list_moisture");
         selectedOptionsTemp = evalSelected("sensor_list_temp");
+        selectedOptionsFlow = evalSelected("actuator_list_flow");
 
         //console.log("SensorID: " + selectedOptions)
 
@@ -275,6 +276,9 @@
         );
         const queryParamsTemp = selectedOptionsTemp.join(
           "&selectedOptionsTemp="
+        );
+        const queryParamsFlow = selectedOptionsFlow.join(
+          "&selectedOptionsFlow="
         );
         const queryForms = parseForms();
         const queryRetention = parseSoilWaterRetention();
@@ -317,10 +321,10 @@
       // Display Snesor values for temp and moisture
       function displaySensorsAndElements(sensorList) {
         // Get the <select> element by its ID
-        const sensor_list_moisture = document.getElementById(
-          "sensor_list_moisture"
-        );
+        const sensor_list_moisture = document.getElementById("sensor_list_moisture");
         const sensor_list_temp = document.getElementById("sensor_list_temp");
+        const actuator_list_flow = document.getElementById("actuator_list_flow");
+
         showElements();
 
         // Loop through the sensor names and create <option> elements
@@ -328,6 +332,7 @@
           // Create separate <option> elements for each select element
           const optionElement_moisture = document.createElement("option");
           const optionElement_temp = document.createElement("option");
+          const optionElement_flow = document.createElement("option")
 
           // Set the value and text of the <option> elements
           optionElement_moisture.value =
@@ -339,9 +344,15 @@
           optionElement_temp.text =
             sensor.deviceName + " / " + sensor.sensorName;
 
+          optionElement_flow.value = 
+            sensor.deviceId + "/" + sensor.sensorId;
+          optionElement_flow.text =
+            sensor.deviceName + " / " + sensor.sensorName;
+
           // Append the <option> elements to the <select> elements
           sensor_list_moisture.appendChild(optionElement_moisture);
           sensor_list_temp.appendChild(optionElement_temp);
+          actuator_list_flow.appendChild(optionElement_flow);
         });
       }
 
@@ -443,15 +454,18 @@
           <div class="main-sensors">
             <div class="moisture">
               <label for="sensor_list_moisture"
-                >Choose soil moisture sensors</label
-              >
+                >Choose soil moisture sensors</label>
               <select id="sensor_list_moisture" multiple size="5"></select>
             </div>
             <div class="temperature">
               <label for="sensor_list_temp"
-                >Choose soil temperature sensors</label
-              >
+                >Choose soil temperature sensors</label>
               <select id="sensor_list_temp" multiple size="5"></select>
+            </div>
+            <div class="actuation">
+              <label for="actuator_list_flow"
+                >Choose soil water flow sensor</label>
+              <select id="actuator_list_flow" multiple size="5"></select>
             </div>
           </div>
           <div class="main-sensors">

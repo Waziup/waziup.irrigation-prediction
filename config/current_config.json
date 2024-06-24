@@ -5,30 +5,51 @@
     "DeviceAndSensorIdsTemp": [
         "657360e268f319085542e336/657360f468f319085542e33b"
     ],
+    "DeviceAndSensorIdsFlow": [],
     "Gps_info": {
         "lattitude": "51.023591",
         "longitude": "13.744087"
     },
-    "Slope": "-0.08",
-    "Threshold": 15.0,
+    "Slope": "-0.07",
+    "Threshold": 7.0,
     "Start_date": "2023-12-12T00:00:00.000Z",
     "Period": 0,
     "Soil_water_retention_curve": [
         {
-            "Soil tension": "15",
-            "VWC": " 0.5"
+            "Soil tension": "0",
+            "VWC": " 0.225"
         },
         {
-            "Soil tension": "25",
-            "VWC": " 0.4"
-        },
-        {
-            "Soil tension": "35",
-            "VWC": " 0.3"
-        },
-        {
-            "Soil tension": "45",
+            "Soil tension": "5",
             "VWC": " 0.2"
+        },
+        {
+            "Soil tension": "10",
+            "VWC": " 0.185"
+        },
+        {
+            "Soil tension": "20",
+            "VWC": " 0.15"
+        },
+        {
+            "Soil tension": "50",
+            "VWC": " 0.125"
+        },
+        {
+            "Soil tension": "100",
+            "VWC": " 0.1"
+        },
+        {
+            "Soil tension": "200",
+            "VWC": " 0.075"
+        },
+        {
+            "Soil tension": "500",
+            "VWC": " 0.05"
+        },
+        {
+            "Soil tension": "1000",
+            "VWC": " 0.025"
         }
     ]
 }

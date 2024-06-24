@@ -54,7 +54,8 @@ body {
 }
 
 .main-sensors .moisture,
-.main-sensors .temperature {
+.main-sensors .temperature,
+.main-sensors .actuation {
   border-radius: 4px;
   border: solid 1px var(--primary-color);
 }

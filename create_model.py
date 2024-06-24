@@ -65,6 +65,7 @@ Timezone = ''
 # Extracted variables from Current_config
 DeviceAndSensorIdsMoisture = []
 DeviceAndSensorIdsTemp = []
+DeviceAndSensorIdsFlow = []
 
 # Std sample rate set by arduino code of microcontroller
 StdSamplingRate = 10
@@ -128,9 +129,9 @@ LoadDataFromCSV = False
 
 
 def read_config():
-    global Current_config
     global DeviceAndSensorIdsMoisture
     global DeviceAndSensorIdsTemp
+    global DeviceAndSensorIdsFlow
     global LoadDataFromCSV
 
     # Specify the path to the JSON file you want to read
@@ -138,7 +139,7 @@ def read_config():
 
     # Read the JSON data from the file
     with open(json_file_path, 'r') as json_file:
-        Current_config = json.load(json_file)
+        config = json.load(json_file)
 
     try:
         with open(CSVFile, "r") as file:
@@ -146,6 +147,8 @@ def read_config():
             data = pd.read_csv(file, header=0)
             DeviceAndSensorIdsMoisture = []
             DeviceAndSensorIdsTemp = []
+            DeviceAndSensorIdsFlow = []
+            
             # create array with sensors strings
             for col in data.columns:
                 if col.startswith("tension"):
@@ -153,11 +156,15 @@ def read_config():
                 elif col.startswith("soil_temp"):
                     DeviceAndSensorIdsTemp.append(col)
             LoadDataFromCSV = True
+            DeviceAndSensorIdsFlow = config["DeviceAndSensorIdsFlow"]
     except FileNotFoundError:
-        DeviceAndSensorIdsMoisture = Current_config["DeviceAndSensorIdsMoisture"]
-        DeviceAndSensorIdsTemp = Current_config["DeviceAndSensorIdsTemp"]
+        DeviceAndSensorIdsMoisture = config["DeviceAndSensorIdsMoisture"]
+        DeviceAndSensorIdsTemp = config["DeviceAndSensorIdsTemp"]
+        DeviceAndSensorIdsFlow = config["DeviceAndSensorIdsFlow"]
     except Exception as e:
         print("An error occurred: No devices are set in settings, there is also no local CSV file.", e)
+
+    return config
 
 # not ready
 def get_token():
@@ -222,9 +229,10 @@ def load_data(path):
 def load_data_api(sensor_name, from_timestamp):#, token)
     global ApiUrl
     global Timezone
+    global Current_config
 
     # Load config to obtain GPS coordinates
-    read_config()
+    Current_config = read_config()
 
     # Token
     load_dotenv()
@@ -297,8 +305,6 @@ def check_gaps(data):
         return data.interpolate(method='linear')
     else:
         return data
-        
-
 
 # Impute missing data & apply rolling mean (imputation & cleaning)
 def fill_gaps(data):
@@ -642,6 +648,9 @@ def create_features(data):
     data['gradient'] = np.gradient(f)
     data['pump_state'] = int(0)
     data = add_pump_state(data)
+
+    # Add amount of irrigation TODO: include
+    #data['irrigation_amount'] = data[DeviceAndSensorIdsFlow]
 
     # also add hours since last irrigation => TODO: check later, still an error
     #data = hours_since_pump_was_turned_on(data)
@@ -1743,6 +1752,7 @@ def main() -> int:
     global Data
     global ApiUrl
     global Threshold_timestamp
+    global Current_config
 
     # Check version of pycaret, should be >= 3.0
     print("Check version of pycaret:", pycaret.__version__, "should be >= 3.0")
@@ -1751,7 +1761,7 @@ def main() -> int:
     ApiUrl = os.getenv("API_URL")
 
     # Read user set config and save to Current_config(global)
-    read_config()
+    Current_config = read_config()
 
     # Generate token if data is not present on GW
     get_token()

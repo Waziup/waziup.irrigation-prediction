@@ -1,14 +1,19 @@
 import sys
 from datetime import datetime, timedelta
 
+from dotenv import load_dotenv
 import pandas as pd
+import requests
+import urllib
 
 import create_model
+
 
 # Globals
 # Timespan of hours 
 TimeSpanOverThreshold = 12
 OverThresholdAllowed = 1.2
+Last_irrigation = ''
 
 # Find global max and min
 def get_max_min(df, target_col='prediction_label'):
@@ -36,7 +41,7 @@ def find_next_occurrences(df, column, threshold):
 
     # Filter the DataFrame to include only rows with indices greater than or equal to 'idx'
     filtered_df = df[df.index >= idx]
-    filtered_df = df[df.index <= idx + timedelta(hours=12)]
+    filtered_df = df[df.index <= idx + timedelta(hours=TimeSpanOverThreshold)]
 
     # Further filter the DataFrame to include only rows where the specified column's value is less than the 'threshold'
     filtered_lower = filtered_df[filtered_df[column] < threshold]
@@ -69,7 +74,74 @@ def find_next_occurrences(df, column, threshold):
     return next_lower_idx.tz_convert('UTC').tz_localize(None) if next_lower_idx is not None else None, next_higher_idx.tz_convert('UTC').tz_localize(None) if next_higher_idx is not None else None # for that I will go to timezone hell
 
 
+# # Load from wazigate API
+# def irrigate_amount(sensor_name, from_timestamp):
+#     # Example API call: 
+#     # curl -X POST "http://192.168.189.2/devices/6645c4d468f31971148f2ab1/actuators/6673fcb568f31971148ff5f7/value"
+#     # -H "accept: */*" -H "Content-Type: application/json" -d "7.2"
+#     global ApiUrl
+#     global Timezone
+#     global Last_irrigation
+
+#     # Load config to obtain setup
+#     config = create_model.Current_config
+
+#     # Token
+#     load_dotenv()
+#     ApiUrl = create_model.os.getenv('API_URL')
+    
+#     if ApiUrl.startswith('http://wazigate/'):
+#         print('There is no token needed, fetch data from local gateway.')
+#     elif Token != None:
+#         print('There is no token needed, already present.')
+#     # Get token, important for non localhost devices
+#     else:
+#         get_token()
+
+
+#     # Create URL for API call
+#     api_url = ApiUrl + "devices/" + sensor_name.split('/')[0] + "/sensors/" + sensor_name.split('/')[1] + "/values" + "?from=" + from_timestamp
+#     # Parse the URL
+#     parsed_url = urllib.parse.urlsplit(api_url)
+
+#     # Encode the query parameters
+#     encoded_query = urllib.parse.quote(parsed_url.query, safe='=&')
+
+#     # Reconstruct the URL with the encoded query
+#     encoded_url = urllib.parse.urlunsplit((parsed_url.scheme, 
+#                                             parsed_url.netloc, 
+#                                             parsed_url.path, 
+#                                             encoded_query, 
+#                                             parsed_url.fragment))
+    
+#     # Define headers for the GET request
+#     headers = {
+#         'Authorization': f'Bearer {Token}',
+#     }
+
+#     try:
+#         # Send a GET request to the API
+#         response = requests.get(encoded_url, headers=headers)
+
+#         # Check if the request was successful (status code 200)
+#         if response.status_code == 200:
+#             # The response content contains the data from the API
+#             response_ok = response.json()
+#         else:
+#             print("Request failed with status code:", response.status_code)
+#     except requests.exceptions.RequestException as e:
+#         # Handle request exceptions (e.g., connection errors)
+#         print("Request error:", e)
+#         return "", e #TODO: intruduce error handling!
+
+#     # Get timezone if no information avalable
+#     Last_irrigation = datetime.datetime.now()
+    
+#     return response_ok
+
 def irrigate():
+
+
     return 0
 
 

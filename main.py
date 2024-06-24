@@ -36,6 +36,7 @@ ConfigPath = 'config/current_config.json'
 # global list of device and sensor ids
 DeviceAndSensorIdsMoisture = []
 DeviceAndSensorIdsTemp = []
+DeviceAndSensorIdsFlow = []
 
 # GPS
 Gps_info = ""
@@ -155,6 +156,7 @@ usock.routerGET("/api/getApiUrl", getApiUrl)
 def setConfig(url, body):
     global DeviceAndSensorIdsMoisture
     global DeviceAndSensorIdsTemp
+    global DeviceAndSensorIdsFlow
     global Gps_info
     global Slope
     global Threshold
@@ -167,6 +169,7 @@ def setConfig(url, body):
     # Get choosen sensors
     DeviceAndSensorIdsMoisture = parsed_data.get('selectedOptionsMoisture', [])
     DeviceAndSensorIdsTemp = parsed_data.get('selectedOptionsTemp', [])
+    DeviceAndSensorIdsFlow = parsed_data.get('selectedOptionsFlow', [])
 
     # Get data from forms
     Gps_info = parsed_data.get('gps', [])[0]
@@ -191,6 +194,7 @@ def setConfig(url, body):
     data = {
         "DeviceAndSensorIdsMoisture": DeviceAndSensorIdsMoisture,
         "DeviceAndSensorIdsTemp": DeviceAndSensorIdsTemp,
+        "DeviceAndSensorIdsFlow": DeviceAndSensorIdsFlow,
         "Gps_info": {"lattitude": Gps_info.split(',')[0].lstrip(), "longitude": Gps_info.split(',')[1].lstrip()},
         "Slope": Slope,
         "Threshold": Threshold,
@@ -211,6 +215,7 @@ usock.routerPOST("/api/setConfig", setConfig)
 def getConfigFromFile():
     global DeviceAndSensorIdsMoisture
     global DeviceAndSensorIdsTemp
+    global DeviceAndSensorIdsFlow
     global Gps_info
     global Slope
     global Threshold
@@ -224,6 +229,7 @@ def getConfigFromFile():
     # Get choosen sensors
     DeviceAndSensorIdsMoisture = data.get('DeviceAndSensorIdsMoisture', [])
     DeviceAndSensorIdsTemp = data.get('DeviceAndSensorIdsTemp', [])
+    DeviceAndSensorIdsFlow = data.get('DeviceAndSensorIdsFlow', [])
 
     # Get data from forms
     Gps_info = data.get('Gps_info', [])
@@ -271,12 +277,15 @@ def extract_and_format(data, key, datatype):
 def getHistoricalChartData(url, body): 
     # Load data from local wazigate api -> each sensor individually
     data_moisture = []
-    data_temp = []    
+    data_temp = []
+    #data_flow = [] # later also show flow in vis
 
     for moisture in DeviceAndSensorIdsMoisture:
         data_moisture.append(create_model.load_data_api(moisture, Start_date))
     for temp in DeviceAndSensorIdsTemp:
         data_temp.append(create_model.load_data_api(temp, Start_date))
+    # for flow in DeviceAndSensorIdsFlow:
+    #     data_flow.append(create_model.load_data_api(flow, Start_date))
     
     # extract series from key value pairs
     f_data_time = extract_and_format(data_moisture, "time", "str")
