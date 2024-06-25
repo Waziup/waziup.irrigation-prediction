@@ -1,3 +1,5 @@
+import json
+import os
 import sys
 from datetime import datetime, timedelta
 
@@ -15,7 +17,7 @@ TimeSpanOverThreshold = 12
 OverThresholdAllowed = 1.2
 Last_irrigation = ''
 
-# Find global max and min
+# Find global max and min => not used any more
 def get_max_min(df, target_col='prediction_label'):
     # reset "new" index
     df = df.reset_index(inplace=False)
@@ -73,84 +75,100 @@ def find_next_occurrences(df, column, threshold):
 
     return next_lower_idx.tz_convert('UTC').tz_localize(None) if next_lower_idx is not None else None, next_higher_idx.tz_convert('UTC').tz_localize(None) if next_higher_idx is not None else None # for that I will go to timezone hell
 
+# Function to read existing data from the JSON file
+def read_data_from_file(filename):
+    if os.path.exists(filename):
+        with open(filename, 'r') as json_file:
+            return json.load(json_file)
+    else:
+        return {"irrigations": []}
 
-# # Load from wazigate API
-# def irrigate_amount(sensor_name, from_timestamp):
-#     # Example API call: 
-#     # curl -X POST "http://192.168.189.2/devices/6645c4d468f31971148f2ab1/actuators/6673fcb568f31971148ff5f7/value"
-#     # -H "accept: */*" -H "Content-Type: application/json" -d "7.2"
-#     global ApiUrl
-#     global Timezone
-#     global Last_irrigation
+# Function to save data to the JSON file
+def save_data_to_file(filename, data):
+    with open(filename, 'w') as json_file:
+        json.dump(data, json_file, indent=4)
 
-#     # Load config to obtain setup
-#     config = create_model.Current_config
+# Function to add a new record
+def add_record(data, timestamp, amount):
+    record = {
+        "timestamp": timestamp,
+        "amount": amount
+    }
+    data["irrigations"].append(record)
 
-#     # Token
-#     load_dotenv()
-#     ApiUrl = create_model.os.getenv('API_URL')
-    
-#     if ApiUrl.startswith('http://wazigate/'):
-#         print('There is no token needed, fetch data from local gateway.')
-#     elif Token != None:
-#         print('There is no token needed, already present.')
-#     # Get token, important for non localhost devices
-#     else:
-#         get_token()
+    return data
 
+def save_irrigation_time(amount):
+    # Load from file
+    filename = 'data/data.json'
+    data = read_data_from_file(filename)
 
-#     # Create URL for API call
-#     api_url = ApiUrl + "devices/" + sensor_name.split('/')[0] + "/sensors/" + sensor_name.split('/')[1] + "/values" + "?from=" + from_timestamp
-#     # Parse the URL
-#     parsed_url = urllib.parse.urlsplit(api_url)
+    # Add new records
+    data = add_record(data, datetime.now().isoformat(), amount)
 
-#     # Encode the query parameters
-#     encoded_query = urllib.parse.quote(parsed_url.query, safe='=&')
+    # Save updated data back to the JSON file
+    save_data_to_file(filename, data)
 
-#     # Reconstruct the URL with the encoded query
-#     encoded_url = urllib.parse.urlunsplit((parsed_url.scheme, 
-#                                             parsed_url.netloc, 
-#                                             parsed_url.path, 
-#                                             encoded_query, 
-#                                             parsed_url.fragment))
-    
-#     # Define headers for the GET request
-#     headers = {
-#         'Authorization': f'Bearer {Token}',
-#     }
-
-#     try:
-#         # Send a GET request to the API
-#         response = requests.get(encoded_url, headers=headers)
-
-#         # Check if the request was successful (status code 200)
-#         if response.status_code == 200:
-#             # The response content contains the data from the API
-#             response_ok = response.json()
-#         else:
-#             print("Request failed with status code:", response.status_code)
-#     except requests.exceptions.RequestException as e:
-#         # Handle request exceptions (e.g., connection errors)
-#         print("Request error:", e)
-#         return "", e #TODO: intruduce error handling!
-
-#     # Get timezone if no information avalable
-#     Last_irrigation = datetime.datetime.now()
-    
-#     return response_ok
-
-def irrigate():
-
+    print("Irrigation time has been saved to data/data.json")
 
     return 0
 
+# # Load from wazigate API
+def irrigate_amount(amount):
+    # Example API call: 
+    # curl -X POST "http://192.168.189.2/devices/6645c4d468f31971148f2ab1/actuators/6673fcb568f31971148ff5f7/value"
+    # -H "accept: */*" -H "Content-Type: application/json" -d "7.2"
+    global ApiUrl
+    global Timezone
+    global Last_irrigation
+
+    # Name of flow meter sensor to initiate irrigation
+    flow_meter_name = '6645c4d468f31971148f2ab1/667ad55e68f31971149016ce'#create_model.DeviceAndSensorIdsFlow[0]
+
+    # API URL
+    load_dotenv()
+    ApiUrl = create_model.os.getenv('API_URL')
+
+    # Create URL for API call
+    request_url = f"{ApiUrl}devices/{flow_meter_name.split('/')[0]}/actuators/{flow_meter_name.split('/')[1]}/value"
+    
+    # Define headers for the POST request
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {create_model.Token}'
+    }
+    
+    # Define the payload
+    payload = amount
+
+    try:
+        # Send a POST request to the API
+        response = requests.post(request_url, headers=headers, json=payload)
+
+        # Check if the request was successful (status code 200)
+        if response.status_code == 200:
+            # Save times on when there was an irrigation TODO: wait for confirmation from microcontroller, irrigation could be skipped!!
+            save_irrigation_time(amount)
+            response_ok = True
+        else:
+            print("Request failed with status code:", response.status_code)
+            print("Response content:")
+            print(response.text)
+            response_ok = None
+    except requests.exceptions.RequestException as e:
+        # Handle request exceptions (e.g., connection errors)
+        print("Request error:", e)
+        response_ok = None  # TODO: introduce error handling
+    
+    return response_ok
+
 
 # Mighty main fuction TODO:capsulate
-def main(currentSoilTension, threshold_timestamp, predictions) -> int:
+def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount) -> int:
     #####################################################################
     ## TODO: remove DEBUG vars                                          #
     # Get threshold from config                                         #
-    threshold = 15#create_model.Current_config['Threshold']             #
+    threshold = 5#create_model.Current_config['Threshold']             #
     # set timestamp for debug reasons                                   #
     future_time =  datetime.now() + timedelta(hours=5)                  #
     threshold_timestamp = future_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ") #
@@ -168,7 +186,7 @@ def main(currentSoilTension, threshold_timestamp, predictions) -> int:
         if currentSoilTension > threshold * OverThresholdAllowed:
             print(f"Threshold: {threshold} was exceeded by 20%, irrigate immediatly!")
             # Trigger irrigation
-            e = irrigate()
+            e = irrigate_amount(irrigation_amount)
             return e
         # Threshold was met but predictions will not meet threshold in forecast horizon
         elif not threshold_timestamp:
@@ -177,7 +195,7 @@ def main(currentSoilTension, threshold_timestamp, predictions) -> int:
             if next_higher_idx:
                 print(f"Threshold: {threshold} will be meet again in the in the next {TimeSpanOverThreshold} hours, irrigate now!")
                 # Trigger irrigation
-                e = irrigate()
+                e = irrigate_amount(irrigation_amount)
                 return e
             return 0
         elif threshold_timestamp:
@@ -186,7 +204,7 @@ def main(currentSoilTension, threshold_timestamp, predictions) -> int:
             if next_higher_idx:
                 print(f"Threshold: {threshold} will be meet again in the next {TimeSpanOverThreshold} hours, irrigate now!")
                 # Trigger irrigation
-                e = irrigate()
+                e = irrigate_amount(irrigation_amount)
                 return e
             else:
                 print(f"Threshold was not met yet.")

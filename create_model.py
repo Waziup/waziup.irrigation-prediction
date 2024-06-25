@@ -215,6 +215,7 @@ def get_token():
         except requests.exceptions.RequestException as e:
             # Handle request exceptions (e.g., connection errors)
             print("Request error:", e)
+            
             return "", e #TODO: intruduce error handling!
         
 

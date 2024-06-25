@@ -47,6 +47,9 @@ Slope = 0
 # Threshold to irrigate plants
 Threshold = 0
 
+# Threshold to irrigate plants
+Irrigation_amount = 0
+
 # Start date
 Start_date = ""
 
@@ -160,6 +163,7 @@ def setConfig(url, body):
     global Gps_info
     global Slope
     global Threshold
+    global Irrigation_amount
     global Start_date
     global Period
 
@@ -175,6 +179,7 @@ def setConfig(url, body):
     Gps_info = parsed_data.get('gps', [])[0]
     Slope = parsed_data.get('slope', [])[0]
     Threshold = float(parsed_data.get('thres', [])[0])
+    Irrigation_amount = parsed_data.get('amount', [])[0]
     Start_date = parsed_data.get('start', [])[0]
     Period = int(parsed_data.get('period', [])[0])
 
@@ -198,6 +203,7 @@ def setConfig(url, body):
         "Gps_info": {"lattitude": Gps_info.split(',')[0].lstrip(), "longitude": Gps_info.split(',')[1].lstrip()},
         "Slope": Slope,
         "Threshold": Threshold,
+        "Irrigation_amount": Irrigation_amount,
         "Start_date": Start_date,
         "Period": Period,
         "Soil_water_retention_curve": csv_data  # Use the parsed CSV data
@@ -218,6 +224,7 @@ def getConfigFromFile():
     global DeviceAndSensorIdsFlow
     global Gps_info
     global Slope
+    global Irrigation_amount
     global Threshold
     global Start_date
     global Period
@@ -234,7 +241,8 @@ def getConfigFromFile():
     # Get data from forms
     Gps_info = data.get('Gps_info', [])
     Slope = float(data.get('Slope', []))
-    Threshold = float(data.get('Threshold', []))
+    Threshold = data.get('Threshold', [])
+    Irrigation_amount = float(data.get('Irrigation_amount', []))
     Start_date = data.get('Start_date', [])
     Period = int(data.get('Period', []))
 
@@ -278,7 +286,7 @@ def getHistoricalChartData(url, body):
     # Load data from local wazigate api -> each sensor individually
     data_moisture = []
     data_temp = []
-    #data_flow = [] # later also show flow in vis
+    #data_flow = [] # TODO:later also show flow in vis
 
     for moisture in DeviceAndSensorIdsMoisture:
         data_moisture.append(create_model.load_data_api(moisture, Start_date))
@@ -461,7 +469,7 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
         print("Traning finished at: ", end_time, "The duration was: ", duration)
 
         # Call routine to irrgate
-        actuation.main(currentSoilTension, threshold_timestamp, predictions)
+        actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
 
         # Send thread to sleep
         time.sleep(time_interval)  # Wait for the specified time interval
