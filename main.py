@@ -76,8 +76,8 @@ ThreadId = 0
 TrainingFinished = False
 CurrentlyTraining = False
 
-# Load variables of training from file, to debugactuation part
-Perform_training = False
+# Load variables of training from file, to debug actuation part
+Perform_training = True
 
 #---------------------#
 

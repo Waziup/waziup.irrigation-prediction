@@ -586,6 +586,49 @@ def hours_since_pump_was_turned_on(df):
 
     return df
 
+# include the (on device saved) amount of irrigation given
+def include_irrigation_amount(df):
+    # add col and fill zero
+    #df['irrigation_amount'] = 0
+
+    # Load JSON data from file
+    with open('data/irrigations.json', 'r') as file:
+        irrigations_json = json.load(file)
+
+    print("Loaded JSON data:")
+    print(irrigations_json)
+
+    # Convert the 'irrigations' list to a pandas DataFrame
+    irrigations_df = pd.DataFrame(irrigations_json['irrigations'])
+
+    print("\nDataFrame from JSON:")
+    print(irrigations_df.head())  # Check the first few rows to ensure data is loaded correctly
+
+    # Convert timestamp to datetime
+    irrigations_df['timestamp'] = pd.to_datetime(irrigations_df['timestamp'])
+
+    # Set timestamp as index
+    irrigations_df.set_index('timestamp', inplace=True)
+
+    print("\nDataFrame after timestamp conversion and setting index:")
+    print(irrigations_df.head())  # Check again to ensure timestamps are converted correctly
+
+    # Resample the irrigations dataframe to hourly intervals, summing the amounts
+    irrigations_resampled = irrigations_df.resample('H').sum()
+
+    # Reindex the irrigations dataframe to match the main dataframe's index, filling missing values with zero
+    irrigations_reindexed = irrigations_resampled.reindex(df.index, fill_value=0)
+
+
+    print("\nReindexed DataFrame:")
+    print(irrigations_reindexed.head())  # Check reindexed DataFrame to see if it aligns with df's index
+
+    # Add the reindexed irrigation amounts to the main dataframe
+    df['irrigation_amount'] = irrigations_reindexed['amount']
+
+    return df
+
+
 # Augment the dataset creating new features
 def create_features(data):
     # Create average cols
@@ -652,6 +695,7 @@ def create_features(data):
 
     # Add amount of irrigation TODO: include
     #data['irrigation_amount'] = data[DeviceAndSensorIdsFlow]
+    data = include_irrigation_amount(data)
 
     # also add hours since last irrigation => TODO: check later, still an error
     #data = hours_since_pump_was_turned_on(data)
@@ -1194,6 +1238,7 @@ def create_future_values(data):
 
     # also include pump_state, set to zero as we want to assume the behavior without watering
     new_data = new_data.assign(pump_state=0)
+    new_data = new_data.assign(irrigation_amount=0)
 
     return new_data
 
@@ -1802,7 +1847,7 @@ def main() -> int:
     # Train best model on whole dataset (without skipping "test-set")
     # Classical regression
     best_model, best_exp = train_best(best_eval, Data)
-    # NN
+    # NN -> TODO: eval properly
     best_model_nn = train_best_nn(best_eval_nn, Data, scaler)
 
     

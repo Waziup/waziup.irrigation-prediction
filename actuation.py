@@ -2,11 +2,11 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta
+import pytz
 
 from dotenv import load_dotenv
 import pandas as pd
 import requests
-import urllib
 
 import create_model
 
@@ -98,18 +98,37 @@ def add_record(data, timestamp, amount):
 
     return data
 
+# Function to round to the nearest 10 minutes
+def round_to_nearest_10_minutes(dt):
+    # Truncate milliseconds and seconds
+    dt = dt.replace(microsecond=0, second=0)
+    
+    # Calculate the number of minutes to add to round to the nearest 10 minutes
+    add_minutes = 10 - (dt.minute % 10) if dt.minute % 10 >= 5 else -(dt.minute % 10)
+    dt += timedelta(minutes=add_minutes)
+    
+    return dt
+
 def save_irrigation_time(amount):
     # Load from file
-    filename = 'data/data.json'
+    filename = 'data/irrigations.json'
     data = read_data_from_file(filename)
 
+    # obtain timezone
+    timezone = pytz.timezone(create_model.Timezone)
+    # add to current timestamp without converting it
+    now = timezone.localize(datetime.now())
+
+    # Round to the nearest 10 minutes
+    rounded_tz = round_to_nearest_10_minutes(now)
+
     # Add new records
-    data = add_record(data, datetime.now().isoformat(), amount)
+    data = add_record(data, str(rounded_tz), amount)
 
     # Save updated data back to the JSON file
     save_data_to_file(filename, data)
 
-    print("Irrigation time has been saved to data/data.json")
+    print("Irrigation time has been saved to: ", filename)
 
     return 0
 
@@ -122,7 +141,7 @@ def irrigate_amount(amount):
     global Timezone
     global Last_irrigation
 
-    # Name of flow meter sensor to initiate irrigation
+    # Name of flow meter sensor to initiate irrigation, for debug it is fixed
     flow_meter_name = '6645c4d468f31971148f2ab1/667ad55e68f31971149016ce'#create_model.DeviceAndSensorIdsFlow[0]
 
     # API URL
@@ -152,8 +171,7 @@ def irrigate_amount(amount):
             response_ok = True
         else:
             print("Request failed with status code:", response.status_code)
-            print("Response content:")
-            print(response.text)
+            print("Response content:", response.text)
             response_ok = None
     except requests.exceptions.RequestException as e:
         # Handle request exceptions (e.g., connection errors)
