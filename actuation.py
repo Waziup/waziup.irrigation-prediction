@@ -109,6 +109,7 @@ def round_to_nearest_10_minutes(dt):
     
     return dt
 
+# to json file -> not needed because can just ask api, more consistant state
 def save_irrigation_time(amount):
     # Load from file
     filename = 'data/irrigations.json'

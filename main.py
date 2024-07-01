@@ -289,11 +289,11 @@ def getHistoricalChartData(url, body):
     #data_flow = [] # TODO:later also show flow in vis
 
     for moisture in DeviceAndSensorIdsMoisture:
-        data_moisture.append(create_model.load_data_api(moisture, Start_date))
+        data_moisture.append(create_model.load_data_api(moisture, "sensors", Start_date))
     for temp in DeviceAndSensorIdsTemp:
-        data_temp.append(create_model.load_data_api(temp, Start_date))
+        data_temp.append(create_model.load_data_api(temp, "sensors", Start_date))
     # for flow in DeviceAndSensorIdsFlow:
-    #     data_flow.append(create_model.load_data_api(flow, Start_date))
+    #     data_flow.append(create_model.load_data_api(flow, "actuators", Start_date))
     
     # extract series from key value pairs
     f_data_time = extract_and_format(data_moisture, "time", "str")

@@ -127,6 +127,9 @@ Threshold_timestamp = ""
 CSVFile = "binned_removed_new_for_app_ww.csv"
 LoadDataFromCSV = False
 
+# Load former irrigations from file "data/irrigations.json"
+Load_irrigations_from_file = False
+
 
 def read_config():
     global DeviceAndSensorIdsMoisture
@@ -162,7 +165,7 @@ def read_config():
         DeviceAndSensorIdsTemp = config["DeviceAndSensorIdsTemp"]
         DeviceAndSensorIdsFlow = config["DeviceAndSensorIdsFlow"]
     except Exception as e:
-        print("An error occurred: No devices are set in settings, there is also no local CSV file.", e)
+        print("An error occurred: No devices are set in settings, there is also no local config file.", e)
 
     return config
 
@@ -227,7 +230,7 @@ def load_data(path):
     return data
 
 # Load from wazigate API
-def load_data_api(sensor_name, from_timestamp):#, token)
+def load_data_api(sensor_name, type, from_timestamp):#, token)
     global ApiUrl
     global Timezone
     global Current_config
@@ -240,7 +243,7 @@ def load_data_api(sensor_name, from_timestamp):#, token)
     ApiUrl = os.getenv('API_URL')
 
     # Convert timestamp
-    if type(from_timestamp) != str:
+    if not isinstance(from_timestamp, str):
         from_timestamp = from_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
     # Get timezone if no information avalable
@@ -260,7 +263,7 @@ def load_data_api(sensor_name, from_timestamp):#, token)
 
 
     # Create URL for API call
-    api_url = ApiUrl + "devices/" + sensor_name.split('/')[0] + "/sensors/" + sensor_name.split('/')[1] + "/values" + "?from=" + from_timestamp
+    api_url = ApiUrl + "devices/" + sensor_name.split('/')[0] + "/" + type + "/" + sensor_name.split('/')[1] + "/values" + "?from=" + from_timestamp
     # Parse the URL
     parsed_url = urllib.parse.urlsplit(api_url)
 
@@ -588,43 +591,50 @@ def hours_since_pump_was_turned_on(df):
 
 # include the (on device saved) amount of irrigation given
 def include_irrigation_amount(df):
-    # add col and fill zero
-    #df['irrigation_amount'] = 0
+    if Load_irrigations_from_file:
+        # Load JSON data from file
+        with open('data/irrigations.json', 'r') as file:
+            irrigations_json = json.load(file)
 
-    # Load JSON data from file
-    with open('data/irrigations.json', 'r') as file:
-        irrigations_json = json.load(file)
+        print("Loaded JSON data:")
+        print(irrigations_json)
 
-    print("Loaded JSON data:")
-    print(irrigations_json)
+        # Convert the 'irrigations' list to a pandas DataFrame
+        irrigations_df = pd.DataFrame(irrigations_json['irrigations'])
 
-    # Convert the 'irrigations' list to a pandas DataFrame
-    irrigations_df = pd.DataFrame(irrigations_json['irrigations'])
+        print("\nDataFrame from JSON:")
+        print(irrigations_df.head())  # Check the first few rows to ensure data is loaded correctly
 
-    print("\nDataFrame from JSON:")
-    print(irrigations_df.head())  # Check the first few rows to ensure data is loaded correctly
+        # Convert timestamp to datetime
+        irrigations_df['timestamp'] = pd.to_datetime(irrigations_df['timestamp'])
 
-    # Convert timestamp to datetime
-    irrigations_df['timestamp'] = pd.to_datetime(irrigations_df['timestamp'])
+        # Set timestamp as index
+        irrigations_df.set_index('timestamp', inplace=True)
 
-    # Set timestamp as index
-    irrigations_df.set_index('timestamp', inplace=True)
+        print("\nDataFrame after timestamp conversion and setting index:")
+        print(irrigations_df.head())  # Check again to ensure timestamps are converted correctly
 
-    print("\nDataFrame after timestamp conversion and setting index:")
-    print(irrigations_df.head())  # Check again to ensure timestamps are converted correctly
+        # Resample the irrigations dataframe to hourly intervals, summing the amounts
+        irrigations_resampled = irrigations_df.resample('H').sum()
 
-    # Resample the irrigations dataframe to hourly intervals, summing the amounts
-    irrigations_resampled = irrigations_df.resample('H').sum()
+        # Reindex the irrigations dataframe to match the main dataframe's index, filling missing values with zero
+        irrigations_reindexed = irrigations_resampled.reindex(df.index, fill_value=0)
 
-    # Reindex the irrigations dataframe to match the main dataframe's index, filling missing values with zero
-    irrigations_reindexed = irrigations_resampled.reindex(df.index, fill_value=0)
+        print("\nReindexed DataFrame:")
+        print(irrigations_reindexed.head())  # Check reindexed DataFrame to see if it aligns with df's index
 
-
-    print("\nReindexed DataFrame:")
-    print(irrigations_reindexed.head())  # Check reindexed DataFrame to see if it aligns with df's index
-
-    # Add the reindexed irrigation amounts to the main dataframe
-    df['irrigation_amount'] = irrigations_reindexed['amount']
+        # Add the reindexed irrigation amounts to the main dataframe
+        df['irrigation_amount'] = irrigations_reindexed['amount']
+    else:
+        data_irrigation = load_data_api(DeviceAndSensorIdsFlow[0], "actuators", Current_config['Start_date'])
+        df_irrigation = pd.DataFrame(data_irrigation)
+        df_irrigation.rename(columns={'time': 'Timestamp'}, inplace=True)
+        df_irrigation['Timestamp'] = pd.to_datetime(df_irrigation['Timestamp'])
+        df_irrigation.rename(columns={'value': 'irrigation_amount'}, inplace=True)
+        df_irrigation.set_index('Timestamp', inplace=True)
+        df_irrigation.index = df_irrigation.index.round('H')        
+        df = pd.merge(df, df_irrigation, left_index=True, right_index=True, how='outer', suffixes=('_main', '_irrigation'))
+        df['irrigation_amount'] = df['irrigation_amount'].fillna(0)
 
     return df
 
@@ -954,9 +964,9 @@ def prepare_data():
     else:
         # Load data from API
         for moisture in DeviceAndSensorIdsMoisture:
-            data_moisture.append(load_data_api(moisture, start_date))
+            data_moisture.append(load_data_api(moisture, "sensors", start_date))
         for temp in DeviceAndSensorIdsTemp:
-            data_temp.append(load_data_api(temp, start_date))
+            data_temp.append(load_data_api(temp, "sensors", start_date))
     
         # Save JSON data to one dataframe for further processing
         # Create first dataframe with first moisture sensor -> dfs have to be of same length, same timestamps
@@ -1247,6 +1257,8 @@ def evaluate_against_testset(test, exp, best):
     print("This is the evaluation against the split testset")
     ground_truth = test['rolling_mean_grouped_soil']
     test_features = test.drop(['rolling_mean_grouped_soil'], axis=1)
+    to_be_dropped = To_be_dropped.remove('Timestamp')#Error
+    test_features = test_features.drop(to_be_dropped)
     predictions = []
     results_for_model = []
 
@@ -1663,6 +1675,7 @@ def evaluate_target_variable_nd(series1, series2, quantiles=[0.2, 0.4, 0.6, 0.8]
 
     return mse, rmse, mae, mpe, r2, smape_score, quantile_losses, avg_quantile_loss
 
+# TODO:wire this
 def compare_models_on_test(nn_models, ZZ, Z_cnn):
     best_r2 = -1000
     best_model_index  = -1
@@ -1754,10 +1767,22 @@ def tune_models(exp, best):
 
 # Generate prediction with best_model and impute generated future_values
 def generate_predictions(best, exp, features):
+    # Generate predictions
     predictions = exp.predict_model(best, data=features)
+
+    # Clip neg predictions to zero
     predictions.loc[predictions['prediction_label'] < 0, 'prediction_label'] = 0
 
     return predictions
+
+# def generate_predictions_nn(best_model_nn, features):
+#     # Generate predictions
+#     predictions = 
+    
+#     # Clip neg predictions to zero
+#     predictions.loc[predictions['prediction_label'] < 0, 'prediction_label'] = 0
+
+#     return predictions
 
 # Calculates the time when threshold will be meet, according to predictions
 def calc_threshold(Predictions):
@@ -1853,16 +1878,17 @@ def main() -> int:
     
     # Create future value set to feed new data to model
     future_features = create_future_values(Data)
+    # Compare dataframes cols to be sure that they match, otherwise drop
+    future_features = compare_train_predictions_cols(train, future_features)
     # NN
     Z, Z_scaled, Z_cnn = prepare_future_values(scaler, future_features, X_train.columns)
 
-    # Compare dataframes cols to be sure that they match, otherwise drop
-    future_features = compare_train_predictions_cols(train, future_features)
+
 
     # Before tuning
     #best_model_before_tuning = best_exp.compare_models()
     
-    # Tune hyperparameters of the 3 best models, see notebook TODO: better use try catch
+    # Tune hyperparameters of the 3 best models, see notebook TODO: better use try catch, add tuning for nn models
     tuned_best = tune_model(best_exp, best_model)
     
     # After tuning
@@ -1888,6 +1914,7 @@ def main() -> int:
     # Classical regression
     Predictions = generate_predictions(tuned_best, best_exp, future_features)
     # NN
+    #Predictions_nn = generate_predictions_nn(best_model_nn )
 
     
     # Calculate when threshold will be meet
