@@ -626,14 +626,27 @@ def include_irrigation_amount(df):
         # Add the reindexed irrigation amounts to the main dataframe
         df['irrigation_amount'] = irrigations_reindexed['amount']
     else:
+        # Load data and create the dataframe
         data_irrigation = load_data_api(DeviceAndSensorIdsFlow[0], "actuators", Current_config['Start_date'])
         df_irrigation = pd.DataFrame(data_irrigation)
         df_irrigation.rename(columns={'time': 'Timestamp'}, inplace=True)
         df_irrigation['Timestamp'] = pd.to_datetime(df_irrigation['Timestamp'])
         df_irrigation.rename(columns={'value': 'irrigation_amount'}, inplace=True)
+
+        # Convert irrigation_amount to numeric, forcing errors to NaN
+        df_irrigation['irrigation_amount'] = pd.to_numeric(df_irrigation['irrigation_amount'], errors='coerce')
+
+        # Round the timestamps to the nearest hour and aggregate the irrigation amounts
+        df_irrigation['Timestamp'] = df_irrigation['Timestamp'].dt.round('H')
+        df_irrigation = df_irrigation.groupby('Timestamp').agg({'irrigation_amount': 'sum'}).reset_index()
+
+        # Set the Timestamp as the index
         df_irrigation.set_index('Timestamp', inplace=True)
-        df_irrigation.index = df_irrigation.index.round('H')        
+
+        # Merge the dataframes
         df = pd.merge(df, df_irrigation, left_index=True, right_index=True, how='outer', suffixes=('_main', '_irrigation'))
+
+        # Fill missing irrigation_amount with 0
         df['irrigation_amount'] = df['irrigation_amount'].fillna(0)
 
     return df
@@ -996,15 +1009,10 @@ def prepare_data():
             d.set_index('Time', inplace=True)
             data = pd.merge(data, d, left_index=True, right_index=True, how='outer')
 
-    # Convert datatype of cols to float64 -> otherwise json parse will parse negative values as object
-    #data = data.apply(pd.to_numeric, errors='coerce')
-    #data = data.astype(float)
-    data = convert_cols(data)
-
-    # Rename index
+    # Rename index -> TODO: do not rename to Time and afterwards to Timestamp :)
     data.rename_axis('Timestamp', inplace=True)
 
-    # Convert index
+    # Convert index TODO: recheck Timestamps
     data.index = pd.to_datetime(data.index, utc=True)
     data.index = data.index.tz_convert(Timezone)
         
@@ -1024,6 +1032,11 @@ def prepare_data():
     # Drop the raw values -> better without raw values-> overfitting
     data.drop(columns = DeviceAndSensorIdsMoisture + DeviceAndSensorIdsTemp, errors='ignore', inplace=True)
     
+    # Convert datatype of cols to float64 -> otherwise json parse will parse negative values as object
+    #data = data.apply(pd.to_numeric, errors='coerce')
+    #data = data.astype(float)
+    data = convert_cols(data)
+
     # Normalization
     #data = normalize(data)
 
@@ -1252,13 +1265,17 @@ def create_future_values(data):
 
     return new_data
 
-# eval model against formerly split testset
+# eval model against formerly split testset -> TODO: test has duplicates because of irrigation added formerly
 def evaluate_against_testset(test, exp, best):
     print("This is the evaluation against the split testset")
     ground_truth = test['rolling_mean_grouped_soil']
+    #ground_truth.reset_index(drop=True, inplace=True)
     test_features = test.drop(['rolling_mean_grouped_soil'], axis=1)
-    to_be_dropped = To_be_dropped.remove('Timestamp')#Error
-    test_features = test_features.drop(to_be_dropped)
+    # Create a new list without 'Timestamp', .remove() is inplace and does not return
+    to_be_dropped = [item for item in To_be_dropped if item != 'Timestamp']
+    #test_features.reset_index(drop=True, inplace=True)
+    test_features = test_features.drop(to_be_dropped, axis=1)
+
     predictions = []
     results_for_model = []
 
@@ -1444,35 +1461,35 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Create an array to store all the models
     nn_models = []
 
-    # Create neural network
-    model_nn = create_nn_model((X_train.shape[1],), units_hidden1=32, units_hidden2=16)
-    # Train the model
-    history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_nn)
+    # # Create neural network
+    # model_nn = create_nn_model((X_train.shape[1],), units_hidden1=32, units_hidden2=16)
+    # # Train the model
+    # history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_nn)
 
-    # Create conv neural network
-    model_cnn = create_cnn_model((X_train_cnn.shape[1], 1), units_hidden1=64)
-    # Train the model
-    history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_cnn)
+    # # Create conv neural network
+    # model_cnn = create_cnn_model((X_train_cnn.shape[1], 1), units_hidden1=64)
+    # # Train the model
+    # history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_cnn)
 
-    # RNN architecture
-    # Create RNN model
-    model_rnn = create_rnn_model((X_train.shape[1], 1), 50)
-    # Train the model
-    history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_rnn)
+    # # RNN architecture
+    # # Create RNN model
+    # model_rnn = create_rnn_model((X_train.shape[1], 1), 50)
+    # # Train the model
+    # history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_rnn)
 
-    # RNN architecture
-    # Create RNN model
-    model_gru = create_gru_model((X_train.shape[1], 1), 50)
-    # Train the model
-    history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_gru)
+    # # RNN architecture
+    # # Create RNN model
+    # model_gru = create_gru_model((X_train.shape[1], 1), 50)
+    # # Train the model
+    # history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_gru)
 
     # LSTM architecture => TODO: error in eval
     # Create LSTM model

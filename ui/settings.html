@@ -388,7 +388,24 @@
               sensorList.push(sensorInfo);
             });
           }
+          if(device.actuators && Array.isArray(device.actuators)) {
+            // Loop through the actuators array of the device
+            device.actuators.forEach((actuator) => {
+              // Extract actuator information
+              const sensorInfo = {
+                deviceId: device.id,
+                deviceName: device.name,
+                sensorId: actuator.id,
+                sensorName: actuator.name,
+                sensorValue: actuator.value,
+              };
+
+              // Push the actuator information to the sensorList
+              sensorList.push(sensorInfo);
+            });
+          }
         });
+
         return sensorList;
       }
 
