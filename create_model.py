@@ -643,6 +643,9 @@ def include_irrigation_amount(df):
         # Set the Timestamp as the index
         df_irrigation.set_index('Timestamp', inplace=True)
 
+        # Timezone has to be set for df_irrigation
+        df_irrigation = df_irrigation.tz_convert(Timezone)
+
         # Merge the dataframes
         df = pd.merge(df, df_irrigation, left_index=True, right_index=True, how='outer', suffixes=('_main', '_irrigation'))
 
@@ -1734,6 +1737,26 @@ def compare_models_on_test(nn_models, ZZ, Z_cnn):
 
     return best_model_index
 
+def eval_approach(results, results_nn, metrics):
+    if metrics == 'mae':
+        best_result = float('inf')
+        for i in range(len(results)):
+            current = results[i]['results'][0]
+            if current < best_result:
+                index = i
+                best_result = current
+                use_pycaret = True
+        for i in range(len(results_nn)):
+            current = results[i]['results'][0]
+            if current < best_result:
+                index = i
+                best_result = current
+                use_pycaret = False
+    else:
+        print('Unknown metircs specified in eval_approach.')
+
+    return index, use_pycaret
+
 
 # Compare dataframes cols to be sure that they match, otherwise drop
 def compare_train_predictions_cols(train, future_features):
@@ -1792,14 +1815,27 @@ def generate_predictions(best, exp, features):
 
     return predictions
 
-# def generate_predictions_nn(best_model_nn, features):
-#     # Generate predictions
-#     predictions = 
+def generate_predictions_nn(best_model_nn, features, start, end):
+    # Generate predictions
+    predictions = best_model_nn.predict(features[..., np.newaxis])
     
-#     # Clip neg predictions to zero
-#     predictions.loc[predictions['prediction_label'] < 0, 'prediction_label'] = 0
+    # Clip neg predictions to zero
+    predictions = np.maximum(predictions, 0)
 
-#     return predictions
+    # Convert the numpy array to a pandas DataFrame and name the column
+    predictions = pd.DataFrame(predictions, columns=['prediction_label'])
+
+    # Add timestamps to the dataframe -> create a DatetimeIndex
+    date_range = pd.date_range(start=start, end=end, freq=str(Sample_rate)+'T')
+
+    # Ensure the length of date_range matches the DataFrame
+    if len(date_range) != len(predictions):
+        raise ValueError("Length of date_range does not match length of DataFrame")
+
+    # Replace the index with the new DatetimeIndex
+    predictions.index = date_range
+
+    return predictions
 
 # Calculates the time when threshold will be meet, according to predictions
 def calc_threshold(Predictions):
@@ -1886,11 +1922,19 @@ def main() -> int:
     # NN
     best_eval_nn, results_nn = evaluate_against_testset_nn(nn_models, X_test_scaled, y_test)
 
+    # Decide which approach is best
+    index, use_pycaret = eval_approach(results, results_nn, 'mae')
+
+    # TODO: Debug mode
+    use_pycaret = False
+
     # Train best model on whole dataset (without skipping "test-set")
-    # Classical regression
-    best_model, best_exp = train_best(best_eval, Data)
-    # NN -> TODO: eval properly
-    best_model_nn = train_best_nn(best_eval_nn, Data, scaler)
+    if use_pycaret:
+        # Classical regression
+        best_model, best_exp = train_best(best_eval, Data)
+    else:
+        # NN -> TODO: eval properly -> still error in r2 calc, fallback to mae
+        best_model_nn = train_best_nn(best_eval_nn, Data, scaler)
 
     
     # Create future value set to feed new data to model
@@ -1898,40 +1942,42 @@ def main() -> int:
     # Compare dataframes cols to be sure that they match, otherwise drop
     future_features = compare_train_predictions_cols(train, future_features)
     # NN
-    Z, Z_scaled, Z_cnn = prepare_future_values(scaler, future_features, X_train.columns)
+    if not use_pycaret:
+        Z, Z_scaled, Z_cnn = prepare_future_values(scaler, future_features, X_train.columns)
 
 
+    if use_pycaret:
+        # Before tuning
+        #best_model_before_tuning = best_exp.compare_models()
+        
+        # Tune hyperparameters of the 3 best models, see notebook TODO: better use try catch, add tuning for nn models
+        tuned_best = tune_model(best_exp, best_model)
+        
+        # After tuning
+        #best_model_after_tuning = best_exp.compare_models()
+        
+        # Manually compare metrics
+        #metrics_before_tuning = best_exp.get_metrics(model=best_model_before_tuning)
+        #metrics_after_tuning = best_exp.get_metrics(model=best_model_after_tuning)
 
-    # Before tuning
-    #best_model_before_tuning = best_exp.compare_models()
-    
-    # Tune hyperparameters of the 3 best models, see notebook TODO: better use try catch, add tuning for nn models
-    tuned_best = tune_model(best_exp, best_model)
-    
-    # After tuning
-    #best_model_after_tuning = best_exp.compare_models()
-    
-    # Manually compare metrics
-    #metrics_before_tuning = best_exp.get_metrics(model=best_model_before_tuning)
-    #metrics_after_tuning = best_exp.get_metrics(model=best_model_after_tuning)
+        # Compare relevant metrics
+        # compare_df = pd.DataFrame({
+        #     'Metric': metrics_before_tuning['Metric'],
+        #     'Before_Tuning': metrics_before_tuning['Value'],
+        #     'After_Tuning': metrics_after_tuning['Value']
+        # })
 
-    # Compare relevant metrics
-    # compare_df = pd.DataFrame({
-    #     'Metric': metrics_before_tuning['Metric'],
-    #     'Before_Tuning': metrics_before_tuning['Value'],
-    #     'After_Tuning': metrics_after_tuning['Value']
-    # })
-
-    # print(compare_df)
-    
-    # Ensemble, Stacking & ... not implemented yet, see notebook
+        # print(compare_df)
+        
+        # Ensemble, Stacking & ... not implemented yet, see notebook
 
 
-    # Create predictions to forecast values
-    # Classical regression
-    Predictions = generate_predictions(tuned_best, best_exp, future_features)
-    # NN
-    #Predictions_nn = generate_predictions_nn(best_model_nn )
+        # Create predictions to forecast values
+        # Classical regression
+        Predictions = generate_predictions(tuned_best, best_exp, future_features)
+    else:
+        # NN
+        Predictions = generate_predictions_nn(best_model_nn, Z_scaled, future_features.index[0], future_features.index[-1])
 
     
     # Calculate when threshold will be meet

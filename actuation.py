@@ -185,13 +185,13 @@ def irrigate_amount(amount):
 # Mighty main fuction TODO:capsulate
 def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount) -> int:
     #####################################################################
-    # ## TODO: remove DEBUG vars                                          #
-    # # Get threshold from config                                         #
-    # threshold = 5#create_model.Current_config['Threshold']              #
-    # # set timestamp for debug reasons                                   #
-    # future_time =  datetime.now() + timedelta(hours=5)                  #
-    # threshold_timestamp = future_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ") #
-    # ## TODO: remove DEBUG vars                                          #
+    ## TODO: remove DEBUG vars                                          #
+    # Get threshold from config                                         #
+    threshold = create_model.Current_config['Threshold'] #5             #
+    # set timestamp for debug reasons                                   #
+    future_time =  datetime.now() + timedelta(hours=5)                  #
+    threshold_timestamp = future_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ") #
+    ## TODO: remove DEBUG vars                                          #
     #####################################################################
     # time_span is set to 12h
     now = datetime.now().replace(microsecond=0)
