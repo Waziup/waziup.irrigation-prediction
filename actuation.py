@@ -39,7 +39,7 @@ def get_max_min(df, target_col='prediction_label'):
 def find_next_occurrences(df, column, threshold):
     # Start @current time
     # timezone = create_model.get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"])
-    idx = pd.Timestamp(datetime.now().replace(microsecond=0)).tz_localize('Europe/Berlin') #TODO: timezone is missing here, replace with timezone, uncomment above
+    idx = pd.Timestamp(datetime.now().replace(microsecond=0)).tz_localize(create_model.Timezone) #TODO: timezone is missing here, replace with timezone, uncomment above
 
     # Filter the DataFrame to include only rows with indices greater than or equal to 'idx'
     filtered_df = df[df.index >= idx]
@@ -142,8 +142,8 @@ def irrigate_amount(amount):
     global Timezone
     global Last_irrigation
 
-    # Name of flow meter sensor to initiate irrigation, for debug it is fixed
-    flow_meter_name = create_model.DeviceAndSensorIdsFlow[0]#'6645c4d468f31971148f2ab1/667ad55e68f31971149016ce'
+    # Name of flow meter sensor to initiate irrigation
+    flow_meter_name = create_model.DeviceAndSensorIdsFlow[0]
 
     # API URL
     load_dotenv()
@@ -184,18 +184,18 @@ def irrigate_amount(amount):
 
 # Mighty main fuction TODO:capsulate
 def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount) -> int:
+    global TimeSpanOverThreshold
     #####################################################################
     ## TODO: remove DEBUG vars                                          #
     # Get threshold from config                                         #
-    threshold = create_model.Current_config['Threshold'] #5             #
-    # set timestamp for debug reasons                                   #
-    future_time =  datetime.now() + timedelta(hours=5)                  #
+    threshold = create_model.Current_config['Threshold']           #
+    # set timestamp for debug reasons
+    TimeSpanOverThreshold =  create_model.Current_config['Look_ahead_time']                                  #
+    future_time =  datetime.now() + timedelta(hours=TimeSpanOverThreshold)                  #
     threshold_timestamp = future_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ") #
     ## TODO: remove DEBUG vars                                          #
     #####################################################################
-    # time_span is set to 12h
     now = datetime.now().replace(microsecond=0)
-    then = now + timedelta(hours=TimeSpanOverThreshold)
 
     # "Weak" irrigation strategy
     # If threshold was met

@@ -1,7 +1,10 @@
 # .dockerignore
 *.log
 *.pkl
+*.h5
 *.md
 *.txt
+*.csv
 config/current-config.json
 /catboost_info
+/.vscode

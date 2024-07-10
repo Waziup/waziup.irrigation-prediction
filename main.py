@@ -47,8 +47,11 @@ Slope = 0
 # Threshold to irrigate plants
 Threshold = 0
 
-# Threshold to irrigate plants
+# Amount in liters to irrigate plants
 Irrigation_amount = 0
+
+# Time to look ahead in forecast how long soil tension threshold can be exceeded in hours
+Look_ahead_time = 0
 
 # Start date
 Start_date = ""
@@ -164,6 +167,7 @@ def setConfig(url, body):
     global Slope
     global Threshold
     global Irrigation_amount
+    global Look_ahead_time
     global Start_date
     global Period
 
@@ -180,6 +184,7 @@ def setConfig(url, body):
     Slope = parsed_data.get('slope', [])[0]
     Threshold = float(parsed_data.get('thres', [])[0])
     Irrigation_amount = parsed_data.get('amount', [])[0]
+    Look_ahead_time = parsed_data.get('lookahead', [])[0]
     Start_date = parsed_data.get('start', [])[0]
     Period = int(parsed_data.get('period', [])[0])
 
@@ -204,6 +209,7 @@ def setConfig(url, body):
         "Slope": Slope,
         "Threshold": Threshold,
         "Irrigation_amount": Irrigation_amount,
+        "Look_ahead_time": Look_ahead_time,
         "Start_date": Start_date,
         "Period": Period,
         "Soil_water_retention_curve": csv_data  # Use the parsed CSV data
@@ -225,6 +231,7 @@ def getConfigFromFile():
     global Gps_info
     global Slope
     global Irrigation_amount
+    global Look_ahead_time
     global Threshold
     global Start_date
     global Period
@@ -243,6 +250,7 @@ def getConfigFromFile():
     Slope = float(data.get('Slope', []))
     Threshold = data.get('Threshold', [])
     Irrigation_amount = float(data.get('Irrigation_amount', []))
+    Look_ahead_time = float(data.get('Look_ahead_time', []))
     Start_date = data.get('Start_date', [])
     Period = int(data.get('Period', []))
 
@@ -430,7 +438,7 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
     global CurrentlyTraining
 
     # Set the time interval in seconds (e.g., 60 seconds for 1 minute)
-    time_interval = 43200 #12h
+    time_interval = Look_ahead_time*60*60/1.8 # From config train 
 
     while True:
         start_time = datetime.now().replace(microsecond=0)

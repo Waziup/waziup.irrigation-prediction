@@ -244,6 +244,9 @@
         var irrigation_amount = document.getElementById(
           "irrigation_amount_form"
         ).value;
+        var look_ahead_time = document.getElementById(
+          "look_ahead_time_form"
+        ).value;
         var starting_date = document.getElementById(
           "starting_timestamp_form"
         ).value;
@@ -263,6 +266,8 @@
           encodeURIComponent(tension_threshold) +
           "&amount=" +
           encodeURIComponent(irrigation_amount) +
+          "&lookahead=" + 
+          encodeURIComponent(look_ahead_time) +
           "&start=" +
           encodeURIComponent(isoTimestamp) +
           "&period=" +
@@ -459,8 +464,8 @@
         $("#sensor_list")
           .html('<img src="./loading.gif" /> Loading...')
           .fadeIn();
-        //loadStuff();
-        loadStuff_remote() 
+        loadStuff();
+        //loadStuff_remote() // Debug
       });
     </script>
   </head>
@@ -530,6 +535,17 @@
                 type="number"
                 name="irrigation_amount"
                 value="10"
+              />
+            </div>
+            <div>
+              <label for="look_ahead_time"
+                >Time to look ahead in forecast how long soil tension threshold can be exceeded in hours.</label
+              >
+              <input
+                id="look_ahead_time_form"
+                type="number"
+                name="look_ahead_time"
+                value="6"
               />
             </div>
             <div>

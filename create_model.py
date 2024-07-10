@@ -1140,8 +1140,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        #exclude=['lar']
-        include=['xgboost', 'llar'] #debug
+        exclude=['lar']
+        #include=['xgboost', 'llar'] #debug
     )
 
     return re_exp, best_re
@@ -1464,35 +1464,35 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Create an array to store all the models
     nn_models = []
 
-    # # Create neural network
-    # model_nn = create_nn_model((X_train.shape[1],), units_hidden1=32, units_hidden2=16)
-    # # Train the model
-    # history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_nn)
+    # Create neural network
+    model_nn = create_nn_model((X_train.shape[1],), units_hidden1=32, units_hidden2=16)
+    # Train the model
+    history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_nn)
 
-    # # Create conv neural network
-    # model_cnn = create_cnn_model((X_train_cnn.shape[1], 1), units_hidden1=64)
-    # # Train the model
-    # history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_cnn)
+    # Create conv neural network
+    model_cnn = create_cnn_model((X_train_cnn.shape[1], 1), units_hidden1=64)
+    # Train the model
+    history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_cnn)
 
-    # # RNN architecture
-    # # Create RNN model
-    # model_rnn = create_rnn_model((X_train.shape[1], 1), 50)
-    # # Train the model
-    # history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_rnn)
+    # RNN architecture
+    # Create RNN model
+    model_rnn = create_rnn_model((X_train.shape[1], 1), 50)
+    # Train the model
+    history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_rnn)
 
-    # # RNN architecture
-    # # Create RNN model
-    # model_gru = create_gru_model((X_train.shape[1], 1), 50)
-    # # Train the model
-    # history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_gru)
+    # RNN architecture
+    # Create RNN model
+    model_gru = create_gru_model((X_train.shape[1], 1), 50)
+    # Train the model
+    history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_gru)
 
     # LSTM architecture => TODO: error in eval
     # Create LSTM model
@@ -1926,7 +1926,7 @@ def main() -> int:
     index, use_pycaret = eval_approach(results, results_nn, 'mae')
 
     # TODO: Debug mode
-    use_pycaret = False
+    #use_pycaret = False
 
     # Train best model on whole dataset (without skipping "test-set")
     if use_pycaret:
@@ -1979,6 +1979,8 @@ def main() -> int:
         # NN
         Predictions = generate_predictions_nn(best_model_nn, Z_scaled, future_features.index[0], future_features.index[-1])
 
+    # Cut passed time from predictions
+    Predictions = Predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]    
     
     # Calculate when threshold will be meet
     Threshold_timestamp = calc_threshold(Predictions)
