@@ -180,6 +180,53 @@ textarea {
   font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
 }
 
+/*For the overview div*/
+.quick-view-container {
+  display: flex;
+  justify-content: space-between; /* Adjust space between containers */
+  gap: 20px; /* Optional: space between the two containers */
+}
+
+.sensor-container, .irrigation-container {
+  background-color: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 20px;
+  width: 45%; /* Adjust the width as needed */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  font-family: 'Arial', sans-serif;
+}
+
+.sensor-heading, .irrigation-heading {
+  font-size: 20px;
+  color: #333;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.sensor-value, .irrigation-value {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding: 8px;
+  border-bottom: 1px solid #ddd;
+}
+
+.sensor-value:last-child, .irrigation-value:last-child {
+  border-bottom: none;
+}
+
+.description {
+  font-size: 16px;
+  color: #555;
+}
+
+.value {
+  font-size: 16px;
+  font-weight: bold;
+  color: #007bff;
+}
+
 /* Style the container of the chart */
 #chart {
   width: 70%; /* Set the chart width */

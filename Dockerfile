@@ -24,10 +24,11 @@ RUN  pip install requests \
      timezonefinder \
      python-dotenv \
      xgboost \
+     catboost \
      tensorflow \
      scikeras \
      scikit-learn \
-     joblib
+     joblib==1.3
 
 COPY . /root/src/
 

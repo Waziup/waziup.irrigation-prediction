@@ -230,7 +230,7 @@ def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount
                 return 0
     # Threshold was not met, so do not irrigate
     else:
-        print(f"Threshold: {threshold} is not reached, do not irrigate.")
+        print(f"Threshold: {threshold} is not reached, cuurent soil tension is: {currentSoilTension}, do not irrigate.")
         return 0
 
 

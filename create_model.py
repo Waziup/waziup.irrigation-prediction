@@ -1141,7 +1141,7 @@ def create_and_compare_model_reg(train):
         sort = 'R2',
         verbose = 1,
         exclude=['lar']
-        #include=['xgboost', 'llar'] #debug
+        #include=['xgboost', 'llar', 'catboost'] #debug
     )
 
     return re_exp, best_re
@@ -1185,7 +1185,10 @@ def evaluate_target_variable(series1, series2, model_name):
     diff = np.abs(values1.values - values2.values)
     mae = np.mean(diff)
     rmse = np.sqrt(np.mean(diff ** 2))
-    mpe = np.mean(diff / values1.values) * 100
+    # MPE (Mean Percentage Error) - Avoid division by zero
+    non_zero_mask = values1.values != 0
+    mpe = np.mean(diff[non_zero_mask] / values1.values[non_zero_mask]) * 100 if np.any(non_zero_mask) else np.nan
+
 
     # R2
     mean_series1 = np.mean(series1)
@@ -1583,12 +1586,12 @@ def evaluate_against_testset_nn(nn_models, X_test_scaled, y_test):
     #         print(f"Evaluate is not available for the model. {e}")
         # Make predictions
         try:
-            predictions.append(nn_models[i].predict(X_test_scaled[..., np.newaxis]))
+            predictions.append(nn_models[i].predict(X_test_scaled[..., np.newaxis]))                
         except Exception as e:
             print(f"Predict is not available for the model.")
 
         # evaluate predictions against testset 
-        results_for_model.append(evaluate_target_variable(y_test, pd.Series(predictions[i].flatten()), ""))
+        results_for_model.append(evaluate_target_variable(y_test.reset_index(drop=True), pd.Series(predictions[i].flatten()), ""))
     
     # Sort models in new dataframe according to performance on testset
     best_eval = evaluate_results_and_choose_best(results_for_model, nn_models)
@@ -1792,8 +1795,13 @@ def analyze_performance_old(exp, best):
         #before.save("Plot_after_testset_"+str(i)+".png", format='png')
 
 # Tune hyperparameters of one models
-def tune_model(exp, best):        
-    return exp.tune_model(best, choose_better = True)
+def tune_model(exp, best):
+    try:        
+        print(f"Tuning grid for {best}: {exp.get_tuning_grid(best)}")
+        return exp.tune_model(best, choose_better = True)
+    except Exception as e:
+        print(f"There was an error tuning the model. {e}")
+        return best
 
 # Tune hyperparameters of several models
 def tune_models(exp, best):

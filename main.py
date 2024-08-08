@@ -184,7 +184,7 @@ def setConfig(url, body):
     Slope = parsed_data.get('slope', [])[0]
     Threshold = float(parsed_data.get('thres', [])[0])
     Irrigation_amount = parsed_data.get('amount', [])[0]
-    Look_ahead_time = parsed_data.get('lookahead', [])[0]
+    Look_ahead_time = int(parsed_data.get('lookahead', [])[0])
     Start_date = parsed_data.get('start', [])[0]
     Period = int(parsed_data.get('period', [])[0])
 

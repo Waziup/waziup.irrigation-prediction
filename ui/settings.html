@@ -254,7 +254,7 @@
           "maximum_time_period_form"
         ).value;
 
-        // Convert the selected date to an ISO timestamp
+        // Convert the selected date to an ISO timestamp => TODO: check timestamp
         var isoTimestamp = new Date(starting_date).toISOString();
 
         const Params =
@@ -464,8 +464,8 @@
         $("#sensor_list")
           .html('<img src="./loading.gif" /> Loading...')
           .fadeIn();
-        loadStuff();
-        //loadStuff_remote() // Debug
+        //loadStuff();
+        loadStuff_remote() // Debug
       });
     </script>
   </head>

@@ -12,13 +12,13 @@
       rel="stylesheet"
     />
     <script type="text/javascript" src="libs/jquery-3.2.1.min.js"></script>
-    <script type="text/javascript" src="libs/apexcharts.min.js"></script>
     <!-- Include the locally hosted ApexCharts -->
+    <script type="text/javascript" src="libs/apexcharts.min.js"></script>
     <script type="text/javascript">
       var waitForTraining = true;
       var timestamp = "";
       // Apex charts is rather slow in handeling many datapoints => needs to be restricted
-      var MaxValuesToBeDisplayed = 2500
+      var MaxValuesToBeDisplayed = 1500
       
 
       // Nav
@@ -427,6 +427,47 @@
         This application predicts soil moisture values for sensors attached to
         the WaziGate.
       </p>
+      <div class="quick-view-container">
+        <div class="sensor-container">
+            <h3 class="sensor-heading">Sensor Readings</h3>
+            <div class="sensor-value">
+                <span class="description">Temperature:</span>
+                <span class="value">22.5°C</span>
+            </div>
+            <div class="sensor-value">
+                <span class="description">Humidity:</span>
+                <span class="value">60%</span>
+            </div>
+            <div class="sensor-value">
+                <span class="description">Pressure:</span>
+                <span class="value">1013 hPa</span>
+            </div>
+        </div>
+        
+        <div class="irrigation-container">
+            <h3 class="irrigation-heading">Irrigation Status</h3>
+            <div class="irrigation-value">
+                <span class="description">Pump Status:</span>
+                <span class="value">Active</span>
+            </div>
+            <div class="irrigation-value">
+              <label for="look_ahead_time"
+                >Irrigation amount in liters</label
+              >
+              <input
+                id="look_ahead_time_form"
+                type="number"
+                name="look_ahead_time"
+                value="6"
+              />
+            </div>
+            <div class="action-buttons">
+              <button class="settings" type="button" onclick="goToSettings()">
+                Settings
+              </button>
+            </div>
+        </div>
+      </div>
       <div class="chart-container">
         <p>Raw captured sensor values:</p>
         <div id="chart_hist"></div>
