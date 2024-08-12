@@ -221,6 +221,57 @@ def get_token():
             
             return "", e #TODO: intruduce error handling!
         
+def load_latest_data_api(sensor_name, type):#, token)
+    global ApiUrl
+
+    # Token
+    load_dotenv()
+    ApiUrl = os.getenv('API_URL')
+
+    if ApiUrl.startswith('http://wazigate/'):
+        print('There is no token needed, fetch data from local gateway.')
+    elif Token != None:
+        print('There is no token needed, already present.')
+    # Get token, important for non localhost devices
+    else:
+        get_token()
+
+    # Create URL for API call e.g.:curl -X GET "http://192.168.189.15/devices/669780aa68f319066a12444a/sensors/6697875968f319066a12444d/value" -H "accept: application/json"
+    api_url = ApiUrl + "devices/" + sensor_name.split('/')[0] + "/" + type + "/" + sensor_name.split('/')[1] + "/value"
+    # Parse the URL
+    parsed_url = urllib.parse.urlsplit(api_url)
+
+    # Encode the query parameters
+    encoded_query = urllib.parse.quote(parsed_url.query, safe='=&')
+
+    # Reconstruct the URL with the encoded query
+    encoded_url = urllib.parse.urlunsplit((parsed_url.scheme, 
+                                            parsed_url.netloc, 
+                                            parsed_url.path, 
+                                            encoded_query, 
+                                            parsed_url.fragment))
+    
+    # Define headers for the GET request
+    headers = {
+        'Authorization': f'Bearer {Token}',
+    }
+
+    try:
+        # Send a GET request to the API
+        response = requests.get(encoded_url, headers=headers)
+
+        # Check if the request was successful (status code 200)
+        if response.status_code == 200:
+            # The response content contains the data from the API
+            response_ok = response.json()
+        else:
+            print("Request failed with status code:", response.status_code)
+    except requests.exceptions.RequestException as e:
+        # Handle request exceptions (e.g., connection errors)
+        print("Request error:", e)
+        return "", e #TODO: intruduce error handling!
+    
+    return response_ok
 
 # Load from CSV file
 def load_data(path):
@@ -1750,7 +1801,7 @@ def eval_approach(results, results_nn, metrics):
                 best_result = current
                 use_pycaret = True
         for i in range(len(results_nn)):
-            current = results[i]['results'][0]
+            current = results_nn[i]['results'][0]
             if current < best_result:
                 index = i
                 best_result = current

@@ -289,6 +289,43 @@ def extract_and_format(data, key, datatype):
     
     return values
 
+def irrigateManually(url, body):
+    # Parse the query parameters from the URL
+    query_params = parse_qs(urlparse(url).query)
+
+    # Extract the 'amount' parameter (assuming it's passed as a query parameter)
+    amount = int(query_params.get('amount', [0])[0])
+
+    # Call the actuation function with the extracted amount
+    response = actuation.irrigate_amount(amount)
+
+    return 200, bytes(json.dumps({"status": "success", "amount": amount, "response": response}), "utf8"), []
+    
+usock.routerGET("/api/irrigateManually", irrigateManually)
+
+def getValuesForDashboard(url, body):
+    data_moisture = []
+    data_temp = []
+
+    for moisture in DeviceAndSensorIdsMoisture:
+        data_moisture.append(create_model.load_latest_data_api(moisture, "sensors"))
+    for temp in DeviceAndSensorIdsTemp:
+        data_temp.append(create_model.load_latest_data_api(temp, "sensors"))
+
+    # Calculate the moisture average
+    moisture_average = sum(data_moisture) / len(data_moisture)
+    # Calculate the temp average
+    temp_average = sum(data_temp) / len(data_temp)
+
+    dashboard_data = {
+        "temp_average": temp_average,
+        "moisture_average": moisture_average
+    }
+    
+    return 200, bytes(json.dumps(dashboard_data), "utf8"), []
+
+usock.routerGET("/api/getValuesForDashboard", getValuesForDashboard)
+
 
 def getHistoricalChartData(url, body): 
     # Load data from local wazigate api -> each sensor individually

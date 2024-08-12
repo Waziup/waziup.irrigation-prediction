@@ -112,6 +112,19 @@
       }
 
       // Get data from to display inside chart from backend
+      function fetchCurrentValues() {
+        fetch("../api/getValuesForDashboard")
+          .then((response) => response.json())
+          .then((dashboardData) => {
+            // set data in html
+            document.getElementById('temp-value').textContent = String(dashboardData.temp_average) + ' °C';
+            document.getElementById('tension-value').textContent = String(dashboardData.moisture_average) + ' cb';
+          })
+          .catch((error) => console.error("Error fetching data:", error));
+      }
+
+
+      // Get data from to display inside chart from backend
       function fetchHistoricalChartData() {
         fetch("../api/getHistoricalChartData")
           .then((response) => response.json())
@@ -341,6 +354,49 @@
           });
       }
 
+      function canBeParsedToInt(str) {
+        let parsed = parseInt(str, 10);
+        return !isNaN(parsed);
+    }
+
+      // manually irrigate an amount
+      function irrigateManually() {
+        let amount;
+        // Get the input element
+        const inputElement = document.getElementById("irrigation_value_form");
+
+        if(canBeParsedToInt(inputElement.value)) {
+          amount = parseInt(inputElement.value, 10);
+
+          // Send the amount via a fetch request
+          fetch(`../api/irrigateManually?amount=${amount}`)
+            .then((response) => response.text())
+            .then((data) => {
+              dataObject = JSON.parse(data);
+              if (dataObject.status == "success") {
+                alert(
+                  "Manual Irrigation was scheduled, will be performed within the next uplink cycle. Do not press this button again until irrigation is completed."
+                );
+              } else {
+                alert("Cannot schedule irrigation, see console for more info! Error:", data);
+              }
+              console.log(data);
+          })
+          .catch((error) => {
+            console.error('Error:', error);
+            alert("An error occurred during the request. Please try again.");
+          });
+          
+        }
+        else {
+          alert(
+            "First type a valid amount in liters to be irrigated!"
+          );
+        }
+
+      }
+
+
       // start training, encapsulated in create_model.py
       function startTraining() {
         fetch(`../api/startTraining`)
@@ -388,6 +444,7 @@
                 // Config is present
                 console.log("Config is already present...");
                 fetchHistoricalChartData();
+                fetchCurrentValues();
                 fetchDatasetChartData();
                 fetchPredictionChartData();
                 fetchThreshold();
@@ -432,16 +489,16 @@
             <h3 class="sensor-heading">Sensor Readings</h3>
             <div class="sensor-value">
                 <span class="description">Temperature:</span>
-                <span class="value">22.5°C</span>
+                <span id="temp-value">-- °C</span>
             </div>
             <div class="sensor-value">
-                <span class="description">Humidity:</span>
-                <span class="value">60%</span>
+                <span class="description">Soil tension:</span>
+                <span id="tension-value">-- cb</span>
             </div>
             <div class="sensor-value">
-                <span class="description">Pressure:</span>
-                <span class="value">1013 hPa</span>
-            </div>
+              <span class="description">Soil humidity:</span>
+              <span id="humidity-value">-- %</span>
+          </div>
         </div>
         
         <div class="irrigation-container">
@@ -451,19 +508,19 @@
                 <span class="value">Active</span>
             </div>
             <div class="irrigation-value">
-              <label for="look_ahead_time"
+              <label for="irrigation-value-input"
                 >Irrigation amount in liters</label
               >
               <input
-                id="look_ahead_time_form"
+                id="irrigation_value_form"
                 type="number"
-                name="look_ahead_time"
-                value="6"
+                name="irrigation_value"
+                value="10"
               />
             </div>
             <div class="action-buttons">
-              <button class="settings" type="button" onclick="goToSettings()">
-                Settings
+              <button class="settings" type="button" onclick="irrigateManually()">
+                Schedule a Irrigation
               </button>
             </div>
         </div>
