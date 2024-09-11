@@ -13,10 +13,10 @@
         "longitude": "13.744087"
     },
     "Slope": "-0.07",
-    "Threshold": 17.0,
+    "Threshold": 7.0,
     "Irrigation_amount": "10",
     "Look_ahead_time": 6,
-    "Start_date": "2023-12-11T00:00:00.000Z",
+    "Start_date": "2024-05-11T00:00:00.000Z",
     "Period": 0,
     "Soil_water_retention_curve": [
         {

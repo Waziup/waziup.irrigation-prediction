@@ -88,9 +88,35 @@
               return true;
             } else {
               // TODO: do not display chart or do display without values
-              // alert(
-              //   "Please press the settings button and set up the needed Parameters"
-              // );
+              alert(
+                "Please press the 'Settings' button and set up the needed parameters."
+              );
+              set_button = document.getElementById('settings_btn');
+              set_button.classList.add('highlight');
+              train_button = document.getElementById('train_btn');
+              train_button.className = 'button-cancel';
+              train_button.disabled = true;
+            }
+            console.log(data);
+            return false;
+          });
+      }
+
+      // To confirm that user had run the config
+      function checkActiveIrrigation() {
+        return fetch(`../api/checkActiveIrrigation`)
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.data.activeIrrigation == true) {
+              return true;
+            } else {
+              // could be capsulated
+              var text = document.getElementById('active_passiv');
+              var button = document.getElementById('schedule_irrigation');
+              text.className = 'value_inactive';
+              text.innerText = 'Inactive - No present';
+              button.className = 'button-cancel';
+              button.disabled = true;
             }
             console.log(data);
             return false;
@@ -439,6 +465,7 @@
       function loadStuff() {
         $.get("/devices", function (data) {
           checkConfigPresent()
+          checkActiveIrrigation()
             .then((ret) => {
               if (ret) {
                 // Config is present
@@ -471,10 +498,10 @@
 
   <body>
     <div class="action-buttons">
-      <button class="settings" type="button" onclick="goToSettings()">
+      <button id="settings_btn" class="settings" type="button" onclick="goToSettings()">
         Settings
       </button>
-      <button class="training" type="button" onclick="startTraining()">
+      <button id="train_btn" class="training" type="button" onclick="startTraining()">
         Start Training
       </button>
     </div>
@@ -505,7 +532,7 @@
             <h3 class="irrigation-heading">Irrigation Status</h3>
             <div class="irrigation-value">
                 <span class="description">Pump Status:</span>
-                <span class="value">Active</span>
+                <span id="active_passiv" class="value_active">Active</span>
             </div>
             <div class="irrigation-value">
               <label for="irrigation-value-input"
@@ -519,7 +546,7 @@
               />
             </div>
             <div class="action-buttons">
-              <button class="settings" type="button" onclick="irrigateManually()">
+              <button id="schedule_irrigation" class="settings" type="button" onclick="irrigateManually()">
                 Schedule a Irrigation
               </button>
             </div>

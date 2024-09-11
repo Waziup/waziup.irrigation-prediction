@@ -133,7 +133,7 @@ def save_irrigation_time(amount):
 
     return 0
 
-# # Load from wazigate API
+# Load from wazigate API
 def irrigate_amount(amount):
     # Example API call: 
     # curl -X POST "http://192.168.189.2/devices/6645c4d468f31971148f2ab1/actuators/6673fcb568f31971148ff5f7/value"

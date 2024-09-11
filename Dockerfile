@@ -28,8 +28,9 @@ RUN  pip install requests \
      tensorflow \
      scikeras \
      scikit-learn \
-     joblib==1.3
-
+     joblib==1.3 \
+     keras-tuner
+# keras tuner check usage!
 COPY . /root/src/
 
 RUN rm -rf /var/lib/apt/lists/* \

@@ -46,6 +46,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 #import kerastuner as kt
+from kerastuner.tuners import Hyperband
 
 # local
 import main
@@ -342,7 +343,7 @@ def load_data_api(sensor_name, type, from_timestamp):#, token)
             # The response content contains the data from the API
             response_ok = response.json()
         else:
-            print("Request failed with status code:", response.status_code)
+            print("Request failed with status code:", response.status_code) 
     except requests.exceptions.RequestException as e:
         # Handle request exceptions (e.g., connection errors)
         print("Request error:", e)
@@ -596,7 +597,7 @@ def align_retention_curve_with_api(data, data_weather_api):
 
     return modified_curve
 
-# TODO: more sophisticated approach needed: needs to learn from former => introduce model
+# TODO: more sophisticated approach needed: needs to learn from former => introduce model, is now excluded when flow meter is installed
 def add_pump_state(data):
     slope = float(Current_config["Slope"])
     # for index, row in data.iterrows():
@@ -678,30 +679,31 @@ def include_irrigation_amount(df):
         df['irrigation_amount'] = irrigations_reindexed['amount']
     else:
         # Load data and create the dataframe
-        data_irrigation = load_data_api(DeviceAndSensorIdsFlow[0], "actuators", Current_config['Start_date'])
-        df_irrigation = pd.DataFrame(data_irrigation)
-        df_irrigation.rename(columns={'time': 'Timestamp'}, inplace=True)
-        df_irrigation['Timestamp'] = pd.to_datetime(df_irrigation['Timestamp'])
-        df_irrigation.rename(columns={'value': 'irrigation_amount'}, inplace=True)
+        if (len(DeviceAndSensorIdsFlow) >  0):
+            data_irrigation = load_data_api(DeviceAndSensorIdsFlow[0], "actuators", Current_config['Start_date'])
+            df_irrigation = pd.DataFrame(data_irrigation)
+            df_irrigation.rename(columns={'time': 'Timestamp'}, inplace=True)
+            df_irrigation['Timestamp'] = pd.to_datetime(df_irrigation['Timestamp'])
+            df_irrigation.rename(columns={'value': 'irrigation_amount'}, inplace=True)
 
-        # Convert irrigation_amount to numeric, forcing errors to NaN
-        df_irrigation['irrigation_amount'] = pd.to_numeric(df_irrigation['irrigation_amount'], errors='coerce')
+            # Convert irrigation_amount to numeric, forcing errors to NaN
+            df_irrigation['irrigation_amount'] = pd.to_numeric(df_irrigation['irrigation_amount'], errors='coerce')
 
-        # Round the timestamps to the nearest hour and aggregate the irrigation amounts
-        df_irrigation['Timestamp'] = df_irrigation['Timestamp'].dt.round('H')
-        df_irrigation = df_irrigation.groupby('Timestamp').agg({'irrigation_amount': 'sum'}).reset_index()
+            # Round the timestamps to the nearest hour and aggregate the irrigation amounts
+            df_irrigation['Timestamp'] = df_irrigation['Timestamp'].dt.round('H')
+            df_irrigation = df_irrigation.groupby('Timestamp').agg({'irrigation_amount': 'sum'}).reset_index()
 
-        # Set the Timestamp as the index
-        df_irrigation.set_index('Timestamp', inplace=True)
+            # Set the Timestamp as the index
+            df_irrigation.set_index('Timestamp', inplace=True)
 
-        # Timezone has to be set for df_irrigation
-        df_irrigation = df_irrigation.tz_convert(Timezone)
+            # Timezone has to be set for df_irrigation
+            df_irrigation = df_irrigation.tz_convert(Timezone)
 
-        # Merge the dataframes
-        df = pd.merge(df, df_irrigation, left_index=True, right_index=True, how='outer', suffixes=('_main', '_irrigation'))
+            # Merge the dataframes
+            df = pd.merge(df, df_irrigation, left_index=True, right_index=True, how='outer', suffixes=('_main', '_irrigation'))
 
-        # Fill missing irrigation_amount with 0
-        df['irrigation_amount'] = df['irrigation_amount'].fillna(0)
+            # Fill missing irrigation_amount with 0
+            df['irrigation_amount'] = df['irrigation_amount'].fillna(0)
 
     return df
 
@@ -767,8 +769,10 @@ def create_features(data):
     # Add calculated pump state
     f = data.rolling_mean_grouped_soil
     data['gradient'] = np.gradient(f)
-    data['pump_state'] = int(0)
-    data = add_pump_state(data)
+    # Skip the pump state if there is a flow meter where the artificial irrigation amount is messured
+    if (len(Current_config["DeviceAndSensorIdsFlow"]) == 0):
+        data['pump_state'] = int(0)
+        data = add_pump_state(data)
 
     # Add amount of irrigation TODO: include
     #data['irrigation_amount'] = data[DeviceAndSensorIdsFlow]
@@ -2035,6 +2039,20 @@ def main() -> int:
         # Classical regression
         Predictions = generate_predictions(tuned_best, best_exp, future_features)
     else:
+        # tuner = Hyperband(
+        #     build_model,
+        #     objective='val_loss',
+        #     max_epochs=50,
+        #     directory='hyperband_dir',
+        #     project_name='hyperband'
+        # )
+
+        # tuner.search(X_train_scaled, y_train, epochs=50, validation_split=0.2)
+
+        # # Print the best hyperparameters
+        # best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+        # print(f"Best hyperparameters: {best_hps.values}")
+
         # NN
         Predictions = generate_predictions_nn(best_model_nn, Z_scaled, future_features.index[0], future_features.index[-1])
 
@@ -2051,4 +2069,4 @@ def main() -> int:
     return Data['rolling_mean_grouped_soil'][-1], Threshold_timestamp, Predictions
 
 if __name__ == '__main__':
-    sys.exit(main())  # next section explains the use of sys.exit
+    sys.exit(main())

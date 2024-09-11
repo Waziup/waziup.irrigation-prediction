@@ -272,10 +272,27 @@ def checkConfigPresent(url, body):
         "status_code": status_code
     }
 
-
     return status_code, bytes(json.dumps(response), "utf8"), []
 
 usock.routerGET("/api/checkConfigPresent", checkConfigPresent)
+
+def checkActiveIrrigation(url, body):
+    if len(DeviceAndSensorIdsFlow) != 0:
+        response_data = {"activeIrrigation": True}
+        status_code = 200
+        getConfigFromFile()
+    else:
+        response_data = {"activeIrrigation": False}
+        status_code = 404
+
+    response = {
+        "data": response_data,
+        "status_code": status_code
+    }
+
+    return status_code, bytes(json.dumps(response), "utf8"), []
+
+usock.routerGET("/api/checkActiveIrrigation", checkActiveIrrigation)
 
 # From key-value to series
 def extract_and_format(data, key, datatype):
