@@ -158,3 +158,6 @@ catboost_info/
 
 # logs 
 *.log
+
+# tuning records
+hyperband_dir/

@@ -492,7 +492,7 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
     global CurrentlyTraining
 
     # Set the time interval in seconds (e.g., 60 seconds for 1 minute)
-    time_interval = Look_ahead_time*60*60/1.8 # From config train 
+    time_interval = Look_ahead_time*60*60/1.8 # From config train TODO: check whether useful
 
     while True:
         start_time = datetime.now().replace(microsecond=0)
@@ -528,7 +528,7 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
 
         end_time = datetime.now().replace(microsecond=0)
         duration = end_time - start_time
-        print("Traning finished at: ", end_time, "The duration was: ", duration)
+        print("Training finished at: ", end_time, "The duration was: ", duration)
 
         # Call routine to irrgate
         actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)

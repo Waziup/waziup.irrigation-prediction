@@ -5,6 +5,8 @@
 *.md
 *.txt
 *.csv
-config/current-config.json
+config/current_config.json
+/data
 /catboost_info
 /.vscode
+/hyperband_dir

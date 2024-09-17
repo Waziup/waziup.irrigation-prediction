@@ -16,6 +16,7 @@ services:
       test: curl --fail --unix-socket /root/app/proxy.sock http://localhost/ || exit 1
       interval: 30s
       retries: 10 # Will try for 5 minutes
+    restart: always
     extra_hosts:
       - "wazigate:172.17.0.1"
 #-------------------------#

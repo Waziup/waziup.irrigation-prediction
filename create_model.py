@@ -46,7 +46,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 #import kerastuner as kt
-from kerastuner.tuners import Hyperband
+from keras_tuner import Hyperband, HyperParameters
 
 # local
 import main
@@ -351,7 +351,7 @@ def load_data_api(sensor_name, type, from_timestamp):#, token)
     
     return response_ok
 
-# Impute the fuck out of it 
+# Impute missing data & apply rolling mean (imputation & cleaning)
 def check_gaps(data):
     mask = data.isna().any()
     print(mask)
@@ -361,18 +361,6 @@ def check_gaps(data):
         return data.interpolate(method='linear')
     else:
         return data
-
-# Impute missing data & apply rolling mean (imputation & cleaning)
-def fill_gaps(data):
-    # Show if there are any missing values inside the data
-    print("This is before: \n",data.isna().any())
-   
-    data = data.interpolate(method='linear')
-    
-    # Show if there are any missing values inside the data
-    print("This is afterwards: \n",data.isna().any())
-    
-    return data
 
 # Get offset to UTC time
 def get_timezone_offset(timezone_str):
@@ -1067,15 +1055,15 @@ def prepare_data():
             d.set_index('Time', inplace=True)
             data = pd.merge(data, d, left_index=True, right_index=True, how='outer')
 
-    # Rename index -> TODO: do not rename to Time and afterwards to Timestamp :)
+    # Rename index
     data.rename_axis('Timestamp', inplace=True)
 
-    # Convert index TODO: recheck Timestamps
+    # Convert index
     data.index = pd.to_datetime(data.index, utc=True)
     data.index = data.index.tz_convert(Timezone)
         
-    # Impute gaps in data TODO: have a look for evenly distributed timestamps
-    data = fill_gaps(data)
+    # Impute gaps in data
+    data = check_gaps(data)
 
     print(data.index.dtype)
     
@@ -1184,7 +1172,7 @@ def create_and_compare_model_reg(train):
               verbose = True,
               ignore_features = To_be_dropped, 
               train_size = 0.8
-              )
+    )
     
     # Print available models
     re_exp.models()
@@ -1195,8 +1183,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        exclude=['lar']
-        #include=['xgboost', 'llar', 'catboost'] #debug
+        #exclude=['lar']
+        include=['xgboost', 'llar', 'catboost'] #debug
     )
 
     return re_exp, best_re
@@ -1385,98 +1373,174 @@ def train_best(best_model, data):
     return model, re_exp
 
 # Create NN
-def create_nn_model(shape, units_hidden1=64, units_hidden2=32):
-    # Define the neural network architecture
+# TODO: Save the 
+def create_nn_model(hp, shape):
     model = Sequential()
+
+    # Tune the number of units in the first dense layer
+    units_hidden1 = hp.Int('units_hidden1', min_value=32, max_value=256, step=32)
     model.add(Dense(units_hidden1, activation='relu', input_shape=shape))
+
+    # Tune the number of units in the second dense layer
+    units_hidden2 = hp.Int('units_hidden2', min_value=16, max_value=128, step=16)
     model.add(Dense(units_hidden2, activation='relu'))
-    model.add(Dense(1))  # Output layer with one neuron for regression
+
+    # Output layer
+    model.add(Dense(1))
+
+    # Tune the optimizer and learning rate
+    optimizer_choice = hp.Choice('optimizer', ['adam', 'rmsprop'])
+    learning_rate = hp.Float('learning_rate', min_value=1e-4, max_value=1e-2, sampling='log')
+
+    if optimizer_choice == 'adam':
+        optimizer = Adam(learning_rate=learning_rate)
+    else:
+        optimizer = RMSprop(learning_rate=learning_rate)
+
+    # Compile the model
+    model.compile(
+        optimizer=optimizer,
+        loss='mean_squared_error',
+        metrics=['mae'])
 
     # Add a custom attribute to identify the model
     model.model_name = "nn_model"
-    model.units_hidden1 = units_hidden1
-    model.units_hidden2 = units_hidden2
-
-    # Compile the model
-    model.compile(optimizer=Adam(), loss='mean_squared_error')
+    model.hp = hp
+    model.shape = shape
 
     return model
 
 # Create CNN
-def create_cnn_model(shape, units_hidden1=64): #incooperate units_hidden
+def create_cnn_model(hp, shape):
     model = Sequential()
+
+    # Tune the number of filters in the first convolutional layer
+    units_hidden1 = hp.Int('units_hidden1', min_value=32, max_value=128, step=16)
     model.add(Conv1D(filters=units_hidden1, kernel_size=3, activation='relu', input_shape=shape))
     model.add(MaxPooling1D(pool_size=2))
     model.add(Flatten())
-    model.add(Dense(100, activation='relu'))
+
+    # Dense layer
+    dense_units = hp.Int('dense_units', min_value=64, max_value=256, step=32)
+    model.add(Dense(dense_units, activation='relu'))
     model.add(Dense(1))
+
+    # Tune the optimizer and learning rate
+    optimizer_choice = hp.Choice('optimizer', ['adam', 'rmsprop'])
+    learning_rate = hp.Float('learning_rate', min_value=1e-4, max_value=1e-2, sampling='log')
+
+    if optimizer_choice == 'adam':
+        optimizer = Adam(learning_rate=learning_rate)
+    else:
+        optimizer = RMSprop(learning_rate=learning_rate)
+
+    # Compile the model
+    model.compile(
+        optimizer=optimizer,
+        loss='mean_squared_error',
+        metrics=['mae'])
 
     # Add a custom attribute to identify the model
     model.model_name = "cnn_model"
-    model.units_hidden1 = units_hidden1
-
-    # Compile the model
-    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+    model.hp = hp
+    model.shape = shape
 
     return model
 
 # Create RNN
-def create_rnn_model(shape, units=50):
-    # Define the RNN architecture
+def create_rnn_model(hp, shape):
     model = Sequential()
-    model.add(LSTM(units=units, activation='relu', input_shape=shape))
+
+    # Tune the number of units in the LSTM layer
+    units_hidden1 = hp.Int('units_hidden1', min_value=32, max_value=256, step=32)
+    model.add(LSTM(units=units_hidden1, activation='relu', input_shape=shape))
+    
     model.add(Dense(1))
+
+    # Tune the optimizer and learning rate
+    optimizer_choice = hp.Choice('optimizer', ['adam', 'rmsprop'])
+    learning_rate = hp.Float('learning_rate', min_value=1e-4, max_value=1e-2, sampling='log')
+
+    if optimizer_choice == 'adam':
+        optimizer = Adam(learning_rate=learning_rate)
+    else:
+        optimizer = RMSprop(learning_rate=learning_rate)
+
+    # Compile the model
+    model.compile(
+        optimizer=optimizer,
+        loss='mean_squared_error',
+        metrics=['mae'])
 
     # Add a custom attribute to identify the model
     model.model_name = "rnn_model"
-    model.units_hidden1 = units
-
-    # Compile the model
-    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+    model.hp = hp
+    model.shape = shape
 
     return model
 
 # Create GRU
-def create_gru_model(shape, units=50):
-    # Define the GRU architecture
+def create_gru_model(hp, shape):
     model = Sequential()
-    model.add(GRU(units=units, activation='relu', input_shape=shape))
+
+    # Tune the number of units in the GRU layer
+    units_hidden1 = hp.Int('units_hidden1', min_value=32, max_value=256, step=32)
+    model.add(GRU(units=units_hidden1, activation='relu', input_shape=shape))
+    
     model.add(Dense(1))
+
+    # Tune the optimizer and learning rate
+    optimizer_choice = hp.Choice('optimizer', ['adam', 'sgd'])
+    learning_rate = hp.Float('learning_rate', min_value=1e-4, max_value=1e-2, sampling='log')
+
+    if optimizer_choice == 'adam':
+        optimizer = Adam(learning_rate=learning_rate)
+    else:
+        optimizer = SGD(learning_rate=learning_rate)
+
+    # Compile the model
+    model.compile(
+        optimizer=optimizer,
+        loss='mean_squared_error',
+        metrics=['mae'])
 
     # Add a custom attribute to identify the model
     model.model_name = "gru_model"
-    model.units_hidden1 = units
-
-    # Compile the model
-    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+    model.hp = hp
+    model.shape = shape
 
     return model
 
 # Create bi-LSTM
-def create_lstm_model(shape, units=50):
-    # Define the Bidirectional LSTM architecture
+def create_lstm_model(hp, shape):
     model = Sequential()
-    model.add(Bidirectional(LSTM(units=units, activation='relu', input_shape=shape)))
+
+    # Tune the number of units in the Bidirectional LSTM layer
+    units_hidden1 = hp.Int('units_hidden1', min_value=32, max_value=256, step=32)
+    model.add(Bidirectional(LSTM(units=units_hidden1, activation='relu', input_shape=shape)))
+    
     model.add(Dense(1))
 
-    # Add a custom attribute to identify the model
-    model.model_name = "lstm_model"
-    model.units_hidden1 = units
+    # Tune the optimizer and learning rate
+    optimizer_choice = hp.Choice('optimizer', ['adam', 'rmsprop'])
+    learning_rate = hp.Float('learning_rate', min_value=1e-4, max_value=1e-2, sampling='log')
+
+    if optimizer_choice == 'adam':
+        optimizer = Adam(learning_rate=learning_rate)
+    else:
+        optimizer = RMSprop(learning_rate=learning_rate)
 
     # Compile the model
-    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+    model.compile(
+        optimizer=optimizer,
+        loss='mean_squared_error',
+        metrics=['mae'])
+    
+    # Add a custom attribute to identify the model
+    model.model_name = "lstm_model"
+    model.hp = hp
+    model.shape = shape
 
-    return model
-
-def build_model(hp, shape):
-    model = Sequential()
-    model.add(Bidirectional(LSTM(units=hp.Int('units', min_value=32, max_value=512, step=32),
-                                 activation=hp.Choice('activation', values=['relu', 'tanh']),
-                                 input_shape=shape)))
-    model.add(Dense(1))
-    model.compile(optimizer=hp.Choice('optimizer', values=['adam', 'sgd']),
-                  loss='mse',
-                  metrics=['mae'])
     return model
 
 # prepare data for (conv) neural nets and other model architechtures
@@ -1523,42 +1587,76 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     nn_models = []
 
     # Create neural network
-    model_nn = create_nn_model((X_train.shape[1],), units_hidden1=32, units_hidden2=16)
+
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('units_hidden1', 64)
+    hp.Fixed('units_hidden2', 32)
+    hp.Fixed('optimizer', 'adam')
+
+    # Call the model function with the hp object and the input shape
+    input_shape = (X_train.shape[1],)
+    model_nn = create_nn_model(hp, shape=input_shape)
+
     # Train the model
     history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
     # Append for comparison
     nn_models.append(model_nn)
 
     # Create conv neural network
-    model_cnn = create_cnn_model((X_train_cnn.shape[1], 1), units_hidden1=64)
+
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('units_hidden1', 64)
+    hp.Fixed('optimizer', 'adam')
+
+    # Call the model function with the hp object and the input shape
+    input_shape = (X_train_cnn.shape[1], 1)
+    model_cnn = create_cnn_model(hp, shape=input_shape)
+    
     # Train the model
     history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
     # Append for comparison
     nn_models.append(model_cnn)
 
-    # RNN architecture
     # Create RNN model
-    model_rnn = create_rnn_model((X_train.shape[1], 1), 50)
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('units_hidden1', 50)  # Fixed units for RNN
+    hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+
+    input_shape = (X_train.shape[1], 1)
+    model_rnn = create_rnn_model(hp, shape=input_shape)
+
     # Train the model
     history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
     # Append for comparison
     nn_models.append(model_rnn)
 
-    # RNN architecture
-    # Create RNN model
-    model_gru = create_gru_model((X_train.shape[1], 1), 50)
+    # Create GRU model
+    hp = HyperParameters()
+    hp.Fixed('units_hidden1', 50)  # Fixed units for GRU
+    hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+
+    input_shape = (X_train.shape[1], 1)
+    model_gru = create_gru_model(hp, shape=input_shape)
     # Train the model
     history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
     # Append for comparison
     nn_models.append(model_gru)
 
     # LSTM architecture => TODO: error in eval
-    # Create LSTM model
-    model_bilstm = create_lstm_model((X_train.shape[1], 1), 50)
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('units_hidden1', 50)  # Fixed units for LSTM
+    hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+
+    input_shape = (X_train.shape[1], 1)
+    model_lstm = create_lstm_model(hp, shape=input_shape)
     # Train the model
-    history_bilstm = model_bilstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    history_bilstm = model_lstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
     # Append for comparison
-    nn_models.append(model_bilstm)
+    nn_models.append(model_lstm)
 
     # # Keras regressor and grid search -> TODO: Kerastuner does not work, package conflict, try optuna hyperopt
     # # Param grid to big -> not supported
@@ -1611,6 +1709,11 @@ Model_functions = {
     "gru_model" : create_gru_model,
     "lstm_model" : create_lstm_model
 }
+
+def model_builder_with_shape(model_func, shape):
+    def build_model(hp):
+        return model_func(hp, shape)
+    return build_model
 
 
 # Perform evaluation, create predictions on testset (X_test) and save models
@@ -1682,7 +1785,7 @@ def train_best_nn(best_eval, data, scaler):
 
     if function_name in Model_functions: 
         # Create best model TODO: check, bad metrics, compared to other models
-        model = Model_functions[function_name]((X_cnn.shape[1], 1))
+        model = Model_functions[function_name](best_eval.hp, best_eval.shape)
         print(f"Will train the '{model.model_name}' as best model for neural nets.")
         # Train the model
         history_rnn = model.fit(X_cnn, y, epochs=50, batch_size=32, validation_split=0.2)
@@ -1852,7 +1955,7 @@ def analyze_performance_old(exp, best):
 # Tune hyperparameters of one models
 def tune_model(exp, best):
     try:        
-        print(f"Tuning grid for {best}: {exp.get_tuning_grid(best)}")
+        #print(f"Tuning grid for {best}: {exp.get_tuning_grid(best)}")
         return exp.tune_model(best, choose_better = True)
     except Exception as e:
         print(f"There was an error tuning the model. {e}")
@@ -2039,22 +2142,38 @@ def main() -> int:
         # Classical regression
         Predictions = generate_predictions(tuned_best, best_exp, future_features)
     else:
-        # tuner = Hyperband(
-        #     build_model,
-        #     objective='val_loss',
-        #     max_epochs=50,
-        #     directory='hyperband_dir',
-        #     project_name='hyperband'
-        # )
+        hp = HyperParameters()
 
-        # tuner.search(X_train_scaled, y_train, epochs=50, validation_split=0.2)
+        tuner = Hyperband(
+            model_builder_with_shape(Model_functions[best_model_nn.model_name], best_model_nn.shape),
+            objective='val_mae',
+            max_epochs=100,  # Tune epochs between 10 and 100,
+            factor=1,
+            max_trails=250,
+            directory='hyperband_dir',
+            project_name='hyperband_' + best_model_nn.model_name,
+            overwrite=True
+        )
 
-        # # Print the best hyperparameters
-        # best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
-        # print(f"Best hyperparameters: {best_hps.values}")
+        tuner.search(X_train_scaled, 
+                     y_train, 
+                     epochs=hp.Int('epochs', 10, 100), 
+                     batch_size=32, 
+                     validation_split=0.2
+        )
+
+        # Print the best hyperparameters
+        best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+        print(f"Best hyperparameters: {best_hps.values}")
+
+        # Rebuild the model using the best hyperparameters
+        final_model = Model_functions[best_model_nn.model_name](best_hps, best_model_nn.shape)
+
+        # Train the final model with the best hyperparameters on the full training data
+        final_model.fit(X_train_scaled, y_train, epochs=best_hps.values.get('tuner/epochs', 50), batch_size=32, validation_split=0.2)
 
         # NN
-        Predictions = generate_predictions_nn(best_model_nn, Z_scaled, future_features.index[0], future_features.index[-1])
+        Predictions = generate_predictions_nn(final_model, Z_scaled, future_features.index[0], future_features.index[-1])
 
     # Cut passed time from predictions
     Predictions = Predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]    
