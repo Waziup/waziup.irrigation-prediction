@@ -68,12 +68,6 @@ DeviceAndSensorIdsMoisture = []
 DeviceAndSensorIdsTemp = []
 DeviceAndSensorIdsFlow = []
 
-# Std sample rate set by arduino code of microcontroller
-StdSamplingRate = 10
-
-# Actual sampling rate for machine learning purpose
-ActualSamplingRate = 60
-
 # Rolling mean window
 RollingMeanWindowData = 15
 RollingMeanWindowGrouped = 5
@@ -351,7 +345,7 @@ def load_data_api(sensor_name, type, from_timestamp):#, token)
     
     return response_ok
 
-# Impute missing data & apply rolling mean (imputation & cleaning)
+# Resample and interpolate
 def check_gaps(data):
     mask = data.isna().any()
     print(mask)
@@ -361,6 +355,34 @@ def check_gaps(data):
         return data.interpolate(method='linear')
     else:
         return data
+    
+# Impute missing data & apply rolling mean (imputation & cleaning)
+def fill_gaps(data):
+    # Show if there are any missing values inside the data
+    print("This is before: \n",data.isna().any())
+
+    data = data.interpolate(method='linear')
+
+    # Show if there are any missing values inside the data
+    print("This is afterwards: \n",data.isna().any())
+
+    return data
+    
+# Remove larger gaps in data as imputing them is not accurate    
+def remove_large_gaps(df, col, gap_threshold = 6):
+    # Detect NaN gaps in the specified column
+    is_nan = df[col].isna()
+    
+    # Group consecutive NaN and non-NaN values using cumsum on not-NaN
+    group = (~is_nan).cumsum()
+    
+    # Count consecutive NaNs within each group
+    consecutive_gaps = is_nan.groupby(group).cumsum()
+    
+    # Filter out rows where consecutive NaN values exceed the threshold
+    df_filtered = df[consecutive_gaps <= gap_threshold].copy()
+    
+    return df_filtered
 
 # Get offset to UTC time
 def get_timezone_offset(timezone_str):
@@ -751,22 +773,25 @@ def create_features(data):
     # # Calculate and add CORRECTED volumetric water content
     # data = add_volumetric_col_to_df(data, 'rolling_mean_grouped_soil', corrected_water_retention_curve)
 
-    # Check gaps => TODO: not every col should interpolated (month?), some data is lost here
-    data = check_gaps(data) 
+    # Omit rows when there is no data from physical sensors for over six hours => below: interpolate
+    data = remove_large_gaps(data, 'rolling_mean_grouped_soil', 6)
 
-    # Add calculated pump state
+    # Check gaps => TODO: not every col should interpolated (month?), some data is lost here
+    data = fill_gaps(data) 
+
+    # Add calculated pump state or actual irrigation amount
+    # Calc gradient
     f = data.rolling_mean_grouped_soil
     data['gradient'] = np.gradient(f)
     # Skip the pump state if there is a flow meter where the artificial irrigation amount is messured
     if (len(Current_config["DeviceAndSensorIdsFlow"]) == 0):
         data['pump_state'] = int(0)
         data = add_pump_state(data)
+    else:
+        # Add amount of irrigation TODO: include
+        data = include_irrigation_amount(data)
 
-    # Add amount of irrigation TODO: include
-    #data['irrigation_amount'] = data[DeviceAndSensorIdsFlow]
-    data = include_irrigation_amount(data)
-
-    # also add hours since last irrigation => TODO: check later, still an error
+    # also add hours since last irrigation => TODO: check later, still an error, !!!!!questionable whether it is useful!!!!!
     #data = hours_since_pump_was_turned_on(data)
     
     return data
@@ -1063,7 +1088,7 @@ def prepare_data():
     data.index = data.index.tz_convert(Timezone)
         
     # Impute gaps in data
-    data = check_gaps(data)
+    data = fill_gaps(data)
 
     print(data.index.dtype)
     
@@ -1083,7 +1108,7 @@ def prepare_data():
     #data = data.astype(float)
     data = convert_cols(data)
 
-    # Normalization
+    # Normalization => Is done before training TODO: also for NN?
     #data = normalize(data)
 
     print(data.iloc[0])
@@ -1309,8 +1334,10 @@ def create_future_values(data):
     new_data['rolling_mean_grouped_soil_temp'] = new_data['Soil_temperature_7-28'] # TODO: calculate/calibrate diviation for better alignment
 
     # also include pump_state, set to zero as we want to assume the behavior without watering
-    new_data = new_data.assign(pump_state=0)
-    new_data = new_data.assign(irrigation_amount=0)
+    if (len(Current_config["DeviceAndSensorIdsFlow"]) == 0):
+        new_data = new_data.assign(pump_state=0)
+    else:
+        new_data = new_data.assign(irrigation_amount=0)
 
     return new_data
 
@@ -1599,6 +1626,7 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     model_nn = create_nn_model(hp, shape=input_shape)
 
     # Train the model
+    print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
     history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
     # Append for comparison
     nn_models.append(model_nn)
@@ -1615,11 +1643,13 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     model_cnn = create_cnn_model(hp, shape=input_shape)
     
     # Train the model
+    print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
     history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
     # Append for comparison
     nn_models.append(model_cnn)
 
     # Create RNN model
+
     # Create a dummy HyperParameters object with fixed values
     hp = HyperParameters()
     hp.Fixed('units_hidden1', 50)  # Fixed units for RNN
@@ -1629,11 +1659,14 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     model_rnn = create_rnn_model(hp, shape=input_shape)
 
     # Train the model
+    print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
     history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
     # Append for comparison
     nn_models.append(model_rnn)
 
     # Create GRU model
+
+    # Create a dummy HyperParameters object with fixed values
     hp = HyperParameters()
     hp.Fixed('units_hidden1', 50)  # Fixed units for GRU
     hp.Fixed('optimizer', 'adam')  # Fixed optimizer
@@ -1641,11 +1674,13 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     input_shape = (X_train.shape[1], 1)
     model_gru = create_gru_model(hp, shape=input_shape)
     # Train the model
+    print('Will now train a Gated Recurrent Unit neural network (GRU), with the following hyperparameters: ' + str(hp.values))
     history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
     # Append for comparison
     nn_models.append(model_gru)
 
-    # LSTM architecture => TODO: error in eval
+    # LSTM architecture
+
     # Create a dummy HyperParameters object with fixed values
     hp = HyperParameters()
     hp.Fixed('units_hidden1', 50)  # Fixed units for LSTM
@@ -1654,6 +1689,7 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     input_shape = (X_train.shape[1], 1)
     model_lstm = create_lstm_model(hp, shape=input_shape)
     # Train the model
+    print('Will now train a Long short-term memory neural network (LSTM), with the following hyperparameters: ' + str(hp.values))
     history_bilstm = model_lstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
     # Append for comparison
     nn_models.append(model_lstm)
@@ -1684,19 +1720,6 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # # Get the best model
     # best_model = grid_result.best_estimator_
     # # Append best model for comparision
-    # nn_models.append(best_model)
-
-    # # Leverage keras tuner with bi-LSTM model, can also use other models 
-    # tuner = kt.Hyperband(build_model,
-    #                  objective='val_mae',
-    #                  max_epochs=50,
-    #                  factor=3,
-    #                  directory='hyperband_dir',
-    #                  project_name='bilstm_tuning')
-
-    # tuner.search(X_train_scaled[..., np.newaxis], y_train, epochs=50, validation_split=0.2)
-    # best_model = tuner.get_best_models(num_models=1)[0]
-    # # Append best model
     # nn_models.append(best_model)
 
     return nn_models
@@ -1792,7 +1815,7 @@ def train_best_nn(best_eval, data, scaler):
     else:
         print(f"Function '{function_name}' not found")
 
-    return model
+    return model, X_scaled, y
     
 # Create testset, not seen during training=>should be fur
 def prepare_future_values(scaler, new_data, X_train_c):
@@ -1971,6 +1994,45 @@ def tune_models(exp, best):
         
     return tuned_best_models
 
+
+def tune_model_nn(X_train_scaled, y_train, best_model_nn):
+    print("Tuning best NN model (", best_model_nn.model_name, ") after evaluation.")
+
+    hp = HyperParameters()
+
+    tuner = Hyperband(
+        model_builder_with_shape(Model_functions[best_model_nn.model_name], best_model_nn.shape),
+        objective='val_mae',
+        max_epochs=100,             # Tune epochs between 10 and 100,
+        factor=2,                   # Reduces the number of epochs for each successive run, Defaults to 3.
+        hyperband_iterations=1,     # Limits the number full hyperband runs
+        directory='hyperband_dir',
+        project_name='hyperband_' + best_model_nn.model_name,
+        overwrite=True
+    )
+
+    tuner.search(X_train_scaled, 
+                    y_train, 
+                    epochs=hp.Int('epochs', 10, 100), 
+                    batch_size=32, 
+                    validation_split=0.2
+    )
+
+    # Print the best hyperparameters
+    best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+    print(f"Best hyperparameters: {best_hps.values}")
+
+    # Rebuild the model using the best hyperparameters
+    final_model = Model_functions[best_model_nn.model_name](best_hps, best_model_nn.shape)
+
+    # Train the final model with the best hyperparameters on the full training data
+    final_model.fit(X_train_scaled, y_train, epochs=best_hps.values.get('tuner/epochs', 50), batch_size=32)#, validation_split=0.2)
+
+    # Compare with formerly best model -> since it is trained 
+    #final_model = evaluate_against_testset_nn(best_model_nn, X_train_scaled, y_train)
+
+    return final_model
+
 # Generate prediction with best_model and impute generated future_values
 def generate_predictions(best, exp, features):
     # Generate predictions
@@ -2100,7 +2162,7 @@ def main() -> int:
         best_model, best_exp = train_best(best_eval, Data)
     else:
         # NN -> TODO: eval properly -> still error in r2 calc, fallback to mae
-        best_model_nn = train_best_nn(best_eval_nn, Data, scaler)
+        best_model_nn, X_scaled, y = train_best_nn(best_eval_nn, Data, scaler)
 
     
     # Create future value set to feed new data to model
@@ -2142,38 +2204,10 @@ def main() -> int:
         # Classical regression
         Predictions = generate_predictions(tuned_best, best_exp, future_features)
     else:
-        hp = HyperParameters()
-
-        tuner = Hyperband(
-            model_builder_with_shape(Model_functions[best_model_nn.model_name], best_model_nn.shape),
-            objective='val_mae',
-            max_epochs=100,  # Tune epochs between 10 and 100,
-            factor=1,
-            max_trails=250,
-            directory='hyperband_dir',
-            project_name='hyperband_' + best_model_nn.model_name,
-            overwrite=True
-        )
-
-        tuner.search(X_train_scaled, 
-                     y_train, 
-                     epochs=hp.Int('epochs', 10, 100), 
-                     batch_size=32, 
-                     validation_split=0.2
-        )
-
-        # Print the best hyperparameters
-        best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
-        print(f"Best hyperparameters: {best_hps.values}")
-
-        # Rebuild the model using the best hyperparameters
-        final_model = Model_functions[best_model_nn.model_name](best_hps, best_model_nn.shape)
-
-        # Train the final model with the best hyperparameters on the full training data
-        final_model.fit(X_train_scaled, y_train, epochs=best_hps.values.get('tuner/epochs', 50), batch_size=32, validation_split=0.2)
+        tuned_best = tune_model_nn(X_scaled, y, best_model_nn)
 
         # NN
-        Predictions = generate_predictions_nn(final_model, Z_scaled, future_features.index[0], future_features.index[-1])
+        Predictions = generate_predictions_nn(tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])
 
     # Cut passed time from predictions
     Predictions = Predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]    
