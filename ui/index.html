@@ -302,25 +302,24 @@
           .then((response) => response.json())
           .then((chartData) => {
             if (chartData.model == false) {
-              // alert(
-              //   'Please start training procedure by pressing the "Start Training" button, after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.'
-              // );
+              // Handle case where no model is available
             } else {
               // Format the data
-              var moistureSeriesRounded = chartData.moistureSeries.map(
-                (value) => parseFloat(value.toFixed(2))
+              var moistureSeriesRounded = chartData.moistureSeries.map((value) =>
+                parseFloat(value.toFixed(2))
               );
-              var moistureSeriesVolRounded = chartData.moistureSeriesVol.map(
-                (value) => parseFloat(value.toFixed(2))
+              var moistureSeriesVolRounded = chartData.moistureSeriesVol.map((value) =>
+                parseFloat(value.toFixed(4))
               );
               var formattedTimestamps = chartData.timestamps.map((timestamp) =>
                 formatTimestamp(timestamp)
               );
-
+      
+              // Set up the chart options
               var options = {
                 chart: {
                   type: "line",
-                  title: "Prediction Soil Moisture", // Set the title here
+                  title: "Prediction Soil Moisture",
                 },
                 series: [
                   {
@@ -333,29 +332,123 @@
                   },
                 ],
                 xaxis: {
-                  categories: formattedTimestamps, //chartData.timestamps,//formattedTimestamps,
+                  categories: formattedTimestamps,
                   labels: {
-                    rotate: -45, // Rotate labels by -45 degrees to avoid overlapping
-                    minHeight: 40, // Set a minimum height for labels to prevent overlapping
-                    // datetimeFormatter: {
-                    //     year: 'yyyy',
-                    //     month: 'MMM \'yy',
-                    //     day: 'dd MMM',
-                    //     hour: 'HH:mm',
-                    //     minute: 'HH:mm'
-                    // }
+                    rotate: -45,
+                    minHeight: 40,
                   },
                 },
-                // Add the annotations property
-                annotations: chartData.annotations,
+                yaxis: {
+                  // Add y-axis ranges as per the backend data
+                  min: 0,
+                  max: Math.max(chartData.moistureSeries), // You can customize this max value as needed
+                  annotations: {
+                    yaxis: [
+                      {
+                        y: chartData.permanentWiltingPoint, // Permanent Wilting Point line
+                        borderColor: "#FF5733",
+                        label: {
+                          text: "Permanent Wilting Point",
+                          style: {
+                            color: "#fff",
+                            background: "#FF5733",
+                          },
+                        },
+                      },
+                      {
+                        y: chartData.fieldCapacityUpper, // Upper Field Capacity line
+                        borderColor: "#33FF57",
+                        label: {
+                          text: "Field Capacity (Upper)",
+                          style: {
+                            color: "#fff",
+                            background: "#33FF57",
+                          },
+                        },
+                      },
+                      {
+                        y: chartData.fieldCapacityLower, // Lower Field Capacity line
+                        borderColor: "#33AFFF",
+                        label: {
+                          text: "Field Capacity (Lower)",
+                          style: {
+                            color: "#fff",
+                            background: "#33AFFF",
+                          },
+                        },
+                      },
+                      {
+                        y: chartData.saturation, // Saturation point
+                        borderColor: "#FFD700",
+                        label: {
+                          text: "Saturation",
+                          style: {
+                            color: "#fff",
+                            background: "#FFD700",
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+                // Additional custom annotations
+                annotations: {
+                  xaxis: [], // Add any custom x-axis annotations if needed
+                  yaxis: [
+                    {
+                      y: chartData.permanentWiltingPoint,
+                      borderColor: "#FF5733",
+                      label: {
+                        text: "Permanent Wilting Point",
+                        style: {
+                          color: "#fff",
+                          background: "#FF5733",
+                        },
+                      },
+                    },
+                    {
+                      y: chartData.fieldCapacityUpper,
+                      borderColor: "#33FF57",
+                      label: {
+                        text: "Field Capacity (Upper)",
+                        style: {
+                          color: "#fff",
+                          background: "#33FF57",
+                        },
+                      },
+                    },
+                    {
+                      y: chartData.fieldCapacityLower,
+                      borderColor: "#33AFFF",
+                      label: {
+                        text: "Field Capacity (Lower)",
+                        style: {
+                          color: "#fff",
+                          background: "#33AFFF",
+                        },
+                      },
+                    },
+                    {
+                      y: chartData.saturation,
+                      borderColor: "#FFD700",
+                      label: {
+                        text: "Saturation",
+                        style: {
+                          color: "#fff",
+                          background: "#FFD700",
+                        },
+                      },
+                    },
+                  ],
+                },
               };
-
+      
               var chart = new ApexCharts(
                 document.querySelector("#chart_pred"),
                 options
               );
               chart.render();
-
+      
               // Hide the "Volumetric Water Content" series after rendering
               chart.hideSeries("Volumetric Water Content");
             }

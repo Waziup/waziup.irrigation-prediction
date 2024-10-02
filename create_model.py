@@ -5,7 +5,7 @@ Created on Wed May  3 10:54:49 2023
 @author: felix markwordt
 """
 
-#TODO:general names in csv export
+#TODO: clear imports
 
 from datetime import timedelta, datetime
 import datetime
@@ -25,13 +25,12 @@ import matplotlib.pyplot as plt
 import sys
 import pytz
 import requests
-from sklearn.impute import KNNImputer
 import urllib
 from geopy.geocoders import Nominatim
 from timezonefinder import TimezoneFinder
 
 # new imports nn
-import tensorflow as tf
+import tensorflow
 from tensorflow.keras.models import Sequential, Model
 from tensorflow.keras.layers import Dense, Conv1D, MaxPooling1D, Flatten, Dense, LSTM, GRU, Bidirectional, Dropout
 from tensorflow.keras.optimizers import Adam, SGD, RMSprop
@@ -43,6 +42,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from sklearn.impute import KNNImputer
+from scipy.interpolate import CubicSpline
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 #import kerastuner as kt
@@ -528,7 +529,7 @@ def resample(d):
     d_resample = d.resample(str(Sample_rate)+'T').mean()
     return d_resample
 
-# Volumetric water content
+# Volumetric water content => Not called
 def soil_tension_to_volumetric_water_content(soil_tension, soil_water_retention_curve):
     """
     Convert soil tension (kPa) to volumetric water content (fraction) using a given soil-water retention curve.
@@ -565,7 +566,7 @@ def soil_tension_to_volumetric_water_content(soil_tension, soil_water_retention_
     interpolated_water_content = lower_point[1] + ((soil_tension - lower_point[0]) / tension_diff) * water_content_diff
     
     return interpolated_water_content
-
+# VWC with log scale => Not called
 def soil_tension_to_volumetric_water_content_log(soil_tension, soil_water_retention_curve):
     # Transform the tension and content values to logarithmic space
     tensions_log = np.log10([point[0] for point in soil_water_retention_curve])
@@ -579,6 +580,31 @@ def soil_tension_to_volumetric_water_content_log(soil_tension, soil_water_retent
     
     return interpolated_content
 
+# VWC with splines scale
+def soil_tension_to_volumetric_water_content_spline(soil_tension, soil_water_retention_curve):
+    """
+    Convert soil tension (kPa) to volumetric water content (fraction) using cubic spline interpolation.
+    
+    Parameters:
+        soil_tension (float): Soil tension value in kPa.
+        soil_water_retention_curve (list of tuples): A list of tuples containing points on the soil-water retention curve.
+            Each tuple contains two elements: (soil_tension_value, volumetric_water_content_value).
+    
+    Returns:
+        float: Volumetric water content as a fraction (between 0 and 1).
+    """
+    # Extract tension and water content values from the curve
+    tensions, water_contents = zip(*soil_water_retention_curve)
+    
+    # Create a cubic spline interpolator
+    spline = CubicSpline(tensions, water_contents, bc_type='natural')
+
+    # Evaluate the spline at the given soil tension
+    interpolated_water_content = spline(soil_tension)
+    
+    # Clip the result to ensure it remains within the valid range [0, 1]
+    return np.clip(interpolated_water_content, 0, 1)
+
 def add_volumetric_col_to_df(df, col_name):
     # Iterate over the rows of the dataframe and calculate volumetric water content
     soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in Current_config['Soil_water_retention_curve']]
@@ -587,7 +613,7 @@ def add_volumetric_col_to_df(df, col_name):
     for index, row in df.iterrows():
         soil_tension = row[col_name]
         # Calculate volumetric water content
-        volumetric_water_content = soil_tension_to_volumetric_water_content_log(soil_tension, sorted_curve)
+        volumetric_water_content = soil_tension_to_volumetric_water_content_spline(soil_tension, sorted_curve)
         # Assign the calculated value to a new column in the dataframe
         df.at[index, col_name + '_vol'] = round(volumetric_water_content, 4)
 

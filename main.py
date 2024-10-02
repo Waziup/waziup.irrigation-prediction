@@ -72,7 +72,14 @@ Soil_water_retention_curve = [
     (1000, 0.05),
 ]
 
-# Array of active threads
+# Other soil related params
+PermanentWiltingPoint = 40
+FieldCapacityUpper = 30
+FieldCapacityLower = 10
+Saturation = 0
+
+
+# Array of active threads TODO: if training started kill other threads.
 Threads = []
 ThreadId = 0
 
@@ -170,6 +177,10 @@ def setConfig(url, body):
     global Look_ahead_time
     global Start_date
     global Period
+    global PermanentWiltingPoint
+    global FieldCapacityUpper
+    global FieldCapacityLower
+    global Saturation
 
     # Parse the query parameters from Body
     parsed_data = parse_qs(body.decode('utf-8'))
@@ -187,6 +198,10 @@ def setConfig(url, body):
     Look_ahead_time = int(parsed_data.get('lookahead', [])[0])
     Start_date = parsed_data.get('start', [])[0]
     Period = int(parsed_data.get('period', [])[0])
+    PermanentWiltingPoint = int(parsed_data.get('pwp', [])[0])
+    FieldCapacityUpper = int(parsed_data.get('fcu', [])[0])
+    FieldCapacityLower = int(parsed_data.get('fcl', [])[0])
+    Saturation = int(parsed_data.get('sat', [])[0]) 
 
     # Get soil water retention curve
     Soil_water_retention_curve = parsed_data.get('ret', [])[0]
@@ -212,7 +227,11 @@ def setConfig(url, body):
         "Look_ahead_time": Look_ahead_time,
         "Start_date": Start_date,
         "Period": Period,
-        "Soil_water_retention_curve": csv_data  # Use the parsed CSV data
+        "Soil_water_retention_curve": csv_data,  # Use the parsed CSV data
+        "PermanentWiltingPoint": PermanentWiltingPoint,
+        "FieldCapacityUpper": FieldCapacityUpper,
+        "FieldCapacityLower": FieldCapacityLower,
+        "Saturation": Saturation
     }
 
     # Save the JSON data to the file
@@ -235,6 +254,11 @@ def getConfigFromFile():
     global Threshold
     global Start_date
     global Period
+    global PermanentWiltingPoint
+    global FieldCapacityUpper
+    global FieldCapacityLower
+    global Saturation
+
 
     with open(ConfigPath, 'r') as file:
         # Parse JSON from the file
@@ -253,6 +277,10 @@ def getConfigFromFile():
     Look_ahead_time = float(data.get('Look_ahead_time', []))
     Start_date = data.get('Start_date', [])
     Period = int(data.get('Period', []))
+    PermanentWiltingPoint = int(data.get('pwp', [])[0])
+    FieldCapacityUpper = int(data.get('fcu', [])[0])
+    FieldCapacityLower = int(data.get('fcl', [])[0])
+    Saturation = int(data.get('sat', [])[0])
 
     # Get soil water retention curve -> currently not needed here
     # Soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
@@ -431,6 +459,7 @@ def getPredictionChartData(url, body):
     f_data_moisture = data_pred["prediction_label"].tolist()
     f_data_moisture_vol = data_pred["prediction_label_vol"].tolist()
 
+
     # Add a horizontal line at Threshold
     annotations = {
         'yaxis': [{
@@ -452,7 +481,11 @@ def getPredictionChartData(url, body):
         "timestamps": f_data_time,
         "moistureSeries": f_data_moisture,
         "moistureSeriesVol": f_data_moisture_vol,
-        "annotations": annotations
+        "annotations": annotations,
+        "permanentWiltingPoint": PermanentWiltingPoint,
+        "fieldCapacityUpper": FieldCapacityUpper,
+        "fieldCapacityLower": FieldCapacityLower,
+        "saturation": Saturation
     }
 
     return 200, bytes(json.dumps(chart_data), "utf8"), []

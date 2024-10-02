@@ -16,7 +16,7 @@
     "Threshold": 7.0,
     "Irrigation_amount": "10",
     "Look_ahead_time": 6,
-    "Start_date": "2024-05-11T00:00:00.000Z",
+    "Start_date": "2024-03-12T00:00:00.000Z",
     "Period": 0,
     "Soil_water_retention_curve": [
         {
@@ -55,5 +55,9 @@
             "Soil tension": "1000",
             "VWC": " 0.025"
         }
-    ]
+    ],
+    "PermanentWiltingPoint": 40,
+    "FieldCapacityUpper": 30,
+    "FieldCapacityLower": 10,
+    "Saturation": 0
 }

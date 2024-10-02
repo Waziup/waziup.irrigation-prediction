@@ -24,74 +24,125 @@
     // TODO: get more values in range of 10-30 cb, we are always in that range, needs to be more accurate
     var soil_retention_tuples = {
       "Sandy_Soil": {
-          waterRetention: [0.4, 0.3, 0.2, 0.1],
-          soilTension: [10, 20, 30, 40],
-        },
-        Fine_sandy_loams: {
-          waterRetention: [0.5, 0.4, 0.3, 0.2],
-          soilTension: [15, 25, 35, 45],
-        },
-        Loams_and_silt_loams: {
-          waterRetention: [0.6, 0.5, 0.4, 0.3],
-          soilTension: [20, 30, 40, 50],
-        },
-        Clay_loams: {
-          waterRetention: [0.5, 0.4, 0.3, 0.2],
-          soilTension: [15, 25, 35, 45],
-        },
-        Clays: {
-          waterRetention: [0.4, 0.3, 0.2, 0.1],
-          soilTension: [10, 20, 30, 40],
-        },
-        Kaolinite: {
-          waterRetention: [0.5, 0.4, 0.3, 0.2],
-          soilTension: [15, 25, 35, 45],
-        },
-        Illite: {
-          waterRetention: [0.6, 0.5, 0.4, 0.3],
-          soilTension: [20, 30, 40, 50],
-        },
-        Montmorillonite: {
-          waterRetention: [0.7, 0.6, 0.5, 0.4],
-          soilTension: [25, 35, 45, 55],
-        },
-        Vermiculite: {
-          waterRetention: [0.6, 0.5, 0.4, 0.3],
-          soilTension: [20, 30, 40, 50],
-        },
-        Humus: {
-          waterRetention: [0.5, 0.4, 0.3, 0.2],
-          soilTension: [15, 25, 35, 45],
-        },
-        Peat_Soil: {
-          waterRetention: [0.4, 0.3, 0.2, 0.1],
-          soilTension: [10, 20, 30, 40],
-        },
-        Sandy_Clay_Loam: {
-          waterRetention: [0.5, 0.4, 0.3, 0.2],
-          soilTension: [15, 25, 35, 45],
-        },
-        Silty_Clay: {
-          waterRetention: [0.6, 0.5, 0.4, 0.3],
-          soilTension: [20, 30, 40, 50],
-        },
-        Loess_Soil: {
-          waterRetention: [0.5, 0.4, 0.3, 0.2],
-          soilTension: [15, 25, 35, 45],
-        },
-        Chalky_Soil: {
-          waterRetention: [0.4, 0.3, 0.2, 0.1],
-          soilTension: [10, 20, 30, 40],
-        },
-        Volcanic_Ash_Soil: {
-          waterRetention: [0.5, 0.4, 0.3, 0.2],
-          soilTension: [15, 25, 35, 45],
-        },
-        Sesquioxides: {
-          waterRetention: [0.6, 0.5, 0.4, 0.3],
-          soilTension: [20, 30, 40, 50],
-        },
-      };
+        waterRetention: [0.4, 0.3, 0.2, 0.1],
+        soilTension: [10, 20, 30, 40],
+        Saturation: 0,              // Saturation is when soil tension is around 0 kPa
+        FieldCapacity: [10, 30],    // Typical field capacity tension for sandy soils
+        PermanentWiltingPoint: 40   // General PWP for all soils
+      },
+      "Fine_sandy_loams": {
+        waterRetention: [0.5, 0.4, 0.3, 0.2],
+        soilTension: [15, 25, 35, 45],
+        Saturation: 0,
+        FieldCapacity: [15, 35],
+        PermanentWiltingPoint: 45
+      },
+      "Loams_and_silt_loams": {
+        waterRetention: [0.6, 0.5, 0.4, 0.3],
+        soilTension: [20, 30, 40, 50],
+        Saturation: 0,
+        FieldCapacity: [20, 40],
+        PermanentWiltingPoint: 50
+      },
+      "Clay_loams": {
+        waterRetention: [0.5, 0.4, 0.3, 0.2],
+        soilTension: [15, 25, 35, 45],
+        Saturation: 0,
+        FieldCapacity: [15, 35],
+        PermanentWiltingPoint: 45
+      },
+      "Clays": {
+        waterRetention: [0.4, 0.3, 0.2, 0.1],
+        soilTension: [10, 20, 30, 40],
+        Saturation: 0,
+        FieldCapacity: [10, 30],
+        PermanentWiltingPoint: 40
+      },
+      "Kaolinite": {
+        waterRetention: [0.5, 0.4, 0.3, 0.2],
+        soilTension: [15, 25, 35, 45],
+        Saturation: 0,
+        FieldCapacity: [15, 35],
+        PermanentWiltingPoint: 45
+      },
+      "Illite": {
+        waterRetention: [0.6, 0.5, 0.4, 0.3],
+        soilTension: [20, 30, 40, 50],
+        Saturation: 0,
+        FieldCapacity: [20, 40],
+        PermanentWiltingPoint: 50
+      },
+      "Montmorillonite": {
+        waterRetention: [0.7, 0.6, 0.5, 0.4],
+        soilTension: [25, 35, 45, 55],
+        Saturation: 0,
+        FieldCapacity: [25, 45],
+        PermanentWiltingPoint: 55
+      },
+      "Vermiculite": {
+        waterRetention: [0.6, 0.5, 0.4, 0.3],
+        soilTension: [20, 30, 40, 50],
+        Saturation: 0,
+        FieldCapacity: [20, 40],
+        PermanentWiltingPoint: 50
+      },
+      "Humus": {
+        waterRetention: [0.5, 0.4, 0.3, 0.2],
+        soilTension: [15, 25, 35, 45],
+        Saturation: 0,
+        FieldCapacity: [15, 35],
+        PermanentWiltingPoint: 45
+      },
+      "Peat_Soil": {
+        waterRetention: [0.4, 0.3, 0.2, 0.1],
+        soilTension: [10, 20, 30, 40],
+        Saturation: 0,
+        FieldCapacity: [10, 30],
+        PermanentWiltingPoint: 40
+      },
+      "Sandy_Clay_Loam": {
+        waterRetention: [0.5, 0.4, 0.3, 0.2],
+        soilTension: [15, 25, 35, 45],
+        Saturation: 0,
+        FieldCapacity: [15, 35],
+        PermanentWiltingPoint: 45
+      },
+      "Silty_Clay": {
+        waterRetention: [0.6, 0.5, 0.4, 0.3],
+        soilTension: [20, 30, 40, 50],
+        Saturation: 0,
+        FieldCapacity: [20, 40],
+        PermanentWiltingPoint: 50
+      },
+      "Loess_Soil": {
+        waterRetention: [0.5, 0.4, 0.3, 0.2],
+        soilTension: [15, 25, 35, 45],
+        Saturation: 0,
+        FieldCapacity: [15, 35],
+        PermanentWiltingPoint: 45
+      },
+      "Chalky_Soil": {
+        waterRetention: [0.4, 0.3, 0.2, 0.1],
+        soilTension: [10, 20, 30, 40],
+        Saturation: 0,
+        FieldCapacity: [10, 30],
+        PermanentWiltingPoint: 40
+      },
+      "Volcanic_Ash_Soil": {
+        waterRetention: [0.5, 0.4, 0.3, 0.2],
+        soilTension: [15, 25, 35, 45],
+        Saturation: 0,
+        FieldCapacity: [15, 35],
+        PermanentWiltingPoint: 45
+      },
+      "Sesquioxides": {
+        waterRetention: [0.6, 0.5, 0.4, 0.3],
+        soilTension: [20, 30, 40, 50],
+        Saturation: 0,
+        FieldCapacity: [20, 40],
+        PermanentWiltingPoint: 50
+      }
+    };
 
       // For debug set custom API path
       var Api_path = ""; // production api path for local fetch
@@ -253,6 +304,18 @@
         var time_period = document.getElementById(
           "maximum_time_period_form"
         ).value;
+        var pwp = document.getElementById(
+          "pwp_form"
+        ).value;
+        var fcu = document.getElementById(
+          "fcu_form"
+        ).value;
+        var fcl = document.getElementById(
+          "fcl_form"
+        ).value;
+        var sat = document.getElementById(
+          "sat_form"
+        ).value;
 
         // Convert the selected date to an ISO timestamp => TODO: check timestamp
         var isoTimestamp = new Date(starting_date).toISOString();
@@ -271,7 +334,15 @@
           "&start=" +
           encodeURIComponent(isoTimestamp) +
           "&period=" +
-          encodeURIComponent(time_period);
+          encodeURIComponent(time_period) +
+          "&pwp=" +
+          encodeURIComponent(pwp) +
+          "&fcu=" +
+          encodeURIComponent(fcu) +
+          "&fcl=" +
+          encodeURIComponent(fcl) +
+          "&sat=" +
+          encodeURIComponent(sat);
 
         return Params;
       }
@@ -485,23 +556,23 @@
           <div class="main-sensors">
             <div class="moisture">
               <label for="sensor_list_moisture"
-                >Choose soil moisture sensors</label>
+                >Choose soil moisture sensors:</label>
               <select id="sensor_list_moisture" multiple size="5"></select>
             </div>
             <div class="temperature">
               <label for="sensor_list_temp"
-                >Choose soil temperature sensors</label>
+                >Choose soil temperature sensors:</label>
               <select id="sensor_list_temp" multiple size="5"></select>
             </div>
             <div class="actuation">
               <label for="actuator_list_flow"
-                >Choose soil water flow sensor</label>
+                >Choose soil water flow sensor:</label>
               <select id="actuator_list_flow" multiple size="5"></select>
             </div>
           </div>
           <div class="main-sensors">
             <div>
-              <label for="gps">GPS coordinates</label>
+              <label for="gps">GPS coordinates:</label>
               <input
                 id="gps_form"
                 type="text"
@@ -509,26 +580,15 @@
                 value="51.023591, 13.744087"
               />
             </div>
-            <div>
+            <div><!--TODO: needs to be deactivated without reload-->
               <label for="slope"
-                >Slope for detecting artificial irrgation</label
+                >Slope for detecting artificial irrgation:</label
               >
               <input id="slope_form" type="number" name="slope" value="-0.07" />
             </div>
             <div>
-              <label for="tension_threshold"
-                >Soil tension threshold (in cbar, hPa)</label
-              >
-              <input
-                id="tension_threshold_form"
-                type="number"
-                name="tension_threshold"
-                value="7"
-              />
-            </div>
-            <div>
               <label for="irrigation_amount"
-                >Amount of one irrigation cycle (in liters)</label
+                >Amount of one irrigation cycle (in liters):</label
               >
               <input
                 id="irrigation_amount_form"
@@ -539,7 +599,7 @@
             </div>
             <div>
               <label for="look_ahead_time"
-                >Time to look ahead in forecast how long soil tension threshold can be exceeded in hours.</label
+                >Time to look ahead in forecast how long soil tension threshold can be exceeded in hours:</label
               >
               <input
                 id="look_ahead_time_form"
@@ -549,7 +609,7 @@
               />
             </div>
             <div>
-              <label for="starting_timestamp">Starting date</label>
+              <label for="starting_timestamp">Starting date:</label>
               <input
                 id="starting_timestamp_form"
                 type="date"
@@ -557,7 +617,7 @@
               />
             </div>
             <div>
-              <label for="maximum_time_period">Max time period </label>
+              <label for="maximum_time_period">Max time period: </label>
               <input
                 id="maximum_time_period_form"
                 type="number"
@@ -599,12 +659,10 @@
                 <option value="Sesquioxides">Sesquioxides</option>
               </select>
             </div>
-          </div>
-        </div>
-        <div class="water-retention">
-          <div>
-            <label for="slope">Custom soil water retention curve:</label>
-            <textarea id="soil_water_retention_text" name="myText" rows="6">
+          <div class="water-retention">
+            <div>
+              <label for="slope">Custom soil water retention curve:</label>
+                <textarea id="soil_water_retention_text" name="myText" rows="6">
 0, 0.225
 5, 0.2
 10, 0.185
@@ -613,11 +671,61 @@
 100, 0.1
 200, 0.075
 500, 0.05
-1000, 0.025
-</textarea
-            >
+1000, 0.025</textarea>
+              </div>
+            </div>
+            <div>
+              <div>
+                <label for="pwp">Permanent Wilting Point:</label>
+                <input
+                  id="pwp_form"
+                  type="number"
+                  name="pwp"
+                  value="40"
+                />
+              </div>
+              <div>
+                <label for="fcu">Field Capacity upper bound:</label>
+                <input
+                  id="fcu_form"
+                  type="number"
+                  name="fcu"
+                  value="30"
+                />
+              </div>
+              <div>
+                <label for="fcl">Field Capacity lower bound:</label>
+                <input
+                  id="fcl_form"
+                  type="number"
+                  name="fcl"
+                  value="10"
+                />
+              </div>
+              <div>
+                <label for="sat">Saturation:</label>
+                <input
+                  id="sat_form"
+                  type="number"
+                  name="sat"
+                  value="0"
+                />
+              </div>
+              <div>
+                <label for="tension_threshold"
+                  >Soil tension threshold (in cbar, hPa)</label
+                >
+                <input
+                  id="tension_threshold_form"
+                  type="number"
+                  name="tension_threshold"
+                  value="7"
+                />
+              </div>
+            </div>
           </div>
         </div>
+      </div>
         <br />
         <div class="action-buttons">
           <button class="save" type="button" onclick="setConfig()">
