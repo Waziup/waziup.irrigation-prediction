@@ -198,9 +198,12 @@ textarea {
   border: 1px solid #e0e0e0;
   border-radius: 8px;
   padding: 20px;
-  width: 45%; /* Adjust the width as needed */
+  width: 100%; /* Full width within flex container */
+  max-width: 45%; /* Ensure they don't exceed 45% of the total width */
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   font-family: 'Arial', sans-serif;
+  box-sizing: border-box; /* Make sure padding and border are included in the width */
+  margin-bottom: 20px; /* Add spacing between containers on small screens */
 }
 
 .sensor-heading, .irrigation-heading {
@@ -216,6 +219,22 @@ textarea {
   margin-bottom: 10px;
   padding: 8px;
   border-bottom: 1px solid #ddd;
+}
+
+input[type="text"] {
+  width: 100%;
+  padding: 10px;
+  margin-top: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.container-wrapper {
+  display: flex;
+  justify-content: space-between; /* Keep two containers next to each other */
+  gap: 20px; /* Add some spacing between them */
+  flex-wrap: wrap; /* Allow wrapping on smaller screens */
 }
 
 .sensor-value:last-child, .irrigation-value:last-child {
@@ -282,4 +301,12 @@ textarea {
 ::-webkit-scrollbar-thumb {
   background: #888;
   border-radius: 12px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .sensor-container, .irrigation-container {
+    max-width: 100%; /* Make them take full width on smaller screens */
+    margin-bottom: 20px; /* Ensure there's space between them vertically */
+  }
 }

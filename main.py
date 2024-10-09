@@ -195,7 +195,7 @@ def setConfig(url, body):
     Slope = parsed_data.get('slope', [])[0]
     Threshold = float(parsed_data.get('thres', [])[0])
     Irrigation_amount = parsed_data.get('amount', [])[0]
-    Look_ahead_time = int(parsed_data.get('lookahead', [])[0])
+    Look_ahead_time = float(parsed_data.get('lookahead', [])[0])
     Start_date = parsed_data.get('start', [])[0]
     Period = int(parsed_data.get('period', [])[0])
     PermanentWiltingPoint = int(parsed_data.get('pwp', [])[0])
@@ -277,10 +277,10 @@ def getConfigFromFile():
     Look_ahead_time = float(data.get('Look_ahead_time', []))
     Start_date = data.get('Start_date', [])
     Period = int(data.get('Period', []))
-    PermanentWiltingPoint = int(data.get('pwp', [])[0])
-    FieldCapacityUpper = int(data.get('fcu', [])[0])
-    FieldCapacityLower = int(data.get('fcl', [])[0])
-    Saturation = int(data.get('sat', [])[0])
+    PermanentWiltingPoint = float(data.get('PermanentWiltingPoint', []))
+    FieldCapacityUpper = float(data.get('FieldCapacityUpper', []))
+    FieldCapacityLower = float(data.get('FieldCapacityLower', []))
+    Saturation = float(data.get('Saturation', []))
 
     # Get soil water retention curve -> currently not needed here
     # Soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
@@ -471,7 +471,7 @@ def getPredictionChartData(url, body):
                     'color': '#fff',
                     'background': '#FF4560'
                 },
-                'text': 'Threshold'
+                'text': 'Threshold for irrigation'
             }
         }]
     }
@@ -525,7 +525,7 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
     global CurrentlyTraining
 
     # Set the time interval in seconds (e.g., 60 seconds for 1 minute)
-    time_interval = Look_ahead_time*60*60/1.8 # From config train TODO: check whether useful
+    time_interval = Look_ahead_time*60*60/1.8 # From config train TODO: check whether useful, it is not once a day to preserve energy is still
 
     while True:
         start_time = datetime.now().replace(microsecond=0)

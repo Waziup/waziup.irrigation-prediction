@@ -18,8 +18,8 @@
       var waitForTraining = true;
       var timestamp = "";
       // Apex charts is rather slow in handeling many datapoints => needs to be restricted
-      var MaxValuesToBeDisplayed = 1500
-      
+      var MaxValuesToBeDisplayed = 1500      
+      let chart
 
       // Nav
       function goToSettings() {
@@ -297,12 +297,183 @@
           .catch((error) => console.error("Error fetching data:", error));
       }
 
-      function fetchPredictionChartData() {
+      function fetchPredictionChartData(selectedSeries = 'soilTension') {
+        fetch("../api/getPredictionChartData")
+            .then((response) => response.json())
+            .then((chartData) => {
+                if (chartData.model == false) {
+                    // Handle case where no model is available
+                } else {
+                    // Format the data
+                    var moistureSeriesRounded = chartData.moistureSeries.map((value) =>
+                        parseFloat(value.toFixed(2))
+                    );
+                    var moistureSeriesVolRounded = chartData.moistureSeriesVol.map((value) =>
+                        parseFloat(value.toFixed(4))
+                    );
+                    var formattedTimestamps = chartData.timestamps.map((timestamp) =>
+                        formatTimestamp(timestamp)
+                    );
+    
+                    var options = {
+                        chart: {
+                            type: "line",
+                            title: "Prediction Soil Moisture",
+                            events: {
+                                legendClick: function (chartContext, { seriesIndex }) {
+                                    // Handle annotations for soil tension based on series click
+                                    if (seriesIndex === 0) { // Assuming "Moisture in cbar" is the first series
+                                        // Toggle series visibility
+                                        const isHidden = chartContext.isSeriesHidden(seriesIndex);
+                                        chartContext.toggleSeries(seriesIndex); // Toggle the series
+    
+                                        // Update annotations based on series visibility
+                                        if (isHidden) {
+                                            options.annotations.yaxis = getSoilTensionAnnotations(chartData);
+                                        } else {
+                                            options.annotations.yaxis = []; // Clear annotations if series is shown
+                                        }
+    
+                                        // Ensure the chart is updated without re-rendering
+                                        chart.updateOptions(options, false);
+                                    }
+                                },
+                            },
+                        },
+                        series: [
+                            {
+                                name: "Moisture in cbar",
+                                data: moistureSeriesRounded,
+                            },
+                            {
+                                name: "Volumetric Water Content",
+                                data: moistureSeriesVolRounded,
+                            },
+                        ],
+                        xaxis: {
+                            categories: formattedTimestamps,
+                            labels: {
+                                rotate: -45,
+                                minHeight: 40,
+                            },
+                        },
+                        yaxis: [
+                            {
+                                title: {
+                                    text: "Moisture in cbar",
+                                },
+                                labels: {
+                                    formatter: function (val) {
+                                        return (typeof val === 'number' && !isNaN(val)) ? val.toFixed(0) : ''; // Display without decimals
+                                    },
+                                },
+                                min: 0,
+                                max: Math.max(...moistureSeriesRounded).toFixed(0),
+                            },
+                            {
+                                opposite: true, // Show the second y-axis on the right
+                                title: {
+                                    text: "Volumetric Water Content",
+                                },
+                                labels: {
+                                    formatter: function (val) {
+                                        return (typeof val === 'number' && !isNaN(val)) ? val.toFixed(2) : ''; // Format Volumetric Water Content with more decimals
+                                    },
+                                },
+                                min: Math.min(...moistureSeriesVolRounded).toFixed(0),
+                                max: Math.max(...moistureSeriesVolRounded).toFixed(0),
+                            }
+                        ],
+                        annotations: {
+                            yaxis: getSoilTensionAnnotations(chartData),
+                        },
+                        legend: {
+                            show: true, // Ensure the legend is always shown
+                        },
+                    };
+    
+                    // Create the chart if it doesn't exist
+                    if (!chart) {
+                        chart = new ApexCharts(document.querySelector("#chart_pred"), options);
+                        chart.render();
+                    } else {
+                        chart.updateOptions(options);
+                    }
+                }
+            })
+            .catch((error) => console.error("Error fetching data:", error));
+    }
+    
+    // Function to get annotations for soil tension with colored areas
+    function getSoilTensionAnnotations(chartData) {
+        return [
+            // Area between Saturation and Field Capacity Lower
+            {
+                y: chartData.fieldCapacityLower,
+                borderColor: "transparent",
+                label: {
+                    text: "",
+                },
+                offsetX: 0,
+                offsetY: 0,
+                shape: 'rect',
+                x: chartData.timestamps.length - 1, // Rightmost position to cover the area
+                fillColor: "rgba(173, 216, 230, 0.5)", // Color for this area (light blue)
+                y2: chartData.saturation, // Ending y value to create the filled area
+            },
+            // Area between Field Capacity Lower and Field Capacity Upper
+            {
+                y: chartData.fieldCapacityUpper,
+                borderColor: "transparent",
+                label: {
+                    text: "",
+                },
+                offsetX: 0,
+                offsetY: 0,
+                shape: 'rect',
+                x: chartData.timestamps.length - 1, // Rightmost position to cover the area
+                fillColor: "rgba(144, 238, 144, 0.5)", // Color for this area (light green)
+                y2: chartData.fieldCapacityLower, // Ending y value to create the filled area
+            },
+            {
+              y: chartData.fieldCapacityUpper,
+              borderColor: "transparent",
+              label: {
+                  text: "",
+              },
+              offsetX: 0,
+              offsetY: 0,
+              shape: 'rect',
+              x: chartData.timestamps.length - 1, // Rightmost position to cover the area
+              fillColor: "rgba(144, 238, 144, 0.5)", // Color for this area (light green)
+              y2: chartData.permanentWiltingPoint, // Ending y value to create the filled area
+          },
+          {
+            y: chartData.permanentWiltingPoint,
+            borderColor: "transparent",
+            label: {
+                text: "",
+            },
+            offsetX: 0,
+            offsetY: 0,
+            shape: 'rect',
+            x: chartData.timestamps.length - 1, // Rightmost position to cover the area
+            fillColor: "rgba(144, 238, 144, 0.5)", // Color for this area (light green)
+            y2: 255 // Ending y value to create the filled area
+        },
+        ];
+    }
+      
+
+      function fetchPredictionChartData_no_areas(selectedSeries = 'soilTension') {
         fetch("../api/getPredictionChartData")
           .then((response) => response.json())
           .then((chartData) => {
             if (chartData.model == false) {
               // Handle case where no model is available
+              // alert(
+              //   'Please start training procedure by pressing the "Start Training" button, after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.'
+              // );
             } else {
               // Format the data
               var moistureSeriesRounded = chartData.moistureSeries.map((value) =>
@@ -315,7 +486,6 @@
                 formatTimestamp(timestamp)
               );
       
-              // Set up the chart options
               var options = {
                 chart: {
                   type: "line",
@@ -329,7 +499,7 @@
                   {
                     name: "Volumetric Water Content",
                     data: moistureSeriesVolRounded,
-                  },
+                  }
                 ],
                 xaxis: {
                   categories: formattedTimestamps,
@@ -338,115 +508,105 @@
                     minHeight: 40,
                   },
                 },
-                yaxis: {
-                  // Add y-axis ranges as per the backend data
-                  min: 0,
-                  max: Math.max(chartData.moistureSeries), // You can customize this max value as needed
-                  annotations: {
-                    yaxis: [
-                      {
-                        y: chartData.permanentWiltingPoint, // Permanent Wilting Point line
-                        borderColor: "#FF5733",
-                        label: {
-                          text: "Permanent Wilting Point",
-                          style: {
-                            color: "#fff",
-                            background: "#FF5733",
-                          },
-                        },
+                yaxis: [
+                  {
+                    title: {
+                      text: "Moisture in cbar",
+                    },
+                    labels: {
+                      formatter: function (val) {
+                        return (typeof val === 'number' && !isNaN(val)) ? val.toFixed(0) : ''; // Display without decimals
                       },
-                      {
-                        y: chartData.fieldCapacityUpper, // Upper Field Capacity line
-                        borderColor: "#33FF57",
-                        label: {
-                          text: "Field Capacity (Upper)",
-                          style: {
-                            color: "#fff",
-                            background: "#33FF57",
-                          },
-                        },
+                    },
+                    min: 0,
+                    max: Math.max(...moistureSeriesRounded).toFixed(0), // Y-axis scale for Moisture in cbar
+                  },
+                  {
+                    opposite: true, // Show the second y-axis on the right
+                    title: {
+                      text: "Volumetric Water Content",
+                    },
+                    labels: {
+                      formatter: function (val) {
+                        return (typeof val === 'number' && !isNaN(val)) ? val.toFixed(2) : ''; // Format Volumetric Water Content with more decimals
                       },
-                      {
-                        y: chartData.fieldCapacityLower, // Lower Field Capacity line
-                        borderColor: "#33AFFF",
-                        label: {
-                          text: "Field Capacity (Lower)",
-                          style: {
-                            color: "#fff",
-                            background: "#33AFFF",
-                          },
-                        },
-                      },
-                      {
-                        y: chartData.saturation, // Saturation point
-                        borderColor: "#FFD700",
-                        label: {
-                          text: "Saturation",
-                          style: {
-                            color: "#fff",
-                            background: "#FFD700",
-                          },
-                        },
-                      },
-                    ],
+                    },
+                    min: Math.min(...moistureSeriesVolRounded).toFixed(0),
+                    max: Math.max(...moistureSeriesVolRounded).toFixed(0),
+                  }
+                ],
+                legend: {
+                  onItemClick: {
+                    toggleDataSeries: true // Enable toggling series visibility
+                  },
+                  onItemHover: {
+                    highlightDataSeries: true // Highlight data series on hover
+                  }
+                },
+                fill: {
+                  type: 'solid', // Use gradient fill
+                  gradient: {
+                    shade: 'light', // Set gradient shade
+                    type: 'vertical', // Vertical gradient
+                    shadeIntensity: 0.3,
+                    gradientToColors: ['#33FF57', '#FFD700'], // Colors for upper areas
+                    inverseColors: false,
+                    opacityFrom: 0.3,
+                    opacityTo: 0.1,
+                    stops: [0, 100]
                   },
                 },
-                // Additional custom annotations
-                annotations: {
-                  xaxis: [], // Add any custom x-axis annotations if needed
-                  yaxis: [
-                    {
-                      y: chartData.permanentWiltingPoint,
-                      borderColor: "#FF5733",
-                      label: {
-                        text: "Permanent Wilting Point",
-                        style: {
-                          color: "#fff",
-                          background: "#FF5733",
-                        },
-                      },
-                    },
-                    {
-                      y: chartData.fieldCapacityUpper,
-                      borderColor: "#33FF57",
-                      label: {
-                        text: "Field Capacity (Upper)",
-                        style: {
-                          color: "#fff",
-                          background: "#33FF57",
-                        },
-                      },
-                    },
-                    {
-                      y: chartData.fieldCapacityLower,
-                      borderColor: "#33AFFF",
-                      label: {
-                        text: "Field Capacity (Lower)",
-                        style: {
-                          color: "#fff",
-                          background: "#33AFFF",
-                        },
-                      },
-                    },
-                    {
-                      y: chartData.saturation,
-                      borderColor: "#FFD700",
-                      label: {
-                        text: "Saturation",
-                        style: {
-                          color: "#fff",
-                          background: "#FFD700",
-                        },
-                      },
-                    },
-                  ],
-                },
+                // Add the annotations property from backend
+                annotations: chartData.annotations // Use the annotations from the backend
               };
+               // Add threshold annotations for filling areas
+              if (typeof chartData.fieldCapacityLower === 'number' && typeof chartData.fieldCapacityUpper === 'number') {
+                options.annotations.yaxis.push({
+                  y: chartData.fieldCapacityLower,
+                  borderColor: '#33FF57',
+                  label: {
+                    text: 'Field Capacity Lower',
+                    style: {
+                      color: '#fff',
+                      background: '#33FF57'
+                    }
+                  },
+                  // The fill area can be created using the fill property
+                  fillColor: 'rgba(51, 255, 87, 0.5)', // Set the color for filling
+                  strokeDashArray: 0 // Set to 0 for solid line
+                });
+                options.annotations.yaxis.push({
+                  y: chartData.fieldCapacityUpper,
+                  borderColor: '#33FF57',
+                  label: {
+                    text: 'Field Capacity Upper',
+                    style: {
+                      color: '#fff',
+                      background: '#33FF57'
+                    }
+                  },
+                  fillColor: 'rgba(51, 255, 87, 0.5)', // Set the color for filling
+                  strokeDashArray: 0 // Set to 0 for solid line
+                });
+              }
+
+              if (typeof chartData.fieldCapacityUpper === 'number' && typeof chartData.saturation === 'number') {
+                options.annotations.yaxis.push({
+                  y: chartData.saturation,
+                  borderColor: '#FFD700',
+                  label: {
+                    text: 'Saturation',
+                    style: {
+                      color: '#fff',
+                      background: '#FFD700'
+                    }
+                  },
+                  fillColor: 'rgba(255, 215, 0, 0.5)', // Set the color for filling
+                  strokeDashArray: 0 // Set to 0 for solid line
+                });
+              }
       
-              var chart = new ApexCharts(
-                document.querySelector("#chart_pred"),
-                options
-              );
+              var chart = new ApexCharts(document.querySelector("#chart_pred"), options);
               chart.render();
       
               // Hide the "Volumetric Water Content" series after rendering

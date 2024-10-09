@@ -48,6 +48,8 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 #import kerastuner as kt
 from keras_tuner import Hyperband, HyperParameters
+import time
+from keras.callbacks import Callback
 
 # local
 import main
@@ -118,6 +120,9 @@ Model_mapping = {
 Data = pd.DataFrame
 Predictions = pd.DataFrame
 Threshold_timestamp = ""
+Use_pycaret = True
+Tuned_best = None
+Best_exp = None
 
 # Load data from CSV, is set if there is a file in the root directory
 CSVFile = "binned_removed_new_for_app_ww.csv"
@@ -125,6 +130,20 @@ LoadDataFromCSV = False
 
 # Load former irrigations from file "data/irrigations.json"
 Load_irrigations_from_file = False
+
+# Restrict time to training
+class TimeLimitCallback(Callback):
+    def __init__(self, max_time_seconds):
+        super(TimeLimitCallback, self).__init__()
+        self.max_time_seconds = max_time_seconds
+        self.start_time = time.time()
+
+    def on_epoch_end(self, epoch, logs=None):  # Changed to on_epoch_end
+        elapsed_time = time.time() - self.start_time
+        print(f"Epoch {epoch}: Elapsed time {elapsed_time:.2f} seconds")
+        if elapsed_time > self.max_time_seconds:
+            self.model.stop_training = True
+            print(f"Training stopped after {self.max_time_seconds} seconds")
 
 
 def read_config():
@@ -1639,71 +1658,71 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Create an array to store all the models
     nn_models = []
 
-    # Create neural network
+    # # Create neural network
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('units_hidden1', 64)
-    hp.Fixed('units_hidden2', 32)
-    hp.Fixed('optimizer', 'adam')
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('units_hidden1', 64)
+    # hp.Fixed('units_hidden2', 32)
+    # hp.Fixed('optimizer', 'adam')
 
-    # Call the model function with the hp object and the input shape
-    input_shape = (X_train.shape[1],)
-    model_nn = create_nn_model(hp, shape=input_shape)
+    # # Call the model function with the hp object and the input shape
+    # input_shape = (X_train.shape[1],)
+    # model_nn = create_nn_model(hp, shape=input_shape)
 
-    # Train the model
-    print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
-    history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_nn)
+    # # Train the model
+    # print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
+    # history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_nn)
 
-    # Create conv neural network
+    # # Create conv neural network
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('units_hidden1', 64)
-    hp.Fixed('optimizer', 'adam')
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('units_hidden1', 64)
+    # hp.Fixed('optimizer', 'adam')
 
-    # Call the model function with the hp object and the input shape
-    input_shape = (X_train_cnn.shape[1], 1)
-    model_cnn = create_cnn_model(hp, shape=input_shape)
+    # # Call the model function with the hp object and the input shape
+    # input_shape = (X_train_cnn.shape[1], 1)
+    # model_cnn = create_cnn_model(hp, shape=input_shape)
     
-    # Train the model
-    print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
-    history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_cnn)
+    # # Train the model
+    # print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
+    # history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_cnn)
 
-    # Create RNN model
+    # # Create RNN model
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('units_hidden1', 50)  # Fixed units for RNN
-    hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('units_hidden1', 50)  # Fixed units for RNN
+    # hp.Fixed('optimizer', 'adam')  # Fixed optimizer
 
-    input_shape = (X_train.shape[1], 1)
-    model_rnn = create_rnn_model(hp, shape=input_shape)
+    # input_shape = (X_train.shape[1], 1)
+    # model_rnn = create_rnn_model(hp, shape=input_shape)
 
-    # Train the model
-    print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
-    history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_rnn)
+    # # Train the model
+    # print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
+    # history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_rnn)
 
-    # Create GRU model
+    # # Create GRU model
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('units_hidden1', 50)  # Fixed units for GRU
-    hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('units_hidden1', 50)  # Fixed units for GRU
+    # hp.Fixed('optimizer', 'adam')  # Fixed optimizer
 
-    input_shape = (X_train.shape[1], 1)
-    model_gru = create_gru_model(hp, shape=input_shape)
-    # Train the model
-    print('Will now train a Gated Recurrent Unit neural network (GRU), with the following hyperparameters: ' + str(hp.values))
-    history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_gru)
+    # input_shape = (X_train.shape[1], 1)
+    # model_gru = create_gru_model(hp, shape=input_shape)
+    # # Train the model
+    # print('Will now train a Gated Recurrent Unit neural network (GRU), with the following hyperparameters: ' + str(hp.values))
+    # history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_gru)
 
     # LSTM architecture
 
@@ -2024,24 +2043,33 @@ def tune_models(exp, best):
 def tune_model_nn(X_train_scaled, y_train, best_model_nn):
     print("Tuning best NN model (", best_model_nn.model_name, ") after evaluation.")
 
+    # quick workaround for adjusting train shape for tuning a lstm
+    if best_model_nn.model_name == 'lstm_model': # TODO: check
+        X_train_scaled = X_train_scaled.reshape((X_train_scaled.shape[0], 1, X_train_scaled.shape[1]))
+
     hp = HyperParameters()
 
     tuner = Hyperband(
         model_builder_with_shape(Model_functions[best_model_nn.model_name], best_model_nn.shape),
         objective='val_mae',
-        max_epochs=100,             # Tune epochs between 10 and 100,
-        factor=2,                   # Reduces the number of epochs for each successive run, Defaults to 3.
+        max_epochs=10,              # Tune epochs between 10 and 100 # TODO: was 100
+        factor=4,                   # Reduces the number of epochs for each successive run, Defaults to 3.
         hyperband_iterations=1,     # Limits the number full hyperband runs
         directory='hyperband_dir',
         project_name='hyperband_' + best_model_nn.model_name,
         overwrite=True
     )
 
+    # Set the max time in seconds
+    max_time_seconds = 60 
+    time_limit_callback = TimeLimitCallback(max_time_seconds)
+
     tuner.search(X_train_scaled, 
                     y_train, 
-                    epochs=hp.Int('epochs', 10, 100), 
+                    epochs=hp.Int('epochs', 5, 10), #10 100
                     batch_size=32, 
-                    validation_split=0.2
+                    validation_split=0.2,
+                    callbacks=[time_limit_callback]  # Add the time limit callback here
     )
 
     # Print the best hyperparameters
@@ -2070,6 +2098,10 @@ def generate_predictions(best, exp, features):
     return predictions
 
 def generate_predictions_nn(best_model_nn, features, start, end):
+    # quick workaround for adjusting train shape for tuning a lstm
+    if best_model_nn.model_name == 'lstm_model': # TODO: check
+        features = features.reshape((features.shape[0], 1, features.shape[1]))
+
     # Generate predictions
     predictions = best_model_nn.predict(features[..., np.newaxis])
     
@@ -2124,12 +2156,39 @@ def get_threshold_timestamp():
     else:
         return Threshold_timestamp
 
-# Mighty main fuction ;)
-def main() -> int:
+def predict_with_updated_data():
     global Predictions
+    global Best_exp
+    global Threshold_timestamp
+
+    train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = data_pipeline()
+    # Create future value set to feed new data to model
+    future_features = create_future_values(Data)
+    # Compare dataframes cols to be sure that they match, otherwise drop
+    future_features = compare_train_predictions_cols(train, future_features)
+    # NN
+    if not Use_pycaret:
+        Z, Z_scaled, Z_cnn = prepare_future_values(scaler, future_features, X_train.columns)
+        Predictions = generate_predictions_nn(Tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])
+    else:
+        Predictions = generate_predictions(Tuned_best, Best_exp, future_features)
+    
+    # Cut passed time from predictions
+    Predictions = Predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]    
+    
+    # Calculate when threshold will be meet
+    Threshold_timestamp = calc_threshold(Predictions)
+
+    # Add volumetric water content
+    Predictions = add_volumetric_col_to_df(Predictions, "prediction_label")
+
+    # Return last accumulated reading and threshold timestamp
+    return Data['rolling_mean_grouped_soil'][-1], Threshold_timestamp, Predictions
+
+
+def data_pipeline():
     global Data
     global ApiUrl
-    global Threshold_timestamp
     global Current_config
 
     # Check version of pycaret, should be >= 3.0
@@ -2150,6 +2209,19 @@ def main() -> int:
     train, test = split_by_ratio(Data, 20) # here a split is done to rule out the models that are overfitting
     # NN
     X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = prepare_data_for_cnn(Data, 'rolling_mean_grouped_soil')
+
+    return train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler
+
+# Mighty main fuction ;)
+def main() -> int:
+    global Predictions
+    global Threshold_timestamp
+    global Use_pycaret
+    global Tuned_best
+    global Best_exp
+
+    # Data preparation: get config, fetch, align, clean, sample....
+    train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = data_pipeline()
 
     # Start training pipeline: setup, train models the best ones to best-array
     # Classical regression
@@ -2177,15 +2249,15 @@ def main() -> int:
     best_eval_nn, results_nn = evaluate_against_testset_nn(nn_models, X_test_scaled, y_test)
 
     # Decide which approach is best
-    index, use_pycaret = eval_approach(results, results_nn, 'mae')
+    index, Use_pycaret = eval_approach(results, results_nn, 'mae')
 
     # TODO: Debug mode
-    #use_pycaret = False
+    #Use_pycaret = False
 
     # Train best model on whole dataset (without skipping "test-set")
-    if use_pycaret:
+    if Use_pycaret:
         # Classical regression
-        best_model, best_exp = train_best(best_eval, Data)
+        best_model, Best_exp = train_best(best_eval, Data)
     else:
         # NN -> TODO: eval properly -> still error in r2 calc, fallback to mae
         best_model_nn, X_scaled, y = train_best_nn(best_eval_nn, Data, scaler)
@@ -2196,16 +2268,16 @@ def main() -> int:
     # Compare dataframes cols to be sure that they match, otherwise drop
     future_features = compare_train_predictions_cols(train, future_features)
     # NN
-    if not use_pycaret:
+    if not Use_pycaret:
         Z, Z_scaled, Z_cnn = prepare_future_values(scaler, future_features, X_train.columns)
 
 
-    if use_pycaret:
+    if Use_pycaret:
         # Before tuning
         #best_model_before_tuning = best_exp.compare_models()
         
         # Tune hyperparameters of the 3 best models, see notebook TODO: better use try catch, add tuning for nn models
-        tuned_best = tune_model(best_exp, best_model)
+        Tuned_best = tune_model(Best_exp, best_model)
         
         # After tuning
         #best_model_after_tuning = best_exp.compare_models()
@@ -2228,12 +2300,12 @@ def main() -> int:
 
         # Create predictions to forecast values
         # Classical regression
-        Predictions = generate_predictions(tuned_best, best_exp, future_features)
+        Predictions = generate_predictions(Tuned_best, Best_exp, future_features)
     else:
-        tuned_best = tune_model_nn(X_scaled, y, best_model_nn)
+        Tuned_best = tune_model_nn(X_scaled, y, best_model_nn)
 
         # NN
-        Predictions = generate_predictions_nn(tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])
+        Predictions = generate_predictions_nn(Tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])
 
     # Cut passed time from predictions
     Predictions = Predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]    
