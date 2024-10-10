@@ -291,7 +291,6 @@
               chart.hideSeries("Soil_temperature_7-28");
               chart.hideSeries("Soil_moisture_0-7");
               chart.hideSeries("Et0_evapotranspiration");
-              chart.hideSeries("pump_state");
             }
           })
           .catch((error) => console.error("Error fetching data:", error));
@@ -302,7 +301,8 @@
             .then((response) => response.json())
             .then((chartData) => {
                 if (chartData.model == false) {
-                    // Handle case where no model is available
+                // Handle case where no model is available
+                  alert('Please start training procedure by pressing the "Start Training" button, after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.');
                 } else {
                     // Format the data
                     var moistureSeriesRounded = chartData.moistureSeries.map((value) =>
@@ -385,7 +385,11 @@
                             }
                         ],
                         annotations: {
-                            yaxis: getSoilTensionAnnotations(chartData),
+                          yaxis: [
+                              ...getSoilTensionAnnotations(chartData), // Add frontend custom annotations
+                              ...(Array.isArray(chartData.annotations?.yaxis) ? chartData.annotations.yaxis : []) // Use the annotations from the backend
+                              
+                          ]
                         },
                         legend: {
                             show: true, // Ensure the legend is always shown
@@ -399,6 +403,9 @@
                     } else {
                         chart.updateOptions(options);
                     }
+
+                    // Hide the "Volumetric Water Content" series after rendering
+                    chart.hideSeries("Volumetric Water Content");
                 }
             })
             .catch((error) => console.error("Error fetching data:", error));
@@ -412,13 +419,19 @@
                 y: chartData.fieldCapacityLower,
                 borderColor: "transparent",
                 label: {
-                    text: "",
+                    text: "Saturation",        
+                    style: {
+                      fontSize: "12px",
+                    },
+                    position: 'right', // Align to the right
+                    offsetY: 50, // Vertical offset for middle alignment
+                    offsetX: 0, // Horizontal offset for right alignment
                 },
                 offsetX: 0,
                 offsetY: 0,
                 shape: 'rect',
                 x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-                fillColor: "rgba(173, 216, 230, 0.5)", // Color for this area (light blue)
+                fillColor: "rgba(173, 216, 255, 0.5)", // Color for this area (light blue)
                 y2: chartData.saturation, // Ending y value to create the filled area
             },
             // Area between Field Capacity Lower and Field Capacity Upper
@@ -426,7 +439,13 @@
                 y: chartData.fieldCapacityUpper,
                 borderColor: "transparent",
                 label: {
-                    text: "",
+                    text: "Field Capacity Lower",
+                    style: {
+                      fontSize: "12px",
+                    },
+                    position: 'right', // Align to the right
+                    offsetY: 50, // Vertical offset for middle alignment
+                    offsetX: 0, // Horizontal offset for right alignment
                 },
                 offsetX: 0,
                 offsetY: 0,
@@ -436,30 +455,42 @@
                 y2: chartData.fieldCapacityLower, // Ending y value to create the filled area
             },
             {
-              y: chartData.fieldCapacityUpper,
+              y: chartData.permanentWiltingPoint,
               borderColor: "transparent",
               label: {
-                  text: "",
+                  text: "Field Capacity Higher",                    
+                  style: {
+                    fontSize: "12px",
+                  },
+                  position: 'right', // Align to the right
+                  offsetY: 50, // Vertical offset for middle alignment
+                  offsetX: 0, // Horizontal offset for right alignment
               },
               offsetX: 0,
               offsetY: 0,
               shape: 'rect',
               x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-              fillColor: "rgba(144, 238, 144, 0.5)", // Color for this area (light green)
-              y2: chartData.permanentWiltingPoint, // Ending y value to create the filled area
+              fillColor: "rgba(255, 200, 124, 0.5)", // Color for this area (light orange)
+              y2: chartData.fieldCapacityUpper, // Ending y value to create the filled area
           },
           {
-            y: chartData.permanentWiltingPoint,
+            y: Math.max(...chartData.moistureSeries).toFixed(0),
             borderColor: "transparent",
             label: {
-                text: "",
+                text: "Permanent Wilting Point",
+                style: {
+                  fontSize: "12px",
+                },
+                position: 'right', // Align to the right
+                offsetY: 50, // Vertical offset for middle alignment
+                offsetX: 0, // Horizontal offset for right alignment
             },
             offsetX: 0,
             offsetY: 0,
             shape: 'rect',
             x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-            fillColor: "rgba(144, 238, 144, 0.5)", // Color for this area (light green)
-            y2: 255 // Ending y value to create the filled area
+            fillColor: "rgba(255, 182, 193, 0.5)", // Color for this area (light red)
+            y2: chartData.permanentWiltingPoint // Ending y value to create the filled area
         },
         ];
     }

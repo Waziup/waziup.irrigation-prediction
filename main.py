@@ -481,7 +481,7 @@ def getPredictionChartData(url, body):
         "timestamps": f_data_time,
         "moistureSeries": f_data_moisture,
         "moistureSeriesVol": f_data_moisture_vol,
-        "annotations": annotations,
+        "annotations": annotations, # Could be also just the value instead of annotations object
         "permanentWiltingPoint": PermanentWiltingPoint,
         "fieldCapacityUpper": FieldCapacityUpper,
         "fieldCapacityLower": FieldCapacityLower,
@@ -520,20 +520,32 @@ def isTrainingReady(url, body):
 usock.routerGET("/api/isTrainingReady", isTrainingReady)
     
 
-def workerToTrain(thread_id, url): # TODO: do we really need threading here?
+def workerToTrain(thread_id, url, startTrainingNow):
     global TrainingFinished
     global CurrentlyTraining
 
-    # Set the time interval in seconds (e.g., 60 seconds for 1 minute)
-    time_interval = Look_ahead_time*60*60/1.8 # From config train TODO: check whether useful, it is not once a day to preserve energy is still
+    def time_until_noon():
+        """Calculate the time difference from now until the next noon."""
+        now = datetime.now()
+        noon_today = now.replace(hour=12, minute=0, second=0, microsecond=0)
+        if now >= noon_today:
+            # If it's already past noon, calculate for the next day
+            noon_today += timedelta(days=1)
+        return (noon_today - now).total_seconds()
 
     while True:
+        if(startTrainingNow):
+            # Wait until the next noon
+            time_to_sleep = time_until_noon()
+            print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until next noon...")
+            time.sleep(time_to_sleep)  # Sleep until noon
+
         start_time = datetime.now().replace(microsecond=0)
         print("Training started at:", start_time)
 
         file_path = pathlib.Path('saved_variables.pkl')
 
-        if (Perform_training):
+        if Perform_training:
             # Call create model function
             currentSoilTension, threshold_timestamp, predictions = create_model.main()
 
@@ -554,20 +566,16 @@ def workerToTrain(thread_id, url): # TODO: do we really need threading here?
             threshold_timestamp = loaded_variables['threshold_timestamp']
             predictions = loaded_variables['predictions']
 
-
-        # TODO: reload page
         TrainingFinished = True
         CurrentlyTraining = False
+        startTrainingNow = False
 
         end_time = datetime.now().replace(microsecond=0)
         duration = end_time - start_time
         print("Training finished at: ", end_time, "The duration was: ", duration)
 
-        # Call routine to irrgate
+        # Call routine to irrigate
         actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
-
-        # Send thread to sleep
-        time.sleep(time_interval)  # Wait for the specified time interval
 
 def startTraining(url, body):
     global ThreadId
@@ -575,12 +583,12 @@ def startTraining(url, body):
     global CurrentlyTraining
 
     if not CurrentlyTraining:
-        # Switch off for 2nd, ... round
+        # Reset flags for a new round
         TrainingFinished = False
         CurrentlyTraining = True
 
-        # Create a new thread
-        thread = threading.Thread(target=workerToTrain, args=(ThreadId, url))    
+        # Create a new thread for training
+        thread = threading.Thread(target=workerToTrain, args=(ThreadId, url, True))
         ThreadId += 1
 
         # Append thread to list

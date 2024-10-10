@@ -56,8 +56,8 @@
             "VWC": " 0.025"
         }
     ],
-    "PermanentWiltingPoint": 40,
-    "FieldCapacityUpper": 30,
-    "FieldCapacityLower": 10,
+    "PermanentWiltingPoint": 15,
+    "FieldCapacityUpper": 10,
+    "FieldCapacityLower": 5,
     "Saturation": 0
 }
