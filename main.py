@@ -59,6 +59,10 @@ Start_date = ""
 # Time period to include into the model
 Period = 0
 
+# Frequencies train/predict
+Train_period_days = 1
+Predict_period_hours = 1 #6
+
 # Retention curve => not needed any more
 Soil_water_retention_curve = [
     (0, 0.45),
@@ -82,6 +86,8 @@ Saturation = 0
 # Array of active threads TODO: if training started kill other threads.
 Threads = []
 ThreadId = 0
+Training_thread = None
+Prediction_thread = None
 
 TrainingFinished = False
 CurrentlyTraining = False
@@ -518,26 +524,95 @@ def isTrainingReady(url, body):
     return 200, bytes(json.dumps(response_data), "utf8"), []
 
 usock.routerGET("/api/isTrainingReady", isTrainingReady)
-    
 
+# Thread that runs prediction
+def workerToPredict():
+    def time_until_n_hours(hours):
+        """Calculate the time difference from now until the next noon."""
+        now = datetime.now()
+        predict_time = now + timedelta(hours=hours, minutes=0, seconds=0, microseconds=0)
+
+        return (predict_time - now).total_seconds()
+    
+    # Initial waiting, after model was trained, prediction was conducted and actuation was triggered 
+    time_to_sleep = time_until_n_hours(Predict_period_hours)
+    print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until conducting next prediction...")
+    time.sleep(time_to_sleep)  # Sleep until threshold
+    
+    while True:
+        start_time = datetime.now().replace(microsecond=0)
+        print("Prediction started at:", start_time)
+
+        file_path = pathlib.Path('saved_variables.pkl')
+
+        if Perform_training: #same var is used here to preserve functionality
+            # Call predict_with_updated_data function
+            currentSoilTension, threshold_timestamp, predictions = create_model.predict_with_updated_data()
+
+            # Create object to save
+            variables_to_save = {
+                'currentSoilTension': currentSoilTension,
+                'threshold_timestamp': threshold_timestamp,
+                'predictions': predictions
+            }
+            # Save the variables to a file
+            with open(file_path, 'wb') as f:
+                pickle.dump(variables_to_save, f)
+        else:
+            # Load the saved variables from the file
+            with open(file_path, 'rb') as f:
+                loaded_variables = pickle.load(f)
+            currentSoilTension = loaded_variables['currentSoilTension']
+            threshold_timestamp = loaded_variables['threshold_timestamp']
+            predictions = loaded_variables['predictions']
+
+        end_time = datetime.now().replace(microsecond=0)
+        duration = end_time - start_time
+        print("Prediction finished at: ", end_time, "The duration was: ", duration)
+
+        # Call routine to irrigate
+        actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
+
+        # Wait for Predict_period_hours periodically for next cycle
+        time_to_sleep = time_until_n_hours(Predict_period_hours)
+        print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until conducting next prediction...")
+        time.sleep(time_to_sleep)  # Sleep until threshold
+
+def startPrediction():
+    global ThreadId
+    global Prediction_thread
+
+    if not CurrentlyTraining:
+        # Create a new thread for training
+        Prediction_thread = threading.Thread(target=workerToPredict)
+        ThreadId += 1
+
+        # Append thread to list
+        Threads.append(Prediction_thread)
+
+        # Start the thread
+        Prediction_thread.start()
+
+    
+# Thread that runs training
 def workerToTrain(thread_id, url, startTrainingNow):
     global TrainingFinished
     global CurrentlyTraining
 
-    def time_until_noon():
+    def time_until_noon(train_period_days):
         """Calculate the time difference from now until the next noon."""
         now = datetime.now()
         noon_today = now.replace(hour=12, minute=0, second=0, microsecond=0)
         if now >= noon_today:
             # If it's already past noon, calculate for the next day
-            noon_today += timedelta(days=1)
+            noon_today += timedelta(days=train_period_days)
         return (noon_today - now).total_seconds()
 
     while True:
-        if(startTrainingNow):
+        if not startTrainingNow:
             # Wait until the next noon
-            time_to_sleep = time_until_noon()
-            print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until next noon...")
+            time_to_sleep = time_until_noon(Train_period_days)
+            print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until next training...")
             time.sleep(time_to_sleep)  # Sleep until noon
 
         start_time = datetime.now().replace(microsecond=0)
@@ -577,25 +652,37 @@ def workerToTrain(thread_id, url, startTrainingNow):
         # Call routine to irrigate
         actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
 
+        # Start thread that creates predictions periodically
+        if Prediction_thread is None:
+            startPrediction()
+        # if not Prediction_thread.is_alive():
+        #     startPrediction()
+
+
 def startTraining(url, body):
     global ThreadId
     global TrainingFinished
     global CurrentlyTraining
+    global Training_thread
 
     if not CurrentlyTraining:
+        # Stop/kill all other threads for training a model
+        if Training_thread is not None:
+            Training_thread.kill()
+
         # Reset flags for a new round
         TrainingFinished = False
         CurrentlyTraining = True
 
         # Create a new thread for training
-        thread = threading.Thread(target=workerToTrain, args=(ThreadId, url, True))
+        Training_thread = threading.Thread(target=workerToTrain, args=(ThreadId, url, True))
         ThreadId += 1
 
         # Append thread to list
-        Threads.append(thread)
+        Threads.append(Training_thread)
 
         # Start the thread
-        thread.start()
+        Training_thread.start()
 
     return 200, b"", []
 
