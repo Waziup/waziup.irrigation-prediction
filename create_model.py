@@ -2061,7 +2061,7 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
     )
 
     # Set the max time in seconds
-    max_time_seconds = 60 
+    max_time_seconds = 60 #3600
     time_limit_callback = TimeLimitCallback(max_time_seconds)
 
     tuner.search(X_train_scaled, 
@@ -2182,7 +2182,7 @@ def predict_with_updated_data():
     # Add volumetric water content
     Predictions = add_volumetric_col_to_df(Predictions, "prediction_label")
 
-    # Return last accumulated reading and threshold timestamp
+    # Return last accumulated reading and threshold timestamp currentSoilTension, threshold_timestamp, predictions 
     return Data['rolling_mean_grouped_soil'][-1], Threshold_timestamp, Predictions
 
 
@@ -2276,7 +2276,7 @@ def main() -> int:
         # Before tuning
         #best_model_before_tuning = best_exp.compare_models()
         
-        # Tune hyperparameters of the 3 best models, see notebook TODO: better use try catch, add tuning for nn models
+        # Tune hyperparameters of the 3 best models, see notebook
         Tuned_best = tune_model(Best_exp, best_model)
         
         # After tuning

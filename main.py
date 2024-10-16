@@ -525,12 +525,22 @@ def isTrainingReady(url, body):
 
 usock.routerGET("/api/isTrainingReady", isTrainingReady)
 
+# surveillance, check threads are running
+def check_threads():
+    if not Training_thread or not Training_thread.is_alive():
+        print("Training thread not alive, restarting...")
+        startTraining(url=None, body=None)
+
+    if not Prediction_thread or not Prediction_thread.is_alive():
+        print("Prediction thread not alive, restarting...")
+        startPrediction()
+
 # Thread that runs prediction
 def workerToPredict():
     def time_until_n_hours(hours):
         """Calculate the time difference from now until the next noon."""
         now = datetime.now()
-        predict_time = now + timedelta(hours=hours, minutes=0, seconds=0, microseconds=0)
+        predict_time = now + timedelta(hours=0, minutes=hours, seconds=0, microseconds=0) #TODO: change to hours
 
         return (predict_time - now).total_seconds()
     
@@ -540,43 +550,50 @@ def workerToPredict():
     time.sleep(time_to_sleep)  # Sleep until threshold
     
     while True:
-        start_time = datetime.now().replace(microsecond=0)
-        print("Prediction started at:", start_time)
+        try:
+            start_time = datetime.now().replace(microsecond=0)
+            print("Prediction started at:", start_time)
 
-        file_path = pathlib.Path('saved_variables.pkl')
+            file_path = pathlib.Path('saved_variables.pkl')
 
-        if Perform_training: #same var is used here to preserve functionality
-            # Call predict_with_updated_data function
-            currentSoilTension, threshold_timestamp, predictions = create_model.predict_with_updated_data()
+            if Perform_training: #same var is used here to preserve functionality
+                # Call predict_with_updated_data function
+                currentSoilTension, threshold_timestamp, predictions = create_model.predict_with_updated_data()
 
-            # Create object to save
-            variables_to_save = {
-                'currentSoilTension': currentSoilTension,
-                'threshold_timestamp': threshold_timestamp,
-                'predictions': predictions
-            }
-            # Save the variables to a file
-            with open(file_path, 'wb') as f:
-                pickle.dump(variables_to_save, f)
-        else:
-            # Load the saved variables from the file
-            with open(file_path, 'rb') as f:
-                loaded_variables = pickle.load(f)
-            currentSoilTension = loaded_variables['currentSoilTension']
-            threshold_timestamp = loaded_variables['threshold_timestamp']
-            predictions = loaded_variables['predictions']
+                # Create object to save
+                variables_to_save = {
+                    'currentSoilTension': currentSoilTension,
+                    'threshold_timestamp': threshold_timestamp,
+                    'predictions': predictions
+                }
+                # Save the variables to a file
+                with open(file_path, 'wb') as f:
+                    pickle.dump(variables_to_save, f)
+            else:
+                # Load the saved variables from the file
+                with open(file_path, 'rb') as f:
+                    loaded_variables = pickle.load(f)
+                currentSoilTension = loaded_variables['currentSoilTension']
+                threshold_timestamp = loaded_variables['threshold_timestamp']
+                predictions = loaded_variables['predictions']
 
-        end_time = datetime.now().replace(microsecond=0)
-        duration = end_time - start_time
-        print("Prediction finished at: ", end_time, "The duration was: ", duration)
+            end_time = datetime.now().replace(microsecond=0)
+            duration = end_time - start_time
+            print("Prediction finished at: ", end_time, "The duration was: ", duration)
 
-        # Call routine to irrigate
-        actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
+            # Call routine to irrigate
+            actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
 
-        # Wait for Predict_period_hours periodically for next cycle
-        time_to_sleep = time_until_n_hours(Predict_period_hours)
-        print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until conducting next prediction...")
-        time.sleep(time_to_sleep)  # Sleep until threshold
+            # After initial training and prediction, start surveillance
+            threading.Timer(3600, check_threads).start()  # Check every hour if threads are alive
+
+            # Wait for Predict_period_hours periodically for next cycle
+            time_to_sleep = time_until_n_hours(Predict_period_hours)
+            print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until conducting next prediction...")
+            time.sleep(time_to_sleep)  # Sleep until threshold
+        except Exception as e:
+            print(f"Prediction thread error: {e}. Retrying after 30 minute.")
+            time.sleep(1800)  # Retry after 30 minute if there is an error
 
 def startPrediction():
     global ThreadId
@@ -609,54 +626,58 @@ def workerToTrain(thread_id, url, startTrainingNow):
         return (noon_today - now).total_seconds()
 
     while True:
-        if not startTrainingNow:
-            # Wait until the next noon
-            time_to_sleep = time_until_noon(Train_period_days)
-            print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until next training...")
-            time.sleep(time_to_sleep)  # Sleep until noon
+        try:
+            if not startTrainingNow:
+                # Wait until the next noon
+                time_to_sleep = time_until_noon(Train_period_days)
+                print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until next training...")
+                time.sleep(time_to_sleep)  # Sleep until noon
 
-        start_time = datetime.now().replace(microsecond=0)
-        print("Training started at:", start_time)
+            start_time = datetime.now().replace(microsecond=0)
+            print("Training started at:", start_time)
 
-        file_path = pathlib.Path('saved_variables.pkl')
+            file_path = pathlib.Path('saved_variables.pkl')
 
-        if Perform_training:
-            # Call create model function
-            currentSoilTension, threshold_timestamp, predictions = create_model.main()
+            if Perform_training:
+                # Call create model function
+                currentSoilTension, threshold_timestamp, predictions = create_model.main()
 
-            # Create object to save
-            variables_to_save = {
-                'currentSoilTension': currentSoilTension,
-                'threshold_timestamp': threshold_timestamp,
-                'predictions': predictions
-            }
-            # Save the variables to a file
-            with open(file_path, 'wb') as f:
-                pickle.dump(variables_to_save, f)
-        else:
-            # Load the saved variables from the file
-            with open(file_path, 'rb') as f:
-                loaded_variables = pickle.load(f)
-            currentSoilTension = loaded_variables['currentSoilTension']
-            threshold_timestamp = loaded_variables['threshold_timestamp']
-            predictions = loaded_variables['predictions']
+                # Create object to save
+                variables_to_save = {
+                    'currentSoilTension': currentSoilTension,
+                    'threshold_timestamp': threshold_timestamp,
+                    'predictions': predictions
+                }
+                # Save the variables to a file
+                with open(file_path, 'wb') as f:
+                    pickle.dump(variables_to_save, f)
+            else:
+                # Load the saved variables from the file
+                with open(file_path, 'rb') as f:
+                    loaded_variables = pickle.load(f)
+                currentSoilTension = loaded_variables['currentSoilTension']
+                threshold_timestamp = loaded_variables['threshold_timestamp']
+                predictions = loaded_variables['predictions']
 
-        TrainingFinished = True
-        CurrentlyTraining = False
-        startTrainingNow = False
+            TrainingFinished = True
+            CurrentlyTraining = False
+            startTrainingNow = False
 
-        end_time = datetime.now().replace(microsecond=0)
-        duration = end_time - start_time
-        print("Training finished at: ", end_time, "The duration was: ", duration)
+            end_time = datetime.now().replace(microsecond=0)
+            duration = end_time - start_time
+            print("Training finished at: ", end_time, "The duration was: ", duration)
 
-        # Call routine to irrigate
-        actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
+            # Call routine to irrigate
+            actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
 
-        # Start thread that creates predictions periodically
-        if Prediction_thread is None:
-            startPrediction()
-        # if not Prediction_thread.is_alive():
-        #     startPrediction()
+            # Start thread that creates predictions periodically
+            if Prediction_thread is None:
+                startPrediction()
+            # if not Prediction_thread.is_alive():
+            #     startPrediction()
+        except Exception as e:
+            print(f"Training error: {e}. Retrying after 30 minute.")
+            time.sleep(1800)  # Retry after 30 minute if there is an error
 
 
 def startTraining(url, body):
@@ -668,7 +689,7 @@ def startTraining(url, body):
     if not CurrentlyTraining:
         # Stop/kill all other threads for training a model
         if Training_thread is not None:
-            Training_thread.kill()
+            Training_thread.terminate()
 
         # Reset flags for a new round
         TrainingFinished = False

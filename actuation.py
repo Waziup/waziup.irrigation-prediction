@@ -56,22 +56,22 @@ def find_next_occurrences(df, column, threshold):
         next_lower_idx = None
 
     # Find the next occurrence of a value higher than the threshold after the next lower index
-    if next_lower_idx is not None:
-        # Filter the DataFrame to include only rows with indices greater than or equal to 'next_lower_idx'
-        filtered_df_higher = df[df.index >= next_lower_idx]
+    #if next_lower_idx is not None:
+    # Filter the DataFrame to include only rows with indices greater than or equal to 'next_lower_idx'
+    filtered_df_higher = df[df.index >= next_lower_idx]
 
-        # Further filter the DataFrame to include only rows where the specified column's value is greater than the 'threshold'
-        filtered_higher = filtered_df_higher[filtered_df_higher[column] > threshold]
+    # Further filter the DataFrame to include only rows where the specified column's value is greater than the 'threshold'
+    filtered_higher = filtered_df_higher[filtered_df_higher[column] > threshold]
 
-        # Convert the filtered DataFrame's index to a list
-        next_higher_idx = filtered_higher.index.tolist()
+    # Convert the filtered DataFrame's index to a list
+    next_higher_idx = filtered_higher.index.tolist()
 
-        if next_higher_idx:
-            next_higher_idx = next_higher_idx[0]
-        else:
-            next_higher_idx = None
+    if next_higher_idx:
+        next_higher_idx = next_higher_idx[0]
     else:
         next_higher_idx = None
+# else:
+#     next_higher_idx = None
 
     return next_lower_idx.tz_convert('UTC').tz_localize(None) if next_lower_idx is not None else None, next_higher_idx.tz_convert('UTC').tz_localize(None) if next_higher_idx is not None else None # for that I will go to timezone hell
 
@@ -183,7 +183,7 @@ def irrigate_amount(amount):
 
 
 # Mighty main fuction TODO:capsulate
-def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount) -> int:
+def main_old(currentSoilTension, threshold_timestamp, predictions, irrigation_amount) -> int:
     global TimeSpanOverThreshold
     #####################################################################
     ## TODO: remove DEBUG vars                                          #
@@ -197,7 +197,7 @@ def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount
     #####################################################################
     now = datetime.now().replace(microsecond=0)
 
-    # "Weak" irrigation strategy
+    # "Weak" irrigation strategy TODO: higher: no lower----> was not met
     # If threshold was met
     if currentSoilTension > threshold:
         print(f"Threshold: {threshold} was reached with a value of {currentSoilTension}.")
@@ -218,7 +218,7 @@ def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount
                 return e
             return 0
         elif threshold_timestamp:
-            #and next occurance within 12h
+            #and next occurance within TimeSpanOverThreshold (e.g.12h)
             next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'prediction_label', threshold)
             if next_higher_idx:
                 print(f"Threshold: {threshold} will be meet again in the next {TimeSpanOverThreshold} hours, irrigate now!")
@@ -231,6 +231,57 @@ def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount
     # Threshold was not met, so do not irrigate
     else:
         print(f"Threshold: {threshold} is not reached, cuurent soil tension is: {currentSoilTension}, do not irrigate.")
+        return 0
+    
+# Mighty main function TODO: capsulate
+def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount) -> int:
+    global TimeSpanOverThreshold
+    #####################################################################
+    ## TODO: remove DEBUG vars                                          #
+    # Get threshold from config                                         #
+    threshold = create_model.Current_config['Threshold']           #
+    # set timestamp for debug reasons
+    TimeSpanOverThreshold = create_model.Current_config['Look_ahead_time']                                  #
+    future_time = datetime.now() + timedelta(hours=TimeSpanOverThreshold)                  #
+    threshold_timestamp = future_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ") #
+    ## TODO: remove DEBUG vars                                          #
+    #####################################################################
+    now = datetime.now().replace(microsecond=0)
+
+    # "Weak" irrigation strategy
+    # If threshold was met
+    if currentSoilTension > threshold:
+        print(f"Threshold: {threshold} was reached with a value of {currentSoilTension}.")
+
+        # If current soil tension exceeds threshold by more than allowed margin, irrigate immediately
+        if currentSoilTension > threshold * OverThresholdAllowed:
+            print(f"Threshold: {threshold} was exceeded by 20%, irrigate immediately!")
+            e = irrigate_amount(irrigation_amount)
+            return e
+        
+        # Check predictions
+        next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'prediction_label', threshold)
+
+        # If no lower value is predicted within the forecast horizon, trigger irrigation
+        if not next_lower_idx:
+            print(f"No lower value predicted within {TimeSpanOverThreshold} hours, irrigate now!")
+            e = irrigate_amount(irrigation_amount)
+            return e
+        
+        # # If no higher value is predicted within the horizon, trigger irrigation
+        # elif not next_higher_idx:
+        #     print(f"Predicted values stay high or rise, irrigate now!")
+        #     e = irrigate_amount(irrigation_amount)
+        #     return e
+        
+        # Otherwise, no immediate irrigation is needed
+        else:
+            print(f"Soil tension is high, but irrigation can wait. Since it is expected go below the threshold at: {next_lower_idx}")
+            return 0
+
+    # Threshold was not met, so do not irrigate
+    else:
+        print(f"Threshold: {threshold} is not reached, current soil tension is: {currentSoilTension}, do not irrigate.")
         return 0
 
 
