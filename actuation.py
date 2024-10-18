@@ -37,9 +37,11 @@ def get_max_min(df, target_col='prediction_label'):
 
 # Function to find next lower and higher value occurrence
 def find_next_occurrences(df, column, threshold):
+    timezone = create_model.Timezone
+
     # Start @current time
     # timezone = create_model.get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"])
-    idx = pd.Timestamp(datetime.now().replace(microsecond=0)).tz_localize(create_model.Timezone) #TODO: timezone is missing here, replace with timezone, uncomment above
+    idx = pd.Timestamp(datetime.now().replace(microsecond=0)).tz_localize(timezone) #TODO: timezone is missing here, replace with timezone, uncomment above
 
     # Filter the DataFrame to include only rows with indices greater than or equal to 'idx'
     filtered_df = df[df.index >= idx]
@@ -50,30 +52,34 @@ def find_next_occurrences(df, column, threshold):
 
     # Convert the filtered DataFrame's index to a list
     next_lower_idx = filtered_lower.index.tolist()
+    
+    # Take first occurance from list
     if next_lower_idx:
         next_lower_idx = next_lower_idx[0]
     else:
         next_lower_idx = None
 
     # Find the next occurrence of a value higher than the threshold after the next lower index
-    #if next_lower_idx is not None:
-    # Filter the DataFrame to include only rows with indices greater than or equal to 'next_lower_idx'
-    filtered_df_higher = df[df.index >= next_lower_idx]
+    if next_lower_idx is not None:
+        # Filter the DataFrame to include only rows with indices greater than or equal to 'next_lower_idx'
+        filtered_df_higher = df[df.index >= next_lower_idx]
 
-    # Further filter the DataFrame to include only rows where the specified column's value is greater than the 'threshold'
-    filtered_higher = filtered_df_higher[filtered_df_higher[column] > threshold]
+        # Further filter the DataFrame to include only rows where the specified column's value is greater than the 'threshold'
+        filtered_higher = filtered_df_higher[filtered_df_higher[column] > threshold]
 
-    # Convert the filtered DataFrame's index to a list
-    next_higher_idx = filtered_higher.index.tolist()
+        # Convert the filtered DataFrame's index to a list
+        next_higher_idx = filtered_higher.index.tolist()
 
-    if next_higher_idx:
-        next_higher_idx = next_higher_idx[0]
+        # Take first occurance from list
+        if next_higher_idx:
+            next_higher_idx = next_higher_idx[0]
+        else:
+            next_higher_idx = None
+    # Consequently if there is no occurance of lower, just take first one from inputdata
     else:
-        next_higher_idx = None
-# else:
-#     next_higher_idx = None
+        next_higher_idx = df.index[0]
 
-    return next_lower_idx.tz_convert('UTC').tz_localize(None) if next_lower_idx is not None else None, next_higher_idx.tz_convert('UTC').tz_localize(None) if next_higher_idx is not None else None # for that I will go to timezone hell
+    return next_lower_idx, next_higher_idx 
 
 # Function to read existing data from the JSON file
 def read_data_from_file(filename):
@@ -267,12 +273,6 @@ def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount
             print(f"No lower value predicted within {TimeSpanOverThreshold} hours, irrigate now!")
             e = irrigate_amount(irrigation_amount)
             return e
-        
-        # # If no higher value is predicted within the horizon, trigger irrigation
-        # elif not next_higher_idx:
-        #     print(f"Predicted values stay high or rise, irrigate now!")
-        #     e = irrigate_amount(irrigation_amount)
-        #     return e
         
         # Otherwise, no immediate irrigation is needed
         else:

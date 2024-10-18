@@ -539,7 +539,7 @@ def convert_cols(data):
     for col in data.columns:
         if data[col].dtype == obj_dtype:
             data[col] = pd.to_numeric(data[col], errors='coerce')
-        print("This is :",col, "it has the following dtype: ", data[col].dtype)
+        print(col, "has the following dtype: ", data[col].dtype)
 
     return data
 
@@ -747,6 +747,9 @@ def include_irrigation_amount(df):
             # Round the timestamps to the nearest hour and aggregate the irrigation amounts
             df_irrigation['Timestamp'] = df_irrigation['Timestamp'].dt.round('H')
             df_irrigation = df_irrigation.groupby('Timestamp').agg({'irrigation_amount': 'sum'}).reset_index()
+
+            # subtract one hour, like wtf!!!!
+            #df_irrigation['Timestamp'] = df_irrigation['Timestamp'] - pd.to_timedelta(1, unit='h')
 
             # Set the Timestamp as the index
             df_irrigation.set_index('Timestamp', inplace=True)
@@ -1658,7 +1661,7 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Create an array to store all the models
     nn_models = []
 
-    # # Create neural network
+    # # Create neural network # DEBUG
 
     # # Create a dummy HyperParameters object with fixed values
     # hp = HyperParameters()
@@ -1785,7 +1788,7 @@ def model_builder_with_shape(model_func, shape):
 
 
 # Perform evaluation, create predictions on testset (X_test) and save models
-def save_models_nn(nn_models, X_test_scaled, y_test):
+def save_models_nn(nn_models):
     for i in range(len(nn_models)):     
         # # Make predictions, it is only a test, not saved -> change it
         # try:
@@ -2205,7 +2208,13 @@ def data_pipeline():
     
     # Data preparation pipeline, calls other subfunction to perform the task
     # Classical regression
-    Data = prepare_data()  
+    Data = prepare_data()
+
+    # Search for gaps in data again (quick fix) => tackle problem with latest data "nan", in case of irrigations saved
+    if Data.isna().any().any():
+        #Data.drop(Data.index[-1], inplace=True)
+        Data.dropna(inplace=True)
+      
     train, test = split_by_ratio(Data, 20) # here a split is done to rule out the models that are overfitting
     # NN
     X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = prepare_data_for_cnn(Data, 'rolling_mean_grouped_soil')
@@ -2234,7 +2243,7 @@ def main() -> int:
     # Classical regression:
     model_names = save_models(exp, best)
     # NN: (print eval(on X_test) and save to disk)
-    save_models_nn(nn_models, X_test_scaled, y_test)
+    save_models_nn(nn_models)
     
     # Load regression model from disk, if there was a magical error => TODO: useless, because it would stop before, surround more with try except
     try:

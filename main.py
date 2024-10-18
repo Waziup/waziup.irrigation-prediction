@@ -88,6 +88,7 @@ Threads = []
 ThreadId = 0
 Training_thread = None
 Prediction_thread = None
+Restart_time = 30 #1800 # DEBUG
 
 TrainingFinished = False
 CurrentlyTraining = False
@@ -593,7 +594,7 @@ def workerToPredict():
             time.sleep(time_to_sleep)  # Sleep until threshold
         except Exception as e:
             print(f"Prediction thread error: {e}. Retrying after 30 minute.")
-            time.sleep(1800)  # Retry after 30 minute if there is an error
+            time.sleep(Restart_time)  # Retry after 30 minute if there is an error
 
 def startPrediction():
     global ThreadId
@@ -677,7 +678,7 @@ def workerToTrain(thread_id, url, startTrainingNow):
             #     startPrediction()
         except Exception as e:
             print(f"Training error: {e}. Retrying after 30 minute.")
-            time.sleep(1800)  # Retry after 30 minute if there is an error
+            time.sleep(Restart_time)  # Retry after 30 minute if there is an error
 
 
 def startTraining(url, body):
