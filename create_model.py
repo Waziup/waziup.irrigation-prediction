@@ -118,6 +118,7 @@ Model_mapping = {
 
 # predictions 
 Data = pd.DataFrame
+Data_w = pd.DataFrame
 Predictions = pd.DataFrame
 Threshold_timestamp = ""
 Use_pycaret = True
@@ -430,13 +431,19 @@ def get_timezone(latitude_str, longitude_str):
 
 # Get historical values from open-meteo TODO: include timezone service: https://stackoverflow.com/questions/16086962/how-to-get-a-time-zone-from-a-location-using-latitude-and-longitude-coordinates
 def get_historical_weather_api(data):
+    global Data_w
 
-    first_day_minus_one_str = (data.index[0] - timedelta(days = 1)).strftime("%Y-%m-%d")
+    # TODO: remove that one day overlapping data
+    if Data_w.empty:
+        first_day_minus_one_str = (data.index[0] - timedelta(days = 1)).strftime("%Y-%m-%d")
+    else:
+        first_day_minus_one_str = (Data_w.index[-1] - timedelta(days = 1)).strftime("%Y-%m-%d")
+
+    #data_w_former_end = Data_w.index[-1]
 
     # need to add one day, overlapping have to be cut off later => useless because data is not available to fetch via api
     last_date = data.index[-1]
-    last_day_plus_one = last_date + timedelta(days=0)
-    last_day_plus_one_str = last_day_plus_one.strftime("%Y-%m-%d")
+    last_date_str = last_date.strftime("%Y-%m-%d")
 
     lat = Current_config["Gps_info"]["lattitude"]
     long = Current_config["Gps_info"]["longitude"]
@@ -446,7 +453,7 @@ def get_historical_weather_api(data):
         f'?latitude={lat}'
         f'&longitude={long}'
         f'&start_date={first_day_minus_one_str}'
-        f'&end_date={last_day_plus_one_str}'
+        f'&end_date={last_date_str}'
         f'&hourly=temperature_2m,relativehumidity_2m,rain,cloudcover,shortwave_radiation,windspeed_10m,winddirection_10m,soil_temperature_7_to_28cm,soil_moisture_0_to_7cm,et0_fao_evapotranspiration'
         f'&timezone={Timezone}'
     )
@@ -454,7 +461,7 @@ def get_historical_weather_api(data):
     dct = json.loads(dct)
 
     # Also convert it to a pandas dataframe
-    data_w = (pd.DataFrame([dct['hourly']['temperature_2m'], 
+    data_w_fetched = (pd.DataFrame([dct['hourly']['temperature_2m'], 
                           dct['hourly']['relativehumidity_2m'], 
                           dct['hourly']['rain'], 
                           dct['hourly']['cloudcover'], 
@@ -472,13 +479,24 @@ def get_historical_weather_api(data):
             .dropna())
 
     # Add timezone information without converting 
-    data_w.index = data_w.index.map(lambda x: x.replace(tzinfo=pytz.timezone(Timezone)))
+    data_w_fetched.index = data_w_fetched.index.map(lambda x: x.replace(tzinfo=pytz.timezone(Timezone)))
     #data_w.index = pd.to_datetime(data_w.index) + pd.DateOffset(hours=get_timezone_offset(timezone))
     
     # convert cols to float64
-    data_w = convert_cols(data_w)
+    data_w_fetched = convert_cols(data_w_fetched)
 
-    return data_w
+    if Data_w.empty:
+        # Set as global
+        Data_w = data_w_fetched
+    else:
+        # Merge former historical weather data and fetched one into one dataframe
+        Data_w = pd.concat([Data_w.loc[Data_w.index[0]:],
+                            data_w_fetched.loc[Data_w.index[-1] + 
+                                            timedelta(minutes=Sample_rate) 
+                                            : data.index[-1]]
+                                            ])
+
+    return Data_w
 
 # Get weather forecast from open-meteo
 def get_weather_forecast_api(start_date, end_date):
@@ -1263,12 +1281,13 @@ def create_and_compare_model_reg(train):
     return re_exp, best_re
 
 # Save the best models
-def save_models(exp, best):
+def save_models(exp, best, path_to_save):
     # save pipeline
     model_names = []
     for i in range(len(best)):
-        exp.save_model(best[i], 'production_model_' + str(i))
-        model_names.append('production_model_' + str(i))
+        full_path = path_to_save + str(i) + "_" + best[i].__module__
+        exp.save_model(best[i], full_path)
+        model_names.append(full_path)
         
     return model_names
         
@@ -1788,7 +1807,7 @@ def model_builder_with_shape(model_func, shape):
 
 
 # Perform evaluation, create predictions on testset (X_test) and save models
-def save_models_nn(nn_models):
+def save_models_nn(nn_models, path_to_save):
     for i in range(len(nn_models)):     
         # # Make predictions, it is only a test, not saved -> change it
         # try:
@@ -1798,9 +1817,9 @@ def save_models_nn(nn_models):
             
         # Optionally, you can save the trained model for future use
         try:
-            nn_models[i].save('soil_tension_prediction_nn_model_' + str(i) + '.h5')
+            nn_models[i].save(path_to_save + str(i) + '_' + nn_models[i].model_name + '.h5')
         except Exception as e:
-            print(f"Save is not available for the model. {e}")
+            print(f"Save is not available for the model. {nn_models[i].model_name} : {e}")
 
 # Perform a evaluation of the models against the testset(X_test), slit before 
 def evaluate_against_testset_nn(nn_models, X_test_scaled, y_test):
@@ -2241,9 +2260,9 @@ def main() -> int:
     
     # Save the best models for further evaluation
     # Classical regression:
-    model_names = save_models(exp, best)
+    model_names = save_models(exp, best, 'models/intermediate_models/pycaret/soil_tension_prediction_pycaret_model_')
     # NN: (print eval(on X_test) and save to disk)
-    save_models_nn(nn_models)
+    save_models_nn(nn_models, 'models/intermediate_models/nn/soil_tension_prediction_nn_model_')
     
     # Load regression model from disk, if there was a magical error => TODO: useless, because it would stop before, surround more with try except
     try:
@@ -2306,14 +2325,20 @@ def main() -> int:
         
         # Ensemble, Stacking & ... not implemented yet, see notebook
 
+        # Save best pycaret model
+        model_names = save_models(exp, Tuned_best, 'models/best_models/pycaret/best_soil_tension_prediction_pycaret_model_')
 
         # Create predictions to forecast values
         # Classical regression
         Predictions = generate_predictions(Tuned_best, Best_exp, future_features)
     else:
+        # Tune best model
         Tuned_best = tune_model_nn(X_scaled, y, best_model_nn)
 
-        # NN
+        # Save best model
+        save_models_nn([best_model_nn], 'models/best_models/nn/best_soil_tension_prediction_nn_model_')
+
+        # Generate predictions with NN model
         Predictions = generate_predictions_nn(Tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])
 
     # Cut passed time from predictions

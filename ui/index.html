@@ -303,6 +303,8 @@
                 if (chartData.model == false) {
                 // Handle case where no model is available
                   alert('Please start training procedure by pressing the "Start Training" button, after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.');
+                  train_button = document.getElementById('train_btn');
+                  train_button.classList.add('highlight');
                 } else {
                     // Format the data
                     var moistureSeriesRounded = chartData.moistureSeries.map((value) =>
@@ -717,6 +719,8 @@
               alert(
                 "Training process was started, page will reload when procedure is finished!"
               );
+              train_button = document.getElementById('train_btn');
+              set_button.classList.remove('highlight');
               waitForTraining = true;
               isTrainingReady();
             } else {
@@ -831,7 +835,7 @@
             </div>
             <div class="action-buttons">
               <button id="schedule_irrigation" class="settings" type="button" onclick="irrigateManually()">
-                Schedule a Irrigation
+                Schedule an Irrigation
               </button>
             </div>
         </div>

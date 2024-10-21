@@ -155,9 +155,14 @@ catboost_info/
 
 # pycaret models
 *.pkl
+# tensorflow models
+*.h5
 
 # logs 
 *.log
 
 # tuning records
 hyperband_dir/
+
+# models
+models/
