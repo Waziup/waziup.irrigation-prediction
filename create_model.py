@@ -488,6 +488,8 @@ def get_historical_weather_api(data):
     if Data_w.empty:
         # Set as global
         Data_w = data_w_fetched
+    elif data_w_fetched.index[-1] == Data_w.index[-1]:
+        Data_w = data_w_fetched
     else:
         # Merge former historical weather data and fetched one into one dataframe
         Data_w = pd.concat([Data_w.loc[Data_w.index[0]:],
@@ -1284,6 +1286,11 @@ def create_and_compare_model_reg(train):
 def save_models(exp, best, path_to_save):
     # save pipeline
     model_names = []
+
+    # type check for array -> convert
+    if not isinstance(best, list):
+        best = [best]
+
     for i in range(len(best)):
         full_path = path_to_save + str(i) + "_" + best[i].__module__
         exp.save_model(best[i], full_path)
@@ -2046,11 +2053,12 @@ def analyze_performance_old(exp, best):
 def tune_model(exp, best):
     try:        
         #print(f"Tuning grid for {best}: {exp.get_tuning_grid(best)}")
-        return exp.tune_model(best, choose_better = True)
+        best = exp.tune_model(best, choose_better = True)
+        return best
     except Exception as e:
         print(f"There was an error tuning the model. {e}")
         return best
-
+    
 # Tune hyperparameters of several models
 def tune_models(exp, best):
     # tune hyperparameters of dt
@@ -2280,7 +2288,7 @@ def main() -> int:
     index, Use_pycaret = eval_approach(results, results_nn, 'mae')
 
     # TODO: Debug mode
-    #Use_pycaret = False
+    Use_pycaret = True
 
     # Train best model on whole dataset (without skipping "test-set")
     if Use_pycaret:
@@ -2305,7 +2313,12 @@ def main() -> int:
         #best_model_before_tuning = best_exp.compare_models()
         
         # Tune hyperparameters of the 3 best models, see notebook
-        Tuned_best = tune_model(Best_exp, best_model)
+        try:
+            Tuned_best = tune_model(Best_exp, best_model)
+        except Exception as e:
+            print(f"Error during tuning: {e}, using the original model.")
+            Tuned_best = best_model  # Keep original model if tuning fails
+
         
         # After tuning
         #best_model_after_tuning = best_exp.compare_models()
@@ -2326,7 +2339,7 @@ def main() -> int:
         # Ensemble, Stacking & ... not implemented yet, see notebook
 
         # Save best pycaret model
-        model_names = save_models(exp, Tuned_best, 'models/best_models/pycaret/best_soil_tension_prediction_pycaret_model_')
+        model_names = save_models(exp, [Tuned_best], 'models/best_models/pycaret/best_soil_tension_prediction_pycaret_model_')
 
         # Create predictions to forecast values
         # Classical regression

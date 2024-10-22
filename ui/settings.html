@@ -191,6 +191,21 @@
         }
       }
 
+      // Get formerly saved config from backend
+      function getFormerConfig() {
+        return fetch(`../api/returnConfig`)
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.data.status_code == 200) {
+            
+          } else {
+            console.log("No data was formerly set, use std values");
+          }
+        });
+
+      }
+
+
       // Writes water retention tuples according to select in textarea, for further refinement
       function handleSoilTypeChange() {
         // This function will be called when the select element changes.
@@ -524,6 +539,7 @@
           const sensors = parseSensorData(data);
           console.log("Sensors: ", sensors);
           displaySensorsAndElements(sensors);
+          getFormerConfig();
         } catch (error) {
           // Handle errors
           console.error("Error during fetch:", error);

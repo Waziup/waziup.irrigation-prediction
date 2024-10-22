@@ -292,6 +292,59 @@ def getConfigFromFile():
     # Get soil water retention curve -> currently not needed here
     # Soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
 
+# Get the config from backend to disply it in frontend settings.html
+def returnConfig():
+    try:
+        # Check if all necessary global variables are properly defined
+        if not all(isinstance(var, (int, float, list)) for var in [
+            DeviceAndSensorIdsMoisture, DeviceAndSensorIdsTemp, DeviceAndSensorIdsFlow,
+            Gps_info, Slope, Threshold, Irrigation_amount, Look_ahead_time, 
+            Start_date, Period, PermanentWiltingPoint, FieldCapacityUpper, 
+            FieldCapacityLower, Saturation]):
+            raise ValueError("One or more required variables are missing or of incorrect type.")
+
+        # Construct the response data
+        response_data = {
+            "DeviceAndSensorIdsMoisture": DeviceAndSensorIdsMoisture,
+            "DeviceAndSensorIdsTemp": DeviceAndSensorIdsTemp,
+            "DeviceAndSensorIdsFlow": DeviceAndSensorIdsFlow,
+            "Gps_info": Gps_info,
+            "Slope": Slope,
+            "Threshold": Threshold,
+            "Irrigation_amount": Irrigation_amount,
+            "Look_ahead_time": Look_ahead_time,
+            "Start_date": Start_date,
+            "Period": Period,
+            "PermanentWiltingPoint": PermanentWiltingPoint,
+            "FieldCapacityUpper": FieldCapacityUpper,
+            "FieldCapacityLower": FieldCapacityLower,
+            "Saturation": Saturation
+        }
+
+        # If all is good, return a 200 status code and the data
+        response = {
+            "data": response_data,
+            "status_code": 200
+        }
+        return 200, bytes(json.dumps(response), "utf8"), []
+
+    except ValueError as ve:
+        # Return a 400 error for missing or invalid data
+        error_response = {
+            "error": str(ve),
+            "status_code": 400
+        }
+        return 400, bytes(json.dumps(error_response), "utf8"), []
+
+    except Exception as e:
+        # Return a 500 error for any other internal server error
+        error_response = {
+            "error": "An unexpected error occurred: " + str(e),
+            "status_code": 500
+        }
+        return 500, bytes(json.dumps(error_response), "utf8"), []
+    
+usock.routerGET("/api/returnConfig", returnConfig)
 
 def checkConfigPresent(url, body):
     if os.path.exists(ConfigPath):
@@ -312,10 +365,12 @@ def checkConfigPresent(url, body):
 usock.routerGET("/api/checkConfigPresent", checkConfigPresent)
 
 def checkActiveIrrigation(url, body):
+    # Called on page load->important for checkActiveIrrigation
+    getConfigFromFile()
+
     if len(DeviceAndSensorIdsFlow) != 0:
         response_data = {"activeIrrigation": True}
         status_code = 200
-        getConfigFromFile()
     else:
         response_data = {"activeIrrigation": False}
         status_code = 404
