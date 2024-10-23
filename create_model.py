@@ -489,7 +489,7 @@ def get_historical_weather_api(data):
         # Set as global
         Data_w = data_w_fetched
     elif data_w_fetched.index[-1] == Data_w.index[-1]:
-        Data_w = data_w_fetched
+        return Data_w
     else:
         # Merge former historical weather data and fetched one into one dataframe
         Data_w = pd.concat([Data_w.loc[Data_w.index[0]:],

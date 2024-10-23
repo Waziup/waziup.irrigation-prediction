@@ -63,6 +63,9 @@ Period = 0
 Train_period_days = 1
 Predict_period_hours = 1 #6
 
+# Soil_type
+Soil_type = ""
+
 # Retention curve => not needed any more
 Soil_water_retention_curve = [
     (0, 0.45),
@@ -184,10 +187,12 @@ def setConfig(url, body):
     global Look_ahead_time
     global Start_date
     global Period
+    global Soil_type
     global PermanentWiltingPoint
     global FieldCapacityUpper
     global FieldCapacityLower
     global Saturation
+    global Soil_water_retention_curve
 
     # Parse the query parameters from Body
     parsed_data = parse_qs(body.decode('utf-8'))
@@ -201,10 +206,11 @@ def setConfig(url, body):
     Gps_info = parsed_data.get('gps', [])[0]
     Slope = parsed_data.get('slope', [])[0]
     Threshold = float(parsed_data.get('thres', [])[0])
-    Irrigation_amount = parsed_data.get('amount', [])[0]
+    Irrigation_amount = float(parsed_data.get('amount', [])[0])
     Look_ahead_time = float(parsed_data.get('lookahead', [])[0])
     Start_date = parsed_data.get('start', [])[0]
     Period = int(parsed_data.get('period', [])[0])
+    Soil_type = parsed_data.get('soil', [])[0]
     PermanentWiltingPoint = int(parsed_data.get('pwp', [])[0])
     FieldCapacityUpper = int(parsed_data.get('fcu', [])[0])
     FieldCapacityLower = int(parsed_data.get('fcl', [])[0])
@@ -234,6 +240,7 @@ def setConfig(url, body):
         "Look_ahead_time": Look_ahead_time,
         "Start_date": Start_date,
         "Period": Period,
+        "Soil_type": Soil_type,
         "Soil_water_retention_curve": csv_data,  # Use the parsed CSV data
         "PermanentWiltingPoint": PermanentWiltingPoint,
         "FieldCapacityUpper": FieldCapacityUpper,
@@ -261,48 +268,60 @@ def getConfigFromFile():
     global Threshold
     global Start_date
     global Period
+    global Soil_type
+    global Soil_water_retention_curve
     global PermanentWiltingPoint
     global FieldCapacityUpper
     global FieldCapacityLower
     global Saturation
 
 
-    with open(ConfigPath, 'r') as file:
-        # Parse JSON from the file
-        data = json.load(file)
+    if os.path.exists(ConfigPath):
+        with open(ConfigPath, 'r') as file:
+            # Parse JSON from the file
+            data = json.load(file)
 
-    # Get choosen sensors
-    DeviceAndSensorIdsMoisture = data.get('DeviceAndSensorIdsMoisture', [])
-    DeviceAndSensorIdsTemp = data.get('DeviceAndSensorIdsTemp', [])
-    DeviceAndSensorIdsFlow = data.get('DeviceAndSensorIdsFlow', [])
+        # Get choosen sensors
+        DeviceAndSensorIdsMoisture = data.get('DeviceAndSensorIdsMoisture', [])
+        DeviceAndSensorIdsTemp = data.get('DeviceAndSensorIdsTemp', [])
+        DeviceAndSensorIdsFlow = data.get('DeviceAndSensorIdsFlow', [])
 
-    # Get data from forms
-    Gps_info = data.get('Gps_info', [])
-    Slope = float(data.get('Slope', []))
-    Threshold = data.get('Threshold', [])
-    Irrigation_amount = float(data.get('Irrigation_amount', []))
-    Look_ahead_time = float(data.get('Look_ahead_time', []))
-    Start_date = data.get('Start_date', [])
-    Period = int(data.get('Period', []))
-    PermanentWiltingPoint = float(data.get('PermanentWiltingPoint', []))
-    FieldCapacityUpper = float(data.get('FieldCapacityUpper', []))
-    FieldCapacityLower = float(data.get('FieldCapacityLower', []))
-    Saturation = float(data.get('Saturation', []))
+        # Get data from forms
+        Gps_info = data.get('Gps_info', [])
+        Slope = float(data.get('Slope', []))
+        Threshold = float(data.get('Threshold', []))
+        Irrigation_amount = float(data.get('Irrigation_amount', []))
+        Look_ahead_time = float(data.get('Look_ahead_time', []))
+        Start_date = data.get('Start_date', [])
+        Period = int(data.get('Period', []))
+        Soil_type = data.get('Soil_type', [])
+        PermanentWiltingPoint = float(data.get('PermanentWiltingPoint', []))
+        FieldCapacityUpper = float(data.get('FieldCapacityUpper', []))
+        FieldCapacityLower = float(data.get('FieldCapacityLower', []))
+        Saturation = float(data.get('Saturation', []))
 
-    # Get soil water retention curve -> currently not needed here
-    # Soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
+        # Get soil water retention curve -> currently not needed here
+        Soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
+
+        return True
+    
+    else:
+        return False
 
 # Get the config from backend to disply it in frontend settings.html
-def returnConfig():
+def returnConfig(url, body):
     try:
+        # Call the getConfigFromFile function to load variables
+        getConfigFromFile()
+
         # Check if all necessary global variables are properly defined
-        if not all(isinstance(var, (int, float, list)) for var in [
+        if not all(isinstance(var, (int, float, str, list, dict)) for var in [
             DeviceAndSensorIdsMoisture, DeviceAndSensorIdsTemp, DeviceAndSensorIdsFlow,
             Gps_info, Slope, Threshold, Irrigation_amount, Look_ahead_time, 
             Start_date, Period, PermanentWiltingPoint, FieldCapacityUpper, 
             FieldCapacityLower, Saturation]):
-            raise ValueError("One or more required variables are missing or of incorrect type.")
-
+            raise ValueError("Variables are still missing or of incorrect type after loading from config.")
+    
         # Construct the response data
         response_data = {
             "DeviceAndSensorIdsMoisture": DeviceAndSensorIdsMoisture,
@@ -315,6 +334,8 @@ def returnConfig():
             "Look_ahead_time": Look_ahead_time,
             "Start_date": Start_date,
             "Period": Period,
+            "Soil_type": Soil_type,
+            "Soil_water_retention_curve": Soil_water_retention_curve,
             "PermanentWiltingPoint": PermanentWiltingPoint,
             "FieldCapacityUpper": FieldCapacityUpper,
             "FieldCapacityLower": FieldCapacityLower,
@@ -366,7 +387,9 @@ usock.routerGET("/api/checkConfigPresent", checkConfigPresent)
 
 def checkActiveIrrigation(url, body):
     # Called on page load->important for checkActiveIrrigation
-    getConfigFromFile()
+    if not getConfigFromFile():
+        response_data = {"activeIrrigation": False}
+        status_code = 404
 
     if len(DeviceAndSensorIdsFlow) != 0:
         response_data = {"activeIrrigation": True}

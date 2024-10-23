@@ -166,3 +166,4 @@ hyperband_dir/
 
 # models
 models/
+data/irrigations.json

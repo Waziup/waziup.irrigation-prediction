@@ -191,18 +191,81 @@
         }
       }
 
+      function highlightElement(htmlElement, valuesToHighlight) {
+        Array.from(htmlElement.options).forEach((option) => {
+          if (valuesToHighlight.includes(option.value)) {
+            option.selected = true;
+          }
+        });
+      }
+
       // Get formerly saved config from backend
       function getFormerConfig() {
         return fetch(`../api/returnConfig`)
         .then((response) => response.json())
         .then((data) => {
-          if (data.data.status_code == 200) {
+          if (data.status_code == 200) {
+            // Create a reference
+            response_data = data.data;
+
+            // Assignment for Moisture
+            highlightElement(document.getElementById("sensor_list_moisture"), response_data.DeviceAndSensorIdsMoisture);
             
+            // Assignment for DeviceAndSensorIdsTemp
+            highlightElement(document.getElementById("sensor_list_temp"), response_data.DeviceAndSensorIdsTemp);
+ 
+             // Assignment for DeviceAndSensorIdsFlow
+            highlightElement(document.getElementById("actuator_list_flow"), response_data.DeviceAndSensorIdsFlow);
+ 
+            // Assignment for Gps_info
+            document.getElementById("gps_form").value = String(response_data.Gps_info.lattitude) + ", " + String(response_data.Gps_info.longitude)
+ 
+            // Assignment for Slope
+            document.getElementById("slope_form").value = response_data.Slope;
+
+            // Assignment for Threshold
+            document.getElementById("tension_threshold_form").value = parseFloat(response_data.Threshold);
+
+            // Assignment for Irrigation_amount
+            document.getElementById("irrigation_amount_form").value = response_data.Irrigation_amount;
+
+            // Assignment for Look_ahead_time
+            document.getElementById("look_ahead_time_form").value = response_data.Look_ahead_time;
+
+            // Assignment for Start_date
+            document.getElementById("starting_timestamp_form").value = new Date(response_data.Start_date).toISOString().split('T')[0];
+
+            // Assignment for Period
+            document.getElementById("maximum_time_period_form").value = response_data.Period;
+
+            // Assignment for Period
+            document.getElementById("soil_type_select").value = response_data.Soil_type;
+
+            // Assignment for PermanentWiltingPoint
+            document.getElementById("pwp_form").value = response_data.PermanentWiltingPoint;
+
+            // Assignment for FieldCapacityUpper
+            document.getElementById("fcu_form").value = response_data.FieldCapacityUpper;
+
+            // Assignment for FieldCapacityLower
+            document.getElementById("fcl_form").value = response_data.FieldCapacityLower;
+
+            // Assignment for Saturation
+            document.getElementById("sat_form").value = response_data.Saturation;
+            
+            // Assignment of Soil Water Retention Curve
+            const soilWaterRetention = response_data.Soil_water_retention_curve;
+            // Create the formatted string: "Soil tension, VWC" on each line
+            const formattedString = soilWaterRetention.map(item => 
+              `${item['Soil tension']}, ${item.VWC.trim()}`
+            ).join("\n");
+            // Set the result into a text field
+            document.getElementById("soil_water_retention_text").value = formattedString;
+
           } else {
-            console.log("No data was formerly set, use std values");
+            console.log("No data was formerly set or there was an error, fallback: use std values.");
           }
         });
-
       }
 
 
@@ -300,37 +363,40 @@
       function parseForms() {
         var gps_info = document.getElementById(
           "gps_form"
-        ).value;
+          ).value;
         var irrgation_slope = document.getElementById(
           "slope_form"
-        ).value;
+          ).value;
         var tension_threshold = document.getElementById(
           "tension_threshold_form"
-        ).value;
+          ).value;
         var irrigation_amount = document.getElementById(
           "irrigation_amount_form"
-        ).value;
+          ).value;
         var look_ahead_time = document.getElementById(
           "look_ahead_time_form"
-        ).value;
+          ).value;
         var starting_date = document.getElementById(
           "starting_timestamp_form"
-        ).value;
+          ).value;
         var time_period = document.getElementById(
           "maximum_time_period_form"
-        ).value;
+          ).value;
+        var soil_type = document.getElementById(
+          "soil_type_select"
+          ).value;
         var pwp = document.getElementById(
           "pwp_form"
-        ).value;
+          ).value;
         var fcu = document.getElementById(
           "fcu_form"
-        ).value;
+          ).value;
         var fcl = document.getElementById(
           "fcl_form"
-        ).value;
+          ).value;
         var sat = document.getElementById(
           "sat_form"
-        ).value;
+          ).value;
 
         // Convert the selected date to an ISO timestamp => TODO: check timestamp
         var isoTimestamp = new Date(starting_date).toISOString();
@@ -350,6 +416,8 @@
           encodeURIComponent(isoTimestamp) +
           "&period=" +
           encodeURIComponent(time_period) +
+          "&soil=" +
+          encodeURIComponent(soil_type) +
           "&pwp=" +
           encodeURIComponent(pwp) +
           "&fcu=" +

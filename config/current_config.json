@@ -14,10 +14,11 @@
     },
     "Slope": "-0.07",
     "Threshold": 7.0,
-    "Irrigation_amount": "10",
-    "Look_ahead_time": 6,
+    "Irrigation_amount": 10.0,
+    "Look_ahead_time": 6.0,
     "Start_date": "2024-03-12T00:00:00.000Z",
     "Period": 0,
+    "Soil_type": "Sandy_Soil",
     "Soil_water_retention_curve": [
         {
             "Soil tension": "0",
