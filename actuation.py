@@ -241,17 +241,14 @@ def main_old(currentSoilTension, threshold_timestamp, predictions, irrigation_am
     
 # Mighty main function TODO: capsulate
 def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount) -> int:
-    global TimeSpanOverThreshold
-    #####################################################################
-    ## TODO: remove DEBUG vars                                          #
-    # Get threshold from config                                         #
-    threshold = create_model.Current_config['Threshold']           #
+    global TimeSpanOverThreshold    
+                                     
+    # Get threshold from config                                      
+    threshold = create_model.Current_config['Threshold']
     # set timestamp for debug reasons
-    TimeSpanOverThreshold = create_model.Current_config['Look_ahead_time']                                  #
-    future_time = datetime.now() + timedelta(hours=TimeSpanOverThreshold)                  #
-    threshold_timestamp = future_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ") #
-    ## TODO: remove DEBUG vars                                          #
-    #####################################################################
+    TimeSpanOverThreshold = create_model.Current_config['Look_ahead_time']
+    future_time = datetime.now() + timedelta(hours=TimeSpanOverThreshold)
+    threshold_timestamp = future_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     now = datetime.now().replace(microsecond=0)
 
     # "Weak" irrigation strategy

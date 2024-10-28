@@ -91,7 +91,7 @@ Threads = []
 ThreadId = 0
 Training_thread = None
 Prediction_thread = None
-Restart_time = 30 #1800 # DEBUG
+Restart_time = 1800 # DEBUG
 
 TrainingFinished = False
 CurrentlyTraining = False

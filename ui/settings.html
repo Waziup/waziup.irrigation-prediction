@@ -145,8 +145,7 @@
     };
 
       // For debug set custom API path
-      var Api_path = ""; // production api path for local fetch
-      //var Api_path = "http://192.168.189.2"     // other gw in local network, token!!
+      var Api_path = "";
 
       // Event listers
       document.addEventListener('DOMContentLoaded', function() {
@@ -653,8 +652,8 @@
         $("#sensor_list")
           .html('<img src="./loading.gif" /> Loading...')
           .fadeIn();
-        //loadStuff();
-        loadStuff_remote() // Debug
+        loadStuff();
+        //loadStuff_remote() // DEBUG
       });
     </script>
   </head>

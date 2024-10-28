@@ -1277,8 +1277,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        #exclude=['lar']
-        include=['xgboost', 'llar', 'catboost'] #debug
+        exclude=['lar']
+        #include=['xgboost', 'llar', 'catboost'] #DEBUG
     )
 
     return re_exp, best_re
@@ -1688,71 +1688,71 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Create an array to store all the models
     nn_models = []
 
-    # # Create neural network # DEBUG
+    # Create neural network # DEBUG
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # hp.Fixed('units_hidden1', 64)
-    # hp.Fixed('units_hidden2', 32)
-    # hp.Fixed('optimizer', 'adam')
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('units_hidden1', 64)
+    hp.Fixed('units_hidden2', 32)
+    hp.Fixed('optimizer', 'adam')
 
-    # # Call the model function with the hp object and the input shape
-    # input_shape = (X_train.shape[1],)
-    # model_nn = create_nn_model(hp, shape=input_shape)
+    # Call the model function with the hp object and the input shape
+    input_shape = (X_train.shape[1],)
+    model_nn = create_nn_model(hp, shape=input_shape)
 
-    # # Train the model
-    # print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
-    # history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_nn)
+    # Train the model
+    print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
+    history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_nn)
 
-    # # Create conv neural network
+    # Create conv neural network
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # hp.Fixed('units_hidden1', 64)
-    # hp.Fixed('optimizer', 'adam')
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('units_hidden1', 64)
+    hp.Fixed('optimizer', 'adam')
 
-    # # Call the model function with the hp object and the input shape
-    # input_shape = (X_train_cnn.shape[1], 1)
-    # model_cnn = create_cnn_model(hp, shape=input_shape)
+    # Call the model function with the hp object and the input shape
+    input_shape = (X_train_cnn.shape[1], 1)
+    model_cnn = create_cnn_model(hp, shape=input_shape)
     
-    # # Train the model
-    # print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
-    # history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_cnn)
+    # Train the model
+    print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
+    history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_cnn)
 
-    # # Create RNN model
+    # Create RNN model
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # hp.Fixed('units_hidden1', 50)  # Fixed units for RNN
-    # hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('units_hidden1', 50)  # Fixed units for RNN
+    hp.Fixed('optimizer', 'adam')  # Fixed optimizer
 
-    # input_shape = (X_train.shape[1], 1)
-    # model_rnn = create_rnn_model(hp, shape=input_shape)
+    input_shape = (X_train.shape[1], 1)
+    model_rnn = create_rnn_model(hp, shape=input_shape)
 
-    # # Train the model
-    # print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
-    # history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_rnn)
+    # Train the model
+    print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
+    history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_rnn)
 
-    # # Create GRU model
+    # Create GRU model
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # hp.Fixed('units_hidden1', 50)  # Fixed units for GRU
-    # hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('units_hidden1', 50)  # Fixed units for GRU
+    hp.Fixed('optimizer', 'adam')  # Fixed optimizer
 
-    # input_shape = (X_train.shape[1], 1)
-    # model_gru = create_gru_model(hp, shape=input_shape)
-    # # Train the model
-    # print('Will now train a Gated Recurrent Unit neural network (GRU), with the following hyperparameters: ' + str(hp.values))
-    # history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_gru)
+    input_shape = (X_train.shape[1], 1)
+    model_gru = create_gru_model(hp, shape=input_shape)
+    # Train the model
+    print('Will now train a Gated Recurrent Unit neural network (GRU), with the following hyperparameters: ' + str(hp.values))
+    history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_gru)
 
     # LSTM architecture
 
@@ -2289,7 +2289,7 @@ def main() -> int:
     index, Use_pycaret = eval_approach(results, results_nn, 'mae')
 
     # TODO: Debug mode
-    Use_pycaret = True
+    #Use_pycaret = True
 
     # Train best model on whole dataset (without skipping "test-set")
     if Use_pycaret:
