@@ -148,6 +148,40 @@
       var Api_path = ""; // production api path for local fetch
       //var Api_path = "http://192.168.189.2"     // other gw in local network, token!!
 
+      // Event listers
+      document.addEventListener('DOMContentLoaded', function() {
+        // Disable textbox based on multi-select change
+        document.getElementById('actuator_list_flow').addEventListener('change', function() {
+          var multiSelect = document.getElementById('actuator_list_flow');
+          var textBox = document.getElementById('slope_form');
+          
+          // Check if any option is selected
+          if (multiSelect.selectedOptions.length > 0) {
+              textBox.disabled = true; // Disable the textbox
+              textBox.style.backgroundColor = '#d3d3d3'; // Grey it out
+          } else {
+              textBox.disabled = false; // Enable the textbox
+              textBox.style.backgroundColor = ''; // Remove the grey-out effect
+          }
+        });
+
+        // Tooltips
+        fetch('tooltips.json')  // Replace with the correct path to your JSON file
+        .then(response => response.json())
+        .then(tooltips => {
+          // Loop through each tooltip element
+          document.querySelectorAll('.tooltip').forEach(tooltip => {
+            const tooltipId = tooltip.getAttribute('data-tooltip-id');
+            // Set the tooltip text from the JSON file
+            if (tooltips[tooltipId]) {
+              tooltip.querySelector('.tooltiptext').textContent = tooltips[tooltipId];
+            }
+          });
+        })
+        .catch(error => console.error('Error loading tooltip text:', error));
+      });
+      
+
       // handle menu button
       function goHome() {
         window.location.href = "index.html";
@@ -639,24 +673,40 @@
         <div class="inputs">
           <div class="main-sensors">
             <div class="moisture">
-              <label for="sensor_list_moisture"
-                >Choose soil moisture sensors:</label>
+              <label for="sensor_list_moisture">
+                Choose soil moisture sensors:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="moistureTooltip">help
+                  <span class="tooltiptext" id="moistureTooltip"></span>
+                </span>
+              </label>
               <select id="sensor_list_moisture" multiple size="5"></select>
             </div>
             <div class="temperature">
               <label for="sensor_list_temp"
-                >Choose soil temperature sensors:</label>
+                >Choose soil temperature sensors:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="tempTooltip">help
+                  <span class="tooltiptext" id="tempTooltip"></span>
+                </span>
+              </label>
               <select id="sensor_list_temp" multiple size="5"></select>
             </div>
             <div class="actuation">
               <label for="actuator_list_flow"
-                >Choose soil water flow sensor:</label>
+                >Choose soil water flow sensor:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="waterFlowTooltip">help
+                  <span class="tooltiptext" id="waterFlowTooltip"></span>
+                </span>
+              </label>
               <select id="actuator_list_flow" multiple size="5"></select>
             </div>
           </div>
           <div class="main-sensors">
             <div>
-              <label for="gps">GPS coordinates:</label>
+              <label for="gps">GPS coordinates:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="gpsCoordinates">help
+                  <span class="tooltiptext" id="gpsCoordinates"></span>
+                </span>
+              </label>
               <input
                 id="gps_form"
                 type="text"
@@ -666,14 +716,20 @@
             </div>
             <div><!--TODO: needs to be deactivated without reload-->
               <label for="slope"
-                >Slope for detecting artificial irrgation:</label
-              >
+                >Slope for detecting artificial irrgation:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="slopeTooltip">help
+                  <span class="tooltiptext" id="slopeTooltip"></span>
+                </span>
+              </label>
               <input id="slope_form" type="number" name="slope" value="-0.07" />
             </div>
             <div>
               <label for="irrigation_amount"
-                >Amount of one irrigation cycle (in liters):</label
-              >
+                >Amount of one irrigation cycle (in liters):
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationAmountTooltip">help
+                  <span class="tooltiptext" id="irrigationAmountTooltip"></span>
+                </span>
+              </label>
               <input
                 id="irrigation_amount_form"
                 type="number"
@@ -683,8 +739,11 @@
             </div>
             <div>
               <label for="look_ahead_time"
-                >Time to look ahead in forecast how long soil tension threshold can be exceeded in hours:</label
-              >
+                >Time to look ahead in forecast how long soil tension threshold can be exceeded in hours:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="lookAheadTimeTooltip">help
+                  <span class="tooltiptext" id="lookAheadTimeTooltip"></span>
+                </span>
+              </label>
               <input
                 id="look_ahead_time_form"
                 type="number"
@@ -693,7 +752,11 @@
               />
             </div>
             <div>
-              <label for="starting_timestamp">Starting date:</label>
+              <label for="starting_timestamp">Starting date:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="startingDateTooltip">help
+                  <span class="tooltiptext" id="startingDateTooltip"></span>
+                </span>
+              </label>
               <input
                 id="starting_timestamp_form"
                 type="date"
@@ -701,7 +764,11 @@
               />
             </div>
             <div>
-              <label for="maximum_time_period">Max time period: </label>
+              <label for="maximum_time_period">Max time period:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="maxTimePeriodTooltip">help
+                  <span class="tooltiptext" id="maxTimePeriodTooltip"></span>
+                </span>
+              </label>
               <input
                 id="maximum_time_period_form"
                 type="number"
@@ -710,10 +777,11 @@
               />
             </div>
             <div>
-              <label for="soil_type"
-                >Select a Soil type:
-                <i class="material-symbols-outlined">help_outline</i></label
-              >
+              <label for="soil_type">
+                Select a Soil type:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="soilTypeTooltip">help
+                  <span class="tooltiptext" id="soilTypeTooltip"></span>
+              </label>
               <select
                 class="soil-type"
                 id="soil_type_select"
@@ -745,7 +813,11 @@
             </div>
           <div class="water-retention">
             <div>
-              <label for="slope">Custom soil water retention curve:</label>
+              <label for="slope">Custom soil water retention curve:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="soilWaterRetentionTooltip">help
+                  <span class="tooltiptext" id="soilWaterRetentionTooltip"></span>
+                </span>
+              </label>
                 <textarea id="soil_water_retention_text" name="myText" rows="6">
 0, 0.225
 5, 0.2
@@ -760,7 +832,11 @@
             </div>
             <div>
               <div>
-                <label for="pwp">Permanent Wilting Point:</label>
+                <label for="pwp">Permanent Wilting Point:
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="pwpTooltip">help
+                    <span class="tooltiptext" id="pwpTooltip"></span>
+                  </span>
+                </label>
                 <input
                   id="pwp_form"
                   type="number"
@@ -769,7 +845,10 @@
                 />
               </div>
               <div>
-                <label for="fcu">Field Capacity upper bound:</label>
+                <label for="fcu">Field Capacity upper bound:
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="fcuTooltip">help
+                    <span class="tooltiptext" id="fcuTooltip"></span>
+                </label>
                 <input
                   id="fcu_form"
                   type="number"
@@ -778,7 +857,10 @@
                 />
               </div>
               <div>
-                <label for="fcl">Field Capacity lower bound:</label>
+                <label for="fcl">Field Capacity lower bound:
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="fclTooltip">help
+                    <span class="tooltiptext" id="fclTooltip"></span>
+                </label>
                 <input
                   id="fcl_form"
                   type="number"
@@ -787,7 +869,10 @@
                 />
               </div>
               <div>
-                <label for="sat">Saturation:</label>
+                <label for="sat">Saturation:
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="satTooltip">help
+                    <span class="tooltiptext" id="satTooltip"></span>
+                </label>
                 <input
                   id="sat_form"
                   type="number"
@@ -797,8 +882,10 @@
               </div>
               <div>
                 <label for="tension_threshold"
-                  >Soil tension threshold (in cbar, hPa)</label
-                >
+                  >Soil tension threshold (in cbar, hPa)
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="tensionThresholdTooltip">help
+                    <span class="tooltiptext" id="tensionThresholdTooltip"></span>
+                </label>
                 <input
                   id="tension_threshold_form"
                   type="number"

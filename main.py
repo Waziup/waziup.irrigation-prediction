@@ -304,7 +304,6 @@ def getConfigFromFile():
         Soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
 
         return True
-    
     else:
         return False
 
@@ -661,7 +660,8 @@ def workerToPredict():
             print("Prediction finished at: ", end_time, "The duration was: ", duration)
 
             # Call routine to irrigate
-            actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
+            if len(DeviceAndSensorIdsFlow) > 0: 
+                actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
 
             # After initial training and prediction, start surveillance
             threading.Timer(3600, check_threads).start()  # Check every hour if threads are alive
@@ -747,7 +747,8 @@ def workerToTrain(thread_id, url, startTrainingNow):
             print("Training finished at: ", end_time, "The duration was: ", duration)
 
             # Call routine to irrigate
-            actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
+            if len(DeviceAndSensorIdsFlow) > 0: 
+                actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
 
             # Start thread that creates predictions periodically
             if Prediction_thread is None:

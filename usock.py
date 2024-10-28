@@ -1,5 +1,7 @@
 
+import mimetypes
 import os
+from pathlib import Path
 import socket
 import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -57,6 +59,10 @@ class HTTPHandler(BaseHTTPRequestHandler):
     # protocol_version = "HTTP/1.1"
     #---------------#
     def callAPI(self, method="GET", body=""):
+        # # Check if the request is for a static file
+        # if self.path.startswith("/ui/"):
+        #     self.serve_static_file()
+        #     return
         inPath = urlparse(self.path).path
         routPath = ""
         # print( body)
@@ -74,6 +80,27 @@ class HTTPHandler(BaseHTTPRequestHandler):
             resHeaders = []
 
         self.send(resCode, resBody, resHeaders)
+
+    # def serve_static_file(self):
+    #     # Map the file path based on the request URL
+    #     file_path = Path("." + self.path)  # Maps URL to local file path
+
+    #     # Check if file exists
+    #     if not file_path.is_file():
+    #         self.send(404, b"File not found", [])
+    #         return
+
+    #     # Guess the content type based on file extension
+    #     mime_type, _ = mimetypes.guess_type(file_path)
+    #     mime_type = mime_type or 'application/octet-stream'
+
+    #     # Serve the file content
+    #     self.send_response(200)
+    #     self.send_header("Content-type", mime_type)
+    #     self.end_headers()
+
+    #     with file_path.open("rb") as file:
+    #         self.wfile.write(file.read())
 
     #---------------#
 

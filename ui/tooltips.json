@@ -1,0 +1,25 @@
+{
+    "moistureTooltip":              "Select one or more sensor devices that observe Soil tension and is connected to your WaziGate. To select/deselect multiple sensors hold down [CTRL]-key.",
+    "tempTooltip":                  "Select one or more sensor devices that observe Soil temperature and is connected to your WaziGate. To select/deselect multiple sensors hold down [CTRL]-key.",
+    "waterFlowTooltip":             "Select one sensor device that observe the water flow of your pump that is connected to your WaziGate. Only one device can be selected.",
+    "gpsCoordinates":               "To fetch meteorological data from online sources",
+    "slopeTooltip":                 "Specify the slope to detect artificial irrigation in the area. Only available/needed if there was no water flow sensor added.",
+    "irrigationAmountTooltip":      "Input the volume of water in liters used for a single irrigation cycle.",
+    "lookAheadTimeTooltip":         "Define how many hours ahead you want to consider the forecast for soil tension.",
+    "startingDateTooltip":          "Select the starting date for the of sensor data beeing taken into consideration for model creation. After you installed the sensors a short warm-up period should be allowed.",
+    "maxTimePeriodTooltip":         "Input the maximum duration of data (in days) to be included into the model.",
+    "soilTypeTooltip":              "Select the appropriate soil type based on the soil composition of your field.",
+    "soilWaterRetentionTooltip":    "Input the soil water retention curve data as key-value pairs.",
+    "pwpTooltip":                   "Enter the soil moisture content (tension) at which plants can no longer extract water.",
+    "fcuTooltip":                   "Input the maximum moisture content (tension) the soil can hold.",
+    "fclTooltip":                   "Input the minimum moisture content (tension) the soil can retain.",
+    "satTooltip":                   "Enter the soil moisture content (tension) when the soil is fully saturated.",
+    "tensionThresholdTooltip":      "Specify the threshold for soil tension, measured in cbar or hPa.",
+    "other_key":                    "Additional tooltip text for other elements.",
+
+    "sensorTooltip":                "This section gives an overview about current sensor values.",
+    "irrigationTooltip":            "Here a manual irrigation can be triggered.",
+    "chart_hist_tooltip":           "An overview about the raw sensor data, view is restricted to 1000 Elements to support fast rendering.",
+    "chart_train_data_tooltip":     "An overview about the entire data that is used to train the machine learning models.",
+    "chart_pred_tooltip":           "An overview about the latest calculated prediction of the soil tension values for the upcoming week."
+}

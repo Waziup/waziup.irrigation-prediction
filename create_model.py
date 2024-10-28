@@ -156,10 +156,6 @@ def read_config():
     # Specify the path to the JSON file you want to read
     json_file_path = 'config/current_config.json'
 
-    # Read the JSON data from the file
-    with open(json_file_path, 'r') as json_file:
-        config = json.load(json_file)
-
     try:
         with open(CSVFile, "r") as file:
             # Perform operations on the file
@@ -175,11 +171,16 @@ def read_config():
                 elif col.startswith("soil_temp"):
                     DeviceAndSensorIdsTemp.append(col)
             LoadDataFromCSV = True
-            DeviceAndSensorIdsFlow = config["DeviceAndSensorIdsFlow"]
+            # This is not implemented: DeviceAndSensorIdsFlow = config["DeviceAndSensorIdsFlow"]
     except FileNotFoundError:
+        # Read the JSON data from the file
+        with open(json_file_path, 'r') as json_file:
+            config = json.load(json_file)
+
         DeviceAndSensorIdsMoisture = config["DeviceAndSensorIdsMoisture"]
         DeviceAndSensorIdsTemp = config["DeviceAndSensorIdsTemp"]
-        DeviceAndSensorIdsFlow = config["DeviceAndSensorIdsFlow"]
+        if "DeviceAndSensorIdsFlow" in config:
+            DeviceAndSensorIdsFlow = config["DeviceAndSensorIdsFlow"]
     except Exception as e:
         print("An error occurred: No devices are set in settings, there is also no local config file.", e)
 
@@ -753,8 +754,8 @@ def include_irrigation_amount(df):
         # Add the reindexed irrigation amounts to the main dataframe
         df['irrigation_amount'] = irrigations_reindexed['amount']
     else:
-        # Load data and create the dataframe
         if (len(DeviceAndSensorIdsFlow) >  0):
+            # Load data and create the dataframe
             data_irrigation = load_data_api(DeviceAndSensorIdsFlow[0], "actuators", Current_config['Start_date'])
             df_irrigation = pd.DataFrame(data_irrigation)
             df_irrigation.rename(columns={'time': 'Timestamp'}, inplace=True)
@@ -852,12 +853,12 @@ def create_features(data):
     f = data.rolling_mean_grouped_soil
     data['gradient'] = np.gradient(f)
     # Skip the pump state if there is a flow meter where the artificial irrigation amount is messured
-    if (len(Current_config["DeviceAndSensorIdsFlow"]) == 0):
+    if "DeviceAndSensorIdsFlow" in Current_config:
+        data = include_irrigation_amount(data)
+    else:
         data['pump_state'] = int(0)
         data = add_pump_state(data)
-    else:
-        # Add amount of irrigation TODO: include
-        data = include_irrigation_amount(data)
+        
 
     # also add hours since last irrigation => TODO: check later, still an error, !!!!!questionable whether it is useful!!!!!
     #data = hours_since_pump_was_turned_on(data)
@@ -1408,10 +1409,10 @@ def create_future_values(data):
     new_data['rolling_mean_grouped_soil_temp'] = new_data['Soil_temperature_7-28'] # TODO: calculate/calibrate diviation for better alignment
 
     # also include pump_state, set to zero as we want to assume the behavior without watering
-    if (len(Current_config["DeviceAndSensorIdsFlow"]) == 0):
-        new_data = new_data.assign(pump_state=0)
-    else:
+    if "DeviceAndSensorIdsFlow" in Current_config:
         new_data = new_data.assign(irrigation_amount=0)
+    else:
+        new_data = new_data.assign(pump_state=0)
 
     return new_data
 
