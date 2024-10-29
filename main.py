@@ -61,7 +61,7 @@ Period = 0
 
 # Frequencies train/predict
 Train_period_days = 1
-Predict_period_hours = 1 #6
+Predict_period_hours = 6 #6 DEBUG
 
 # Soil_type
 Soil_type = ""
@@ -98,6 +98,9 @@ CurrentlyTraining = False
 
 # Load variables of training from file, to debug actuation part
 Perform_training = True
+
+# Set the threshold to cleanup models to 3 months (approximately 90 days)
+THRESHOLD_DAYS_CLEANUP = 90
 
 #---------------------#
 
@@ -153,6 +156,90 @@ usock.routerGET("/ui/(.*)", ui)
 usock.routerPOST("/ui/(.*)", ui)
 
 #------------------#
+
+class LogCleanerThread(threading.Thread):
+    def __init__(self, file_path, age_limit_days=90, check_interval=86400):
+        super().__init__()
+        self.file_path = file_path
+        self.age_limit_days = age_limit_days
+        self.check_interval = check_interval
+        self.stop_thread = threading.Event()
+
+    def clean_log(self):
+        """Clears log file if it is older than the age limit."""
+        if os.path.exists(self.file_path):
+            last_modified_time = datetime.fromtimestamp(os.path.getmtime(self.file_path))
+            if datetime.now() - last_modified_time > timedelta(days=self.age_limit_days):
+                open(self.file_path, 'w').close()  # Clear the file contents
+                print(f"{self.file_path} has been cleaned.")
+            else:
+                print(f"{self.file_path} is not old enough to clean.")
+
+    def run(self):
+        while not self.stop_thread.is_set():
+            self.clean_log()
+            time.sleep(self.check_interval)  # Wait before the next check
+
+    def stop(self):
+        self.stop_thread.set()
+
+def schedule_log_cleanup():
+    # Paths to the log files you want to monitor and clean
+    logs_to_clean = [
+        ("logs.log", 90),       # Python log file
+        ("python_logs.log", 90) # Docker log file
+    ]
+
+    # Start a thread for each log file
+    cleaner_threads = []
+    for log_path, age_limit in logs_to_clean:
+        cleaner = LogCleanerThread(file_path=log_path, age_limit_days=age_limit)
+        cleaner.start()
+        cleaner_threads.append(cleaner)
+
+    try:
+        # Keep the main thread alive while the cleaner threads run
+        for cleaner in cleaner_threads:
+            cleaner.join()
+    except KeyboardInterrupt:
+        print("Stopping log cleaners...")
+        for cleaner in cleaner_threads:
+            cleaner.stop()
+        for cleaner in cleaner_threads:
+            cleaner.join()
+
+def delete_old_files(folder_path):
+    """
+    Deletes files older than the threshold from the specified folder and its subfolders.
+    """
+    current_time = time.time()
+    threshold_time = current_time - THRESHOLD_DAYS_CLEANUP * 24 * 60 * 60
+
+    # Traverse the directory, including subdirectories
+    for root, _, files in os.walk(folder_path):
+        for file_name in files:
+            file_path = os.path.join(root, file_name)
+            # Check if the file is older than the threshold
+            if os.path.isfile(file_path) and os.path.getmtime(file_path) < threshold_time:
+                try:
+                    os.remove(file_path)
+                    print(f"Deleted old file: {file_path}")
+                except Exception as e:
+                    print(f"Error deleting file {file_path}: {e}")
+
+def schedule_model_cleanup(folder_path, interval_days=7):
+    """
+    Periodically runs the delete_old_files function every interval_hours.
+    """
+    from threading import Timer
+    
+    # Inner function to recursively schedule the cleanup
+    def run_cleanup():
+        delete_old_files(folder_path)
+        Timer(interval_days * 24 * 3600, run_cleanup).start()
+    
+    # Start the first cleanup run
+    run_cleanup()
 
 # Get URL of API from .env file => TODO: better with try catch than locals, getenv can still stop backend
 def getApiUrl(url, body):
@@ -793,6 +880,16 @@ usock.routerGET("/api/startTraining", startTraining)
 
 
 if __name__ == "__main__":
+    # Load variables
     load_dotenv()
+
+    # Start serving
     usock.sockAddr = os.getenv("Proxy_URL")
     usock.start()
+
+    # Start thread that deletes old models
+    folder_to_check = "models"
+    schedule_model_cleanup(folder_to_check, interval_days=7)  # Check every week
+
+    # Clean logs
+    schedule_log_cleanup()

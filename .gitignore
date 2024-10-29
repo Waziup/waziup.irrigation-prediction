@@ -165,5 +165,7 @@ catboost_info/
 hyperband_dir/
 
 # models
-models/
 data/irrigations.json
+
+# notes
+notes.txt

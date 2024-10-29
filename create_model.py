@@ -2083,8 +2083,8 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
     tuner = Hyperband(
         model_builder_with_shape(Model_functions[best_model_nn.model_name], best_model_nn.shape),
         objective='val_mae',
-        max_epochs=10,              # Tune epochs between 10 and 100 # TODO: was 100
-        factor=4,                   # Reduces the number of epochs for each successive run, Defaults to 3.
+        max_epochs=100,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
+        factor=3,                   # Reduces the number of epochs for each successive run, Defaults to 3.
         hyperband_iterations=1,     # Limits the number full hyperband runs
         directory='hyperband_dir',
         project_name='hyperband_' + best_model_nn.model_name,
@@ -2092,12 +2092,12 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
     )
 
     # Set the max time in seconds
-    max_time_seconds = 60 #3600
+    max_time_seconds = 3600 #3600 DEBUG
     time_limit_callback = TimeLimitCallback(max_time_seconds)
 
     tuner.search(X_train_scaled, 
                     y_train, 
-                    epochs=hp.Int('epochs', 5, 10), #10 100
+                    epochs=hp.Int('epochs', 10, 100), #10 100 DEBUG
                     batch_size=32, 
                     validation_split=0.2,
                     callbacks=[time_limit_callback]  # Add the time limit callback here

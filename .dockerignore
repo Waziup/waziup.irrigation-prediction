@@ -10,4 +10,4 @@ config/current_config.json
 /catboost_info
 /.vscode
 /hyperband_dir
-/models
+notes.txt
