@@ -163,6 +163,32 @@
               textBox.style.backgroundColor = ''; // Remove the grey-out effect
           }
         });
+        
+        // Add edge detection to tooltips
+        document.querySelectorAll('.tooltip').forEach(tooltip => {
+          tooltip.addEventListener('mouseenter', () => {
+            const tooltipText = tooltip.querySelector('.tooltiptext');
+            if (!tooltipText) return;
+        
+            const rect = tooltipText.getBoundingClientRect();
+            const margin = 100; // Add some margin to avoid touching edges
+        
+            // Check if the tooltip is outside the viewport
+            if (rect.left < margin) {
+              tooltipText.classList.add('edge-left');
+            } else if (rect.right > window.innerWidth - margin) {
+              tooltipText.classList.add('edge-right');
+            } else {
+              tooltipText.classList.remove('edge-left', 'edge-right');
+            }
+        
+            if (rect.top < margin) {
+              tooltipText.classList.add('edge-top');
+            } else {
+              tooltipText.classList.remove('edge-top');
+            }
+          });
+        });
 
         // Tooltips
         fetch('tooltips.json')  // Replace with the correct path to your JSON file
@@ -247,9 +273,12 @@
             // Assignment for DeviceAndSensorIdsTemp
             highlightElement(document.getElementById("sensor_list_temp"), response_data.DeviceAndSensorIdsTemp);
  
-             // Assignment for DeviceAndSensorIdsFlow
+            // Assignment for DeviceAndSensorIdsFlow
             highlightElement(document.getElementById("actuator_list_flow"), response_data.DeviceAndSensorIdsFlow);
- 
+
+            // Assignment for Sensor_kind
+            document.getElementById(response_data.Sensor_kind).checked = true;
+
             // Assignment for Gps_info
             document.getElementById("gps_form").value = String(response_data.Gps_info.lattitude) + ", " + String(response_data.Gps_info.longitude)
  
@@ -394,6 +423,9 @@
 
       // Parse data from forms after "Save"
       function parseForms() {
+        var selectedSensorKind = document.querySelector(
+          'input[name="sensor_kind_radio"]:checked'
+          ).value;
         var gps_info = document.getElementById(
           "gps_form"
           ).value;
@@ -435,6 +467,8 @@
         var isoTimestamp = new Date(starting_date).toISOString();
 
         const Params =
+          "&sensor_kind=" +
+          encodeURIComponent(selectedSensorKind) +
           "&gps=" +
           encodeURIComponent(gps_info) +
           "&slope=" +
@@ -606,7 +640,8 @@
       $.get("/devices", function (data) {
         const sensors = parseSensorData(data);
         console.log("Sensors: ", sensors)
-        displaySensorsAndElements(sensors)
+        displaySensorsAndElements(sensors);
+        getFormerConfig();
         //$("#sensor_list").html(sensors).fadeIn();
         //autoR = setTimeout(function () { loadStuff() }, 2000);
       });
@@ -652,8 +687,8 @@
         $("#sensor_list")
           .html('<img src="./loading.gif" /> Loading...')
           .fadeIn();
-        loadStuff();
-        //loadStuff_remote() // DEBUG
+        //loadStuff();
+        loadStuff_remote() // DEBUG
       });
     </script>
   </head>
@@ -679,6 +714,22 @@
                 </span>
               </label>
               <select id="sensor_list_moisture" multiple size="5"></select>
+            </div>
+            <div class="moisture">
+              <label for="moisture_kind">
+                Soil moisture sensors kind:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="moistureKindTooltip">help
+                  <span class="tooltiptext" id="moistureKindTooltip"></span>
+                </span>
+              </label>
+              <div class="radio">
+                <input type="radio" id="capacitive" name="sensor_kind_radio" value="capacitive" />
+                <label for="capacitive">Capacitive soil moisture sensor (Humidity in %)</label>
+              </div>
+              <div class="radio">
+                <input type="radio" id="tension" name="sensor_kind_radio" value="tension" checked/>
+                <label for="tension">Soil tension sensor (Soil tension in kPa, cBar)</label>
+              </div>
             </div>
             <div class="temperature">
               <label for="sensor_list_temp"

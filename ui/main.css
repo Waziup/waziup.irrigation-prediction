@@ -181,12 +181,14 @@ label {
   border-radius: 6px;
   position: absolute;
   z-index: 10;
-  bottom: 125%;
+  bottom: 100%;
   left: 50%;
   transform: translateX(-50%);
   opacity: 0;
-  transition: opacity 0.3s ease;
-  white-space: normal;
+  transition: opacity 1s ease;
+  white-space: normal; /* Allow wrapping */
+  max-width: 200px; /* Limit width to prevent excessive size */
+  box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
 }
 
 .tooltip:hover .tooltiptext {
@@ -194,12 +196,29 @@ label {
   opacity: 1;
 }
 
+/* Adjust position when tooltip is close to the left or right edge */
+.tooltiptext.edge-left {
+  left: 0;
+  transform: translateX(0);
+}
+
+.tooltiptext.edge-right {
+  left: auto;
+  right: 0;
+  transform: translateX(0);
+}
+
+.tooltiptext.edge-top {
+  bottom: auto;
+  top: 100%;
+}
 
 /*For the overview div*/
 .quick-view-container {
   display: flex;
   justify-content: space-between; /* Adjust space between containers */
   gap: 20px; /* Optional: space between the two containers */
+  clear: both;
 }
 
 .sensor-container, .irrigation-container {
@@ -317,5 +336,26 @@ input[type="text"] {
   .sensor-container, .irrigation-container {
     max-width: 100%; /* Make them take full width on smaller screens */
     margin-bottom: 20px; /* Ensure there's space between them vertically */
+  }
+}
+
+.text-content {
+  flex: 1; /* Ensures the text content takes up available space */
+}
+
+.logo-content {
+  width: 15%;
+  float: right;
+  margin-left: 30px;
+  margin-right: -25px;
+  margin-top: -40px;
+}
+
+@media (max-width: 600px) {
+  .logo-content {
+    display: block;
+    width: 40%;
+    float: none;
+    margin: 0 auto;
   }
 }

@@ -1,5 +1,5 @@
 # WaziUps WaziApp: irrigation-prediction
-This application (WaziApp) for the WaziGate predicts irrigation times with help of soil sensors and a weather API (open-meteo).
+This application (WaziApp) for the WaziGate predicts irrigation times with help of soil sensors and a weather API (open-meteo). A non-technical user guide with general instructions can be obtained from [here](help/user_guide.md).
 
 ## How to install
 

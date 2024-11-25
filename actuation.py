@@ -91,6 +91,9 @@ def read_data_from_file(filename):
 
 # Function to save data to the JSON file
 def save_data_to_file(filename, data):
+    if not os.path.exists(filename):
+        print(f"{filename} does not exist, creating a new one.")
+        
     with open(filename, 'w') as json_file:
         json.dump(data, json_file, indent=4)
 

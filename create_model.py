@@ -127,9 +127,9 @@ Best_exp = None
 
 # Load data from CSV, is set if there is a file in the root directory
 CSVFile = "binned_removed_new_for_app_ww.csv"
-LoadDataFromCSV = False
+LoadDataFromCSV = False # DEBUG
 
-# Load former irrigations from file "data/irrigations.json"
+# Load former irrigations from file "data/irrigations.json" DEBUG
 Load_irrigations_from_file = False
 
 # Restrict time to training
@@ -283,10 +283,12 @@ def load_latest_data_api(sensor_name, type):#, token)
             response_ok = response.json()
         else:
             print("Request failed with status code:", response.status_code)
+            print("Response content:", response.text)
+            response_ok = None
     except requests.exceptions.RequestException as e:
         # Handle request exceptions (e.g., connection errors)
         print("Request error:", e)
-        return "", e #TODO: intruduce error handling!
+        return "Error in 'load_latest_data_api()'! ", e #TODO: intruduce error handling!
     
     return response_ok
 
@@ -450,7 +452,7 @@ def get_historical_weather_api(data):
     long = Current_config["Gps_info"]["longitude"]
 
     url = (
-        f'https://archive-api.open-meteo.com/v1/archive'
+        f'https://archive-api.open-meteo.com/v1/era5'
         f'?latitude={lat}'
         f'&longitude={long}'
         f'&start_date={first_day_minus_one_str}'
@@ -486,11 +488,14 @@ def get_historical_weather_api(data):
     # convert cols to float64
     data_w_fetched = convert_cols(data_w_fetched)
 
+    # If empty
     if Data_w.empty:
         # Set as global
         Data_w = data_w_fetched
+    # If it is the same
     elif data_w_fetched.index[-1] == Data_w.index[-1]:
         return Data_w
+    # Concat data
     else:
         # Merge former historical weather data and fetched one into one dataframe
         Data_w = pd.concat([Data_w.loc[Data_w.index[0]:],
@@ -606,6 +611,7 @@ def soil_tension_to_volumetric_water_content(soil_tension, soil_water_retention_
     interpolated_water_content = lower_point[1] + ((soil_tension - lower_point[0]) / tension_diff) * water_content_diff
     
     return interpolated_water_content
+
 # VWC with log scale => Not called
 def soil_tension_to_volumetric_water_content_log(soil_tension, soil_water_retention_curve):
     # Transform the tension and content values to logarithmic space
@@ -658,6 +664,20 @@ def add_volumetric_col_to_df(df, col_name):
         df.at[index, col_name + '_vol'] = round(volumetric_water_content, 4)
 
     return df
+
+def calc_volumetric_water_content_single_value(soil_tension_value):
+    global Current_config
+    # Check config beeing loaded, otherwise read it
+    if 'Current_config' not in globals() and 'Soil_water_retention_curve' not in globals()['Current_config']:
+        Current_config = read_config()
+    # Iterate over the rows of the dataframe and calculate volumetric water content
+    soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in Current_config['Soil_water_retention_curve']]
+    # Sort the soil-water retention curve points by soil tension in ascending order => TODO: NOT EFFICIENT HERE, move out
+    sorted_curve = sorted(soil_water_retention_tupel_list, key=lambda x: x[0])
+    # Calculate volumetric water content
+    volumetric_water_content = soil_tension_to_volumetric_water_content_spline(soil_tension_value, sorted_curve)
+
+    return volumetric_water_content
 
 def align_retention_curve_with_api(data, data_weather_api):
     soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in Current_config['Soil_water_retention_curve']]
@@ -717,11 +737,22 @@ def hours_since_pump_was_turned_on(df):
 
     return df
 
+# Function to ensure the JSON file exists or create it if missing
+def ensure_json_file(file_path):
+    if not os.path.exists(file_path):
+        with open(file_path, 'w') as file:
+            json.dump({"irrigations": []}, file)
+        print(f"Created new JSON file at: {file_path}")
+
 # include the (on device saved) amount of irrigation given
 def include_irrigation_amount(df):
+    irrigation_file = 'data/irrigations.json'
+    # Check and ensure the JSON file exists
+    ensure_json_file(irrigation_file)
+
     if Load_irrigations_from_file:
         # Load JSON data from file
-        with open('data/irrigations.json', 'r') as file:
+        with open(irrigation_file, 'r') as file:
             irrigations_json = json.load(file)
 
         print("Loaded JSON data:")
@@ -759,7 +790,9 @@ def include_irrigation_amount(df):
             data_irrigation = load_data_api(DeviceAndSensorIdsFlow[0], "actuators", Current_config['Start_date'])
             df_irrigation = pd.DataFrame(data_irrigation)
             df_irrigation.rename(columns={'time': 'Timestamp'}, inplace=True)
-            df_irrigation['Timestamp'] = pd.to_datetime(df_irrigation['Timestamp'])
+            df_irrigation['Timestamp'] = pd.to_datetime(df_irrigation['Timestamp'], utc=True)
+            df_irrigation['Timestamp'] = df_irrigation['Timestamp'].dt.tz_convert(Timezone)  # Replace with the correct timezone
+
             df_irrigation.rename(columns={'value': 'irrigation_amount'}, inplace=True)
 
             # Convert irrigation_amount to numeric, forcing errors to NaN
@@ -875,7 +908,7 @@ def normalize(data):
     df_norm = (df-df.min())/(df.max()-df.min())
     df_norm = pd.concat([df_norm, data['Time'],data['hour'], data['minute'], data['date'], data['month'], data.rolling_mean_grouped_soil], 1)
 
-    # bring back to order -> not important
+    # bring back to order -> not important -> will not work in production
     data = data[['Time', 'hour', 'minute', 'date', 'month', 'grouped_soil', 
                  'grouped_resistance', 'grouped_soil_temp', 'rolling_mean_grouped_soil', 
                  'rolling_mean_grouped_soil_temp', 
@@ -1277,8 +1310,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        exclude=['lar']
-        #include=['xgboost', 'llar', 'catboost'] #DEBUG
+        #exclude=['lar']
+        include=['xgboost', 'llar', 'catboost'] #DEBUG
     )
 
     return re_exp, best_re
@@ -1408,7 +1441,7 @@ def create_future_values(data):
     #new_data['rolling_mean_grouped_soil_vol'] = new_data['Soil_moisture_0-7'] #Approach is not any more used
     new_data['rolling_mean_grouped_soil_temp'] = new_data['Soil_temperature_7-28'] # TODO: calculate/calibrate diviation for better alignment
 
-    # also include pump_state, set to zero as we want to assume the behavior without watering
+    # also include pump_state or irrigation_amount depending on config, set to zero as we want to assume the behavior without watering
     if "DeviceAndSensorIdsFlow" in Current_config:
         new_data = new_data.assign(irrigation_amount=0)
     else:
@@ -1688,71 +1721,71 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Create an array to store all the models
     nn_models = []
 
-    # Create neural network # DEBUG
+    # # Create neural network # DEBUG
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('units_hidden1', 64)
-    hp.Fixed('units_hidden2', 32)
-    hp.Fixed('optimizer', 'adam')
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('units_hidden1', 64)
+    # hp.Fixed('units_hidden2', 32)
+    # hp.Fixed('optimizer', 'adam')
 
-    # Call the model function with the hp object and the input shape
-    input_shape = (X_train.shape[1],)
-    model_nn = create_nn_model(hp, shape=input_shape)
+    # # Call the model function with the hp object and the input shape
+    # input_shape = (X_train.shape[1],)
+    # model_nn = create_nn_model(hp, shape=input_shape)
 
-    # Train the model
-    print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
-    history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_nn)
+    # # Train the model
+    # print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
+    # history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_nn)
 
-    # Create conv neural network
+    # # Create conv neural network
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('units_hidden1', 64)
-    hp.Fixed('optimizer', 'adam')
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('units_hidden1', 64)
+    # hp.Fixed('optimizer', 'adam')
 
-    # Call the model function with the hp object and the input shape
-    input_shape = (X_train_cnn.shape[1], 1)
-    model_cnn = create_cnn_model(hp, shape=input_shape)
+    # # Call the model function with the hp object and the input shape
+    # input_shape = (X_train_cnn.shape[1], 1)
+    # model_cnn = create_cnn_model(hp, shape=input_shape)
     
-    # Train the model
-    print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
-    history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_cnn)
+    # # Train the model
+    # print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
+    # history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_cnn)
 
-    # Create RNN model
+    # # Create RNN model
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('units_hidden1', 50)  # Fixed units for RNN
-    hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('units_hidden1', 50)  # Fixed units for RNN
+    # hp.Fixed('optimizer', 'adam')  # Fixed optimizer
 
-    input_shape = (X_train.shape[1], 1)
-    model_rnn = create_rnn_model(hp, shape=input_shape)
+    # input_shape = (X_train.shape[1], 1)
+    # model_rnn = create_rnn_model(hp, shape=input_shape)
 
-    # Train the model
-    print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
-    history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_rnn)
+    # # Train the model
+    # print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
+    # history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_rnn)
 
-    # Create GRU model
+    # # Create GRU model
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('units_hidden1', 50)  # Fixed units for GRU
-    hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('units_hidden1', 50)  # Fixed units for GRU
+    # hp.Fixed('optimizer', 'adam')  # Fixed optimizer
 
-    input_shape = (X_train.shape[1], 1)
-    model_gru = create_gru_model(hp, shape=input_shape)
-    # Train the model
-    print('Will now train a Gated Recurrent Unit neural network (GRU), with the following hyperparameters: ' + str(hp.values))
-    history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_gru)
+    # input_shape = (X_train.shape[1], 1)
+    # model_gru = create_gru_model(hp, shape=input_shape)
+    # # Train the model
+    # print('Will now train a Gated Recurrent Unit neural network (GRU), with the following hyperparameters: ' + str(hp.values))
+    # history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_gru)
 
     # LSTM architecture
 
@@ -1886,9 +1919,10 @@ def train_best_nn(best_eval, data, scaler):
         model = Model_functions[function_name](best_eval.hp, best_eval.shape)
         print(f"Will train the '{model.model_name}' as best model for neural nets.")
         # Train the model
-        history_rnn = model.fit(X_cnn, y, epochs=50, batch_size=32, validation_split=0.2)
+        history_nn = model.fit(X_cnn, y, epochs=50, batch_size=32, validation_split=0.2)
     else:
-        print(f"Function '{function_name}' not found")
+        print(f"Function '{function_name}' not found. Using fallback.")
+        model = best_eval
 
     return model, X_scaled, y
     
@@ -2083,8 +2117,8 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
     tuner = Hyperband(
         model_builder_with_shape(Model_functions[best_model_nn.model_name], best_model_nn.shape),
         objective='val_mae',
-        max_epochs=100,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
-        factor=3,                   # Reduces the number of epochs for each successive run, Defaults to 3.
+        max_epochs=10,              # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
+        factor=5,                 # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
         hyperband_iterations=1,     # Limits the number full hyperband runs
         directory='hyperband_dir',
         project_name='hyperband_' + best_model_nn.model_name,
@@ -2097,10 +2131,10 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
 
     tuner.search(X_train_scaled, 
                     y_train, 
-                    epochs=hp.Int('epochs', 10, 100), #10 100 DEBUG
+                    epochs=hp.Int('epochs', 10, 75), #10 100 DEBUG
                     batch_size=32, 
                     validation_split=0.2,
-                    callbacks=[time_limit_callback]  # Add the time limit callback here
+                    callbacks=[time_limit_callback]  # Add the time limit callback here TODO: fix: it is not working
     )
 
     # Print the best hyperparameters
@@ -2211,7 +2245,8 @@ def predict_with_updated_data():
     Threshold_timestamp = calc_threshold(Predictions)
 
     # Add volumetric water content
-    Predictions = add_volumetric_col_to_df(Predictions, "prediction_label")
+    if Current_config["Sensor_kind"] == 'tension':
+        Predictions = add_volumetric_col_to_df(Predictions, "prediction_label")
 
     # Return last accumulated reading and threshold timestamp currentSoilTension, threshold_timestamp, predictions 
     return Data['rolling_mean_grouped_soil'][-1], Threshold_timestamp, Predictions

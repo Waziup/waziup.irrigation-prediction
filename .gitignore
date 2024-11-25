@@ -164,7 +164,7 @@ catboost_info/
 # tuning records
 hyperband_dir/
 
-# models
+# irrigation records
 data/irrigations.json
 
 # notes

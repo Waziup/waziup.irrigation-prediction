@@ -41,6 +41,10 @@ DeviceAndSensorIdsFlow = []
 # GPS
 Gps_info = ""
 
+# Soil moisture sensor kind
+Sensor_kind = "tension"
+Sensor_unit = ""
+
 # Slope to evaluate irrgation has taken place
 Slope = 0
 
@@ -157,6 +161,7 @@ usock.routerPOST("/ui/(.*)", ui)
 
 #------------------#
 
+# Cleans python and pycaret logs
 class LogCleanerThread(threading.Thread):
     def __init__(self, file_path, age_limit_days=90, check_interval=86400):
         super().__init__()
@@ -183,6 +188,7 @@ class LogCleanerThread(threading.Thread):
     def stop(self):
         self.stop_thread.set()
 
+# setup function for log cleaner
 def schedule_log_cleanup():
     # Paths to the log files you want to monitor and clean
     logs_to_clean = [
@@ -208,10 +214,8 @@ def schedule_log_cleanup():
         for cleaner in cleaner_threads:
             cleaner.join()
 
+# Deletes files older than the threshold from the specified folder and its subfolders.
 def delete_old_files(folder_path):
-    """
-    Deletes files older than the threshold from the specified folder and its subfolders.
-    """
     current_time = time.time()
     threshold_time = current_time - THRESHOLD_DAYS_CLEANUP * 24 * 60 * 60
 
@@ -227,6 +231,7 @@ def delete_old_files(folder_path):
                 except Exception as e:
                     print(f"Error deleting file {file_path}: {e}")
 
+# setup function for model cleaner
 def schedule_model_cleanup(folder_path, interval_days=7):
     """
     Periodically runs the delete_old_files function every interval_hours.
@@ -267,6 +272,7 @@ def setConfig(url, body):
     global DeviceAndSensorIdsMoisture
     global DeviceAndSensorIdsTemp
     global DeviceAndSensorIdsFlow
+    global Sensor_kind
     global Gps_info
     global Slope
     global Threshold
@@ -290,6 +296,7 @@ def setConfig(url, body):
     DeviceAndSensorIdsFlow = parsed_data.get('selectedOptionsFlow', [])
 
     # Get data from forms
+    Sensor_kind = parsed_data.get('sensor_kind', [])[0]
     Gps_info = parsed_data.get('gps', [])[0]
     Slope = parsed_data.get('slope', [])[0]
     Threshold = float(parsed_data.get('thres', [])[0])
@@ -320,6 +327,7 @@ def setConfig(url, body):
         "DeviceAndSensorIdsMoisture": DeviceAndSensorIdsMoisture,
         "DeviceAndSensorIdsTemp": DeviceAndSensorIdsTemp,
         "DeviceAndSensorIdsFlow": DeviceAndSensorIdsFlow,
+        "Sensor_kind" : Sensor_kind,
         "Gps_info": {"lattitude": Gps_info.split(',')[0].lstrip(), "longitude": Gps_info.split(',')[1].lstrip()},
         "Slope": Slope,
         "Threshold": Threshold,
@@ -348,6 +356,7 @@ def getConfigFromFile():
     global DeviceAndSensorIdsMoisture
     global DeviceAndSensorIdsTemp
     global DeviceAndSensorIdsFlow
+    global Sensor_kind
     global Gps_info
     global Slope
     global Irrigation_amount
@@ -361,6 +370,7 @@ def getConfigFromFile():
     global FieldCapacityUpper
     global FieldCapacityLower
     global Saturation
+    global Sensor_unit
 
 
     if os.path.exists(ConfigPath):
@@ -374,6 +384,7 @@ def getConfigFromFile():
         DeviceAndSensorIdsFlow = data.get('DeviceAndSensorIdsFlow', [])
 
         # Get data from forms
+        Sensor_kind = data.get('Sensor_kind', [])
         Gps_info = data.get('Gps_info', [])
         Slope = float(data.get('Slope', []))
         Threshold = float(data.get('Threshold', []))
@@ -390,6 +401,13 @@ def getConfigFromFile():
         # Get soil water retention curve -> currently not needed here
         Soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
 
+        if Sensor_kind == "tension":
+            Sensor_unit = "Moisture in cbar (Soil Tension)"
+        elif Sensor_kind == "capacitive":
+            Sensor_unit = "Moisture in % (Volumetric Water Content)"
+        else :
+            Sensor_unit = "Unit is unknown"
+
         return True
     else:
         return False
@@ -402,8 +420,8 @@ def returnConfig(url, body):
 
         # Check if all necessary global variables are properly defined
         if not all(isinstance(var, (int, float, str, list, dict)) for var in [
-            DeviceAndSensorIdsMoisture, DeviceAndSensorIdsTemp, DeviceAndSensorIdsFlow,
-            Gps_info, Slope, Threshold, Irrigation_amount, Look_ahead_time, 
+            DeviceAndSensorIdsMoisture, DeviceAndSensorIdsTemp, DeviceAndSensorIdsFlow, 
+            Sensor_kind, Gps_info, Slope, Threshold, Irrigation_amount, Look_ahead_time, 
             Start_date, Period, PermanentWiltingPoint, FieldCapacityUpper, 
             FieldCapacityLower, Saturation]):
             raise ValueError("Variables are still missing or of incorrect type after loading from config.")
@@ -413,6 +431,7 @@ def returnConfig(url, body):
             "DeviceAndSensorIdsMoisture": DeviceAndSensorIdsMoisture,
             "DeviceAndSensorIdsTemp": DeviceAndSensorIdsTemp,
             "DeviceAndSensorIdsFlow": DeviceAndSensorIdsFlow,
+            "Sensor_kind": Sensor_kind,
             "Gps_info": Gps_info,
             "Slope": Slope,
             "Threshold": Threshold,
@@ -523,20 +542,30 @@ def getValuesForDashboard(url, body):
     data_moisture = []
     data_temp = []
 
-    for moisture in DeviceAndSensorIdsMoisture:
-        data_moisture.append(create_model.load_latest_data_api(moisture, "sensors"))
     for temp in DeviceAndSensorIdsTemp:
         data_temp.append(create_model.load_latest_data_api(temp, "sensors"))
+    for moisture in DeviceAndSensorIdsMoisture:
+        data_moisture.append(create_model.load_latest_data_api(moisture, "sensors"))
 
-    # Calculate the moisture average
-    moisture_average = sum(data_moisture) / len(data_moisture)
     # Calculate the temp average
     temp_average = sum(data_temp) / len(data_temp)
+    # Calculate the moisture average
+    moisture_average = sum(data_moisture) / len(data_moisture)
+    # Calculate the VVO average if tension sensor is used
+    if Sensor_kind == "tension":
+        vwc_average = round(create_model.calc_volumetric_water_content_single_value(moisture_average)*100,2) 
 
-    dashboard_data = {
-        "temp_average": temp_average,
-        "moisture_average": moisture_average
-    }
+        dashboard_data = {
+            "temp_average": temp_average,
+            "moisture_average": moisture_average,
+            "vwc_average": vwc_average
+        }
+    else:
+        dashboard_data = {
+            "temp_average": temp_average,
+            "moisture_average": "--",
+            "vwc_average": moisture_average
+        }
     
     return 200, bytes(json.dumps(dashboard_data), "utf8"), []
 
@@ -565,7 +594,8 @@ def getHistoricalChartData(url, body):
     chart_data = {
         "timestamps": f_data_time,
         "temperatureSeries": f_data_temp,
-        "moistureSeries": f_data_moisture
+        "moistureSeries": f_data_moisture,
+        "unit": Sensor_unit
     }
 
     return 200, bytes(json.dumps(chart_data), "utf8"), []
@@ -628,7 +658,6 @@ def getPredictionChartData(url, body):
     for item in data_pred.index:
         f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S%z'))
     f_data_moisture = data_pred["prediction_label"].tolist()
-    f_data_moisture_vol = data_pred["prediction_label_vol"].tolist()
 
 
     # Add a horizontal line at Threshold
@@ -651,13 +680,19 @@ def getPredictionChartData(url, body):
     chart_data = {
         "timestamps": f_data_time,
         "moistureSeries": f_data_moisture,
-        "moistureSeriesVol": f_data_moisture_vol,
         "annotations": annotations, # Could be also just the value instead of annotations object
         "permanentWiltingPoint": PermanentWiltingPoint,
         "fieldCapacityUpper": FieldCapacityUpper,
         "fieldCapacityLower": FieldCapacityLower,
-        "saturation": Saturation
+        "saturation": Saturation,
+        "kind": Sensor_kind,
+        "unit": Sensor_unit
     }
+
+    # Conditionally add 'moistureSeriesVol' if available
+    if Sensor_kind == 'tension':# and 'f_data_moisture_vol' in locals() and f_data_moisture_vol is not None:
+        f_data_moisture_vol = data_pred["prediction_label_vol"].tolist()
+        chart_data["moistureSeriesVol"] = f_data_moisture_vol
 
     return 200, bytes(json.dumps(chart_data), "utf8"), []
 
@@ -682,6 +717,14 @@ def getThreshold(url, body):
     
 usock.routerGET("/api/getThreshold", getThreshold)
 
+# Returns the senors kind: e.g. capacitive or tension
+def getSensorKind(url, body):
+    response_data = {"SensorKind": Sensor_kind}
+    
+    return 200, bytes(json.dumps(response_data), "utf8"), []
+
+usock.routerGET("/api/getSensorKind", getSensorKind)
+
 # Frontend polls this to reload page when training is ready => only active for first round of training
 def isTrainingReady(url, body):
     response_data = {"isTrainingFinished": TrainingFinished}
@@ -705,7 +748,7 @@ def workerToPredict():
     def time_until_n_hours(hours):
         """Calculate the time difference from now until the next noon."""
         now = datetime.now()
-        predict_time = now + timedelta(hours=0, minutes=hours, seconds=0, microseconds=0) #TODO: change to hours
+        predict_time = now + timedelta(hours=hours, minutes=0, seconds=0, microseconds=0) #TODO: change to hours
 
         return (predict_time - now).total_seconds()
     
@@ -761,6 +804,7 @@ def workerToPredict():
             print(f"Prediction thread error: {e}. Retrying after 30 minute.")
             time.sleep(Restart_time)  # Retry after 30 minute if there is an error
 
+# Starts a thread that runs prediction
 def startPrediction():
     global ThreadId
     global Prediction_thread
@@ -846,7 +890,7 @@ def workerToTrain(thread_id, url, startTrainingNow):
             print(f"Training error: {e}. Retrying after 30 minute.")
             time.sleep(Restart_time)  # Retry after 30 minute if there is an error
 
-
+# Starts a thread that runs training
 def startTraining(url, body):
     global ThreadId
     global TrainingFinished

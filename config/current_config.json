@@ -5,12 +5,16 @@
     "DeviceAndSensorIdsTemp": [
         "657360e268f319085542e336/657360f468f319085542e33b"
     ],
+    "DeviceAndSensorIdsFlow": [
+        "6645c4d468f31971148f2ab1/667ae30068f3197114901717"
+    ],
+    "Sensor_kind": "tension",
     "Gps_info": {
         "lattitude": "51.023591",
         "longitude": "13.744087"
     },
     "Slope": "-0.07",
-    "Threshold": 7.0,
+    "Threshold": 15.0,
     "Irrigation_amount": 10.0,
     "Look_ahead_time": 6.0,
     "Start_date": "2024-03-12T00:00:00.000Z",
