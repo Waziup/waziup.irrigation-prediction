@@ -190,60 +190,8 @@ def irrigate_amount(amount):
     
     return response_ok
 
-
-# Mighty main fuction TODO:capsulate
-def main_old(currentSoilTension, threshold_timestamp, predictions, irrigation_amount) -> int:
-    global TimeSpanOverThreshold
-    #####################################################################
-    ## TODO: remove DEBUG vars                                          #
-    # Get threshold from config                                         #
-    threshold = create_model.Current_config['Threshold']           #
-    # set timestamp for debug reasons
-    TimeSpanOverThreshold =  create_model.Current_config['Look_ahead_time']                                  #
-    future_time =  datetime.now() + timedelta(hours=TimeSpanOverThreshold)                  #
-    threshold_timestamp = future_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ") #
-    ## TODO: remove DEBUG vars                                          #
-    #####################################################################
-    now = datetime.now().replace(microsecond=0)
-
-    # "Weak" irrigation strategy TODO: higher: no lower----> was not met
-    # If threshold was met
-    if currentSoilTension > threshold:
-        print(f"Threshold: {threshold} was reached with a value of {currentSoilTension}.")
-        # If threshold + 20% -> irrigate
-        if currentSoilTension > threshold * OverThresholdAllowed:
-            print(f"Threshold: {threshold} was exceeded by 20%, irrigate immediatly!")
-            # Trigger irrigation
-            e = irrigate_amount(irrigation_amount)
-            return e
-        # Threshold was met but predictions will not meet threshold in forecast horizon
-        elif not threshold_timestamp:
-            print(f"Threshold: {threshold} was met but predictions will not meet threshold in forecast horizon")
-            next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'prediction_label', threshold)
-            if next_higher_idx:
-                print(f"Threshold: {threshold} will be meet again in the in the next {TimeSpanOverThreshold} hours, irrigate now!")
-                # Trigger irrigation
-                e = irrigate_amount(irrigation_amount)
-                return e
-            return 0
-        elif threshold_timestamp:
-            #and next occurance within TimeSpanOverThreshold (e.g.12h)
-            next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'prediction_label', threshold)
-            if next_higher_idx:
-                print(f"Threshold: {threshold} will be meet again in the next {TimeSpanOverThreshold} hours, irrigate now!")
-                # Trigger irrigation
-                e = irrigate_amount(irrigation_amount)
-                return e
-            else:
-                print(f"Threshold was not met yet.")
-                return 0
-    # Threshold was not met, so do not irrigate
-    else:
-        print(f"Threshold: {threshold} is not reached, cuurent soil tension is: {currentSoilTension}, do not irrigate.")
-        return 0
-    
 # Mighty main function TODO: capsulate
-def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount) -> int:
+def main_old(currentSoilTension, threshold_timestamp, predictions, irrigation_amount) -> int:
     global TimeSpanOverThreshold    
                                      
     # Get threshold from config                                      
@@ -254,7 +202,7 @@ def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount
     threshold_timestamp = future_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     now = datetime.now().replace(microsecond=0)
 
-    # "Weak" irrigation strategy
+        # "Weak" irrigation strategy
     # If threshold was met
     if currentSoilTension > threshold:
         print(f"Threshold: {threshold} was reached with a value of {currentSoilTension}.")
@@ -285,11 +233,69 @@ def main(currentSoilTension, threshold_timestamp, predictions, irrigation_amount
         return 0
 
 
+# Mighty main function TODO: capsulate
+def main(
+    current_value, 
+    threshold_timestamp, 
+    predictions, 
+    irrigation_amount, 
+    strategy="tension"
+) -> int:
+    """
+    Handles irrigation logic for soil tension and soil humidity based on the specified strategy.
 
+    :param current_value: Current sensor value (e.g., soil tension or humidity).
+    :param threshold_timestamp: Predicted threshold crossing timestamp.
+    :param predictions: Predictions data (list or dataframe).
+    :param irrigation_amount: Amount of irrigation to apply.
+    :param strategy: Either "tension" or "humidity".
+    :return: 1 if irrigation is triggered, otherwise 0.
+    """
+    global TimeSpanOverThreshold
 
+    # Get configuration
+    threshold = create_model.Current_config['Threshold']
+    TimeSpanOverThreshold = create_model.Current_config['Look_ahead_time']
 
+    # Define comparison logic based on strategy
+    comparison_fn = (lambda value, threshold: value > threshold) if strategy == "tension" else (
+        lambda value, threshold: value < threshold
+    )
 
-    
+    # Define over-threshold logic
+    over_threshold_fn = (
+        lambda value, threshold: value > threshold * OverThresholdAllowed
+        if strategy == "tension"
+        else lambda value, threshold: value < threshold / OverThresholdAllowed
+    )
+
+    # "Weak" irrigation strategy
+    if comparison_fn(current_value, threshold):
+        print(f"Threshold: {threshold} was reached with a value of {current_value}.")
+
+        # Immediate irrigation if over-threshold logic is satisfied
+        if over_threshold_fn(current_value, threshold):
+            print(f"Immediate irrigation triggered for strategy '{strategy}'!")
+            return irrigate_amount(irrigation_amount)
+
+        # Check predictions for next occurrence below/above threshold
+        next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'prediction_label', threshold)
+
+        # No recovery predicted within forecast horizon
+        if (strategy == "tension" and not next_lower_idx) or (strategy == "humidity" and not next_higher_idx):
+            print(f"No recovery predicted within {TimeSpanOverThreshold} hours, irrigate now!")
+            return irrigate_amount(irrigation_amount)
+
+        # Otherwise, delay irrigation
+        else:
+            target_time = next_lower_idx if strategy == "tension" else next_higher_idx
+            print(f"Irrigation can wait. Recovery expected at: {target_time}")
+            return 0
+
+    # Threshold was not met, so do not irrigate
+    else:
+        print(f"Threshold: {threshold} is not reached, current value is: {current_value}. Do not irrigate.")
+        return 0
 
 
 if __name__ == '__main__':

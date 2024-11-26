@@ -1,36 +1,32 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Settings of the "Irrigation Prediction" WaziApp</title>
-    <meta name="description" content="" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <link rel="stylesheet" href="main.css" type="text/css" />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
-    />
-    <link
-      href="https://fonts.googleapis.com/css?family=Poppins"
-      rel="stylesheet"
-    />
-    <script type="text/javascript" src="libs/jquery-3.2.1.min.js"></script>
-    <!-- Include the locally hosted ApexCharts -->
-    <script type="text/javascript" src="libs/apexcharts.min.js"></script>
-    <script type="text/javascript">
-      var waitForTraining = true;
-      var timestamp = "";
-      // Apex charts is rather slow in handeling many datapoints => needs to be restricted
-      var MaxValuesToBeDisplayed = 1000      
-      let chart
-      var TrainingReadyCheck = 5000 
+<head>
+  <meta charset="utf-8" />
+  <title>Settings of the "Irrigation Prediction" WaziApp</title>
+  <meta name="description" content="" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link rel="stylesheet" href="main.css" type="text/css" />
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link href="https://fonts.googleapis.com/css?family=Poppins" rel="stylesheet" />
+  <script type="text/javascript" src="libs/jquery-3.2.1.min.js"></script>
+  <!-- Include the locally hosted ApexCharts -->
+  <script type="text/javascript" src="libs/apexcharts.min.js"></script>
+  <script type="text/javascript">
+    var waitForTraining = true;
+    var timestamp = "";
+    // Apex charts is rather slow in handeling many datapoints => needs to be restricted
+    var MaxValuesToBeDisplayed = 1000
+    let chart
+    var TrainingReadyCheck = 5000
 
 
-      // Event listers
-      document.addEventListener('DOMContentLoaded', function() {
-        // Tooltips
-        fetch('tooltips.json')  // Replace with the correct path to your JSON file
+    // Event listers
+    document.addEventListener('DOMContentLoaded', function () {
+      // Tooltips
+      fetch('tooltips.json')  // Replace with the correct path to your JSON file
         .then(response => response.json())
         .then(tooltips => {
           // Loop through each tooltip element
@@ -43,784 +39,775 @@
           });
         })
         .catch(error => console.error('Error loading tooltip text:', error));
+    });
+
+    // Nav
+    function goToSettings() {
+      window.location.href = "settings.html";
+    }
+
+    // JavaScript function to toggle visibility
+    function showElements() {
+      var inputElements = document.querySelector(".input_elements");
+      inputElements.style.display = "block";
+    }
+
+    // Display Snesor values and other elements
+    function displaySensorsAndElements(sensorList) {
+      // Get the <select> element by its ID
+      const selectElement = document.getElementById("sensor_list");
+      showElements();
+
+      // Loop through the sensor names and create <option> elements
+      sensorList.forEach((sensor) => {
+        // Create an <option> element
+        const optionElement = document.createElement("option");
+
+        // Set the value and text of the <option> element
+        optionElement.value = sensor.deviceId + "/" + sensor.sensorId;
+        optionElement.text = sensor.deviceName + " / " + sensor.sensorName;
+
+        // Append the <option> element to the <select> element
+        selectElement.appendChild(optionElement);
       });
-            
-      // Nav
-      function goToSettings() {
-        window.location.href = "settings.html";
-      }
+    }
 
-      // JavaScript function to toggle visibility
-      function showElements() {
-        var inputElements = document.querySelector(".input_elements");
-        inputElements.style.display = "block";
-      }
+    // Creates List of sensors
+    function parseSensorData(jsonData) {
+      const sensorList = [];
 
-      // Display Snesor values and other elements
-      function displaySensorsAndElements(sensorList) {
-        // Get the <select> element by its ID
-        const selectElement = document.getElementById("sensor_list");
-        showElements();
+      // Loop through the array of objects (devices) in jsonData
+      jsonData.forEach((device) => {
+        // Check if the device has a "sensors" property
+        if (device.sensors && Array.isArray(device.sensors)) {
+          // Loop through the sensors array of the device
+          device.sensors.forEach((sensor) => {
+            // Extract sensor information
+            const sensorInfo = {
+              deviceId: device.id,
+              deviceName: device.name,
+              sensorId: sensor.id,
+              sensorName: sensor.name,
+              sensorValue: sensor.value,
+            };
 
-        // Loop through the sensor names and create <option> elements
-        sensorList.forEach((sensor) => {
-          // Create an <option> element
-          const optionElement = document.createElement("option");
-
-          // Set the value and text of the <option> element
-          optionElement.value = sensor.deviceId + "/" + sensor.sensorId;
-          optionElement.text = sensor.deviceName + " / " + sensor.sensorName;
-
-          // Append the <option> element to the <select> element
-          selectElement.appendChild(optionElement);
-        });
-      }
-
-      // Creates List of sensors
-      function parseSensorData(jsonData) {
-        const sensorList = [];
-
-        // Loop through the array of objects (devices) in jsonData
-        jsonData.forEach((device) => {
-          // Check if the device has a "sensors" property
-          if (device.sensors && Array.isArray(device.sensors)) {
-            // Loop through the sensors array of the device
-            device.sensors.forEach((sensor) => {
-              // Extract sensor information
-              const sensorInfo = {
-                deviceId: device.id,
-                deviceName: device.name,
-                sensorId: sensor.id,
-                sensorName: sensor.name,
-                sensorValue: sensor.value,
-              };
-
-              // Push the sensor information to the sensorList
-              sensorList.push(sensorInfo);
-            });
-          }
-        });
-        return sensorList;
-      }
-
-      // To confirm that user had run the config
-      function checkConfigPresent() {
-        return fetch(`../api/checkConfigPresent`)
-          .then((response) => response.json())
-          .then((data) => {
-            if (data.data.config_present == true) {
-              return true;
-            } else {
-              // TODO: do not display chart or do display without values
-              alert(
-                "Please press the 'Settings' button and set up the needed parameters."
-              );
-              set_button = document.getElementById('settings_btn');
-              set_button.classList.add('highlight');
-              train_button = document.getElementById('train_btn');
-              train_button.className = 'button-cancel';
-              train_button.disabled = true;
-            }
-            console.log(data);
-            return false;
+            // Push the sensor information to the sensorList
+            sensorList.push(sensorInfo);
           });
-      }
+        }
+      });
+      return sensorList;
+    }
 
-      // To confirm that user had run the config
-      function checkActiveIrrigation() {
-        return fetch(`../api/checkActiveIrrigation`)
-          .then((response) => response.json())
-          .then((data) => {
-            if (data.data.activeIrrigation == true) {
-              return true;
-            } else {
-              // could be capsulated
-              var text = document.getElementById('active_passiv');
-              var button = document.getElementById('schedule_irrigation');
-              text.className = 'value_inactive';
-              text.innerText = 'Inactive - No present';
-              button.className = 'button-cancel';
-              button.disabled = true;
-            }
-            console.log(data);
-          });
-      }
-
-      // Function to format ISO timestamp to a readable format
-      function formatTimestamp(isoTimestamp) {
-        const date = new Date(isoTimestamp);
-        const options = {
-          year: "numeric",
-          month: "short",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit" /*, second: '2-digit'*/,
-        };
-        const formatter = new Intl.DateTimeFormat("de-DE", options);
-        return formatter.format(date);
-      }
-
-      // Get data from to display inside chart from backend
-      function fetchCurrentValues() {
-        fetch("../api/getValuesForDashboard")
-          .then((response) => response.json())
-          .then((dashboardData) => {
-            // set data in html
-            document.getElementById('temp-value').textContent = String(dashboardData.temp_average) + ' °C';
-            document.getElementById('tension-value').textContent = String(dashboardData.moisture_average) + ' cb';
-            document.getElementById('humidity-value').textContent = String(dashboardData.vwc_average) + ' %';
-          })
-          .catch((error) => console.error("Error fetching data:", error));
-      }
-
-      // Get current sensor kind
-      function fetchSensorKind() {
-        fetch("../api/getSensorKind")
-          .then((response) => response.json())
-          .then((response_data) => {
-            if (response_data){
-              return response_data.SensorKind
-            }
+    // To confirm that user had run the config
+    function checkConfigPresent() {
+      return fetch(`../api/checkConfigPresent`)
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.data.config_present == true) {
+            return true;
+          } else {
+            // TODO: do not display chart or do display without values
+            alert(
+              "Please press the 'Settings' button and set up the needed parameters."
+            );
+            set_button = document.getElementById('settings_btn');
+            set_button.classList.add('highlight');
+            train_button = document.getElementById('train_btn');
+            train_button.className = 'button-cancel';
+            train_button.disabled = true;
           }
-      )}
+          console.log(data);
+          return false;
+        });
+    }
 
-      // Get data from to display inside chart from backend
-      function fetchHistoricalChartData() {
-        fetch("../api/getHistoricalChartData")
-          .then((response) => response.json())
-          .then((chartData) => {
-            // Limit the number of values to display
+    // To confirm that user had run the config
+    function checkActiveIrrigation() {
+      return fetch(`../api/checkActiveIrrigation`)
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.data.activeIrrigation == true) {
+            return true;
+          } else {
+            // could be capsulated
+            var text = document.getElementById('active_passiv');
+            var button = document.getElementById('schedule_irrigation');
+            text.className = 'value_inactive';
+            text.innerText = 'Inactive - No present';
+            button.className = 'button-cancel';
+            button.disabled = true;
+          }
+          console.log(data);
+        });
+    }
+
+    // Function to format ISO timestamp to a readable format
+    function formatTimestamp(isoTimestamp) {
+      const date = new Date(isoTimestamp);
+      const options = {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit" /*, second: '2-digit'*/,
+      };
+      const formatter = new Intl.DateTimeFormat("de-DE", options);
+      return formatter.format(date);
+    }
+
+    // Get data from to display inside chart from backend
+    function fetchCurrentValues() {
+      fetch("../api/getValuesForDashboard")
+        .then((response) => response.json())
+        .then((dashboardData) => {
+          // set data in html
+          document.getElementById('temp-value').textContent = String(dashboardData.temp_average) + ' °C';
+          document.getElementById('tension-value').textContent = String(dashboardData.moisture_average) + ' cb';
+          document.getElementById('humidity-value').textContent = String(dashboardData.vwc_average) + ' %';
+        })
+        .catch((error) => console.error("Error fetching data:", error));
+    }
+
+    // Get current sensor kind
+    function fetchSensorKind() {
+      fetch("../api/getSensorKind")
+        .then((response) => response.json())
+        .then((response_data) => {
+          if (response_data) {
+            return response_data.SensorKind
+          }
+        }
+        )
+    }
+
+    // Get data from to display inside chart from backend
+    function fetchHistoricalChartData() {
+      fetch("../api/getHistoricalChartData")
+        .then((response) => response.json())
+        .then((chartData) => {
+          // Limit the number of values to display
+          const totalValues = chartData.timestamps.length;
+
+          if (totalValues > MaxValuesToBeDisplayed) {
+            const step = Math.ceil(totalValues / MaxValuesToBeDisplayed);
+
+            chartData.timestamps = chartData.timestamps.filter((timestamp, index) => index % step === 0);
+            chartData.temperatureSeries = chartData.temperatureSeries.filter((value, index) => index % step === 0);
+            chartData.moistureSeries = chartData.moistureSeries.filter((value, index) => index % step === 0);
+          }
+          // Format the data
+          var temperatureSeriesRounded = chartData.temperatureSeries.map(
+            (value) => parseFloat(value.toFixed(1))
+          );
+          var moistureSeriesRounded = chartData.moistureSeries.map((value) =>
+            parseFloat(value.toFixed(2))
+          );
+          var formattedTimestamps = chartData.timestamps.map((timestamp) =>
+            formatTimestamp(timestamp)
+          );
+          //var sensorKind = fetchSensorKind(); // 
+
+          var options = {
+            chart: {
+              type: "line",
+              title: "Temperature and Soil Moisture", // Set the title here
+            },
+            series: [
+              {
+                name: "Temperature in °C",
+                data: temperatureSeriesRounded,
+              },
+              {
+                name: chartData.unit,
+                data: moistureSeriesRounded,
+              },
+            ],
+            xaxis: {
+              categories: formattedTimestamps, //chartData.timestamps,//formattedTimestamps,
+              labels: {
+                rotate: -45, // Rotate labels by -45 degrees to avoid overlapping
+                minHeight: 40, // Set a minimum height for labels to prevent overlapping
+                // datetimeFormatter: {
+                //     year: 'yyyy',
+                //     month: 'MMM \'yy',
+                //     day: 'dd MMM',
+                //     hour: 'HH:mm',
+                //     minute: 'HH:mm'
+                // }
+              },
+            },
+          };
+
+          var chart = new ApexCharts(
+            document.querySelector("#chart_hist"),
+            options
+          );
+          chart.render();
+        })
+        .catch((error) => console.error("Error fetching data:", error));
+    }
+
+    // TODO: keys are wrong, data missing
+    function fetchDatasetChartData() {
+      fetch("../api/getDatasetChartData")
+        .then((response) => response.json())
+        .then((chartData) => {
+          if (chartData.model == false) {
+            // alert(
+            //   'Please start the training procedure by pressing the "Start Training" button after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.'
+            // );
+          } else {
+            // Initialize variables outside the loop
+            var elementsToDisplay = [];
+            var formattedTimestamps;
             const totalValues = chartData.timestamps.length;
+            const step = Math.ceil(totalValues / MaxValuesToBeDisplayed);
 
-            if (totalValues > MaxValuesToBeDisplayed) {
-                const step = Math.ceil(totalValues / MaxValuesToBeDisplayed);
-                
-                chartData.timestamps = chartData.timestamps.filter((timestamp, index) => index % step === 0);
-                chartData.temperatureSeries = chartData.temperatureSeries.filter((value, index) => index % step === 0);
-                chartData.moistureSeries = chartData.moistureSeries.filter((value, index) => index % step === 0);
+            // Iterate through the keys in chartData
+            for (var key in chartData) {
+              if (chartData.hasOwnProperty(key)) {
+                // Check the type for each element in the array
+                var isNumberArray = chartData[key].every(
+                  (value) => typeof value === "number"
+                );
+
+                if (isNumberArray) {
+                  if (totalValues > MaxValuesToBeDisplayed) {
+                    chartData[key] = chartData[key].filter((value, index) => index % step === 0);
+                  }
+                  // If all elements are numbers, push the series data
+                  elementsToDisplay.push({
+                    name: key,
+                    data: chartData[key].map((value) =>
+                      parseFloat(value.toFixed(2))
+                    ),
+                  });
+                } else if (typeof chartData[key][0] === "string") {
+                  if (totalValues > MaxValuesToBeDisplayed) {
+                    chartData[key] = chartData[key].filter((value, index) => index % step === 0);
+                  }
+                  formattedTimestamps = chartData.timestamps.map(
+                    (timestamp) => formatTimestamp(timestamp)
+                  );
+                }
+              }
             }
-            // Format the data
-            var temperatureSeriesRounded = chartData.temperatureSeries.map(
-              (value) => parseFloat(value.toFixed(1))
-            );
-            var moistureSeriesRounded = chartData.moistureSeries.map((value) =>
-              parseFloat(value.toFixed(2))
-            );
-            var formattedTimestamps = chartData.timestamps.map((timestamp) =>
-              formatTimestamp(timestamp)
-            );
-            //var sensorKind = fetchSensorKind(); // 
 
             var options = {
               chart: {
                 type: "line",
-                title: "Temperature and Soil Moisture", // Set the title here
+                title: "All values of the dataset", // Set the title here
               },
-              series: [
-                {
-                  name: "Temperature in °C",
-                  data: temperatureSeriesRounded,
-                },
-                {
-                  name: chartData.unit,
-                  data: moistureSeriesRounded,
-                },
-              ],
+              series: elementsToDisplay, // Use the prepared series data
               xaxis: {
-                categories: formattedTimestamps, //chartData.timestamps,//formattedTimestamps,
+                categories: formattedTimestamps || [], // Use formattedTimestamps if available, otherwise an empty array
                 labels: {
-                  rotate: -45, // Rotate labels by -45 degrees to avoid overlapping
-                  minHeight: 40, // Set a minimum height for labels to prevent overlapping
-                  // datetimeFormatter: {
-                  //     year: 'yyyy',
-                  //     month: 'MMM \'yy',
-                  //     day: 'dd MMM',
-                  //     hour: 'HH:mm',
-                  //     minute: 'HH:mm'
-                  // }
+                  rotate: -45,
+                  minHeight: 40,
                 },
               },
             };
 
             var chart = new ApexCharts(
-              document.querySelector("#chart_hist"),
+              document.querySelector("#chart_train_data"),
               options
             );
             chart.render();
-          })
-          .catch((error) => console.error("Error fetching data:", error));
-      }
 
-      // TODO: keys are wrong, data missing
-      function fetchDatasetChartData() {
-        fetch("../api/getDatasetChartData")
-          .then((response) => response.json())
-          .then((chartData) => {
-            if (chartData.model == false) {
-              // alert(
-              //   'Please start the training procedure by pressing the "Start Training" button after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.'
-              // );
-            } else {
-              // Initialize variables outside the loop
-              var elementsToDisplay = [];
-              var formattedTimestamps;
-              const totalValues = chartData.timestamps.length;
-              const step = Math.ceil(totalValues / MaxValuesToBeDisplayed);
+            // Hide some series after rendering
+            chart.hideSeries("hour");
+            chart.hideSeries("Cloudcover");
+            chart.hideSeries("Shortwave_Radiation");
+            chart.hideSeries("Soil_temperature_7-28");
+            chart.hideSeries("Soil_moisture_0-7");
+            chart.hideSeries("Et0_evapotranspiration");
+          }
+        })
+        .catch((error) => console.error("Error fetching data:", error));
+    }
 
-              // Iterate through the keys in chartData
-              for (var key in chartData) {
-                if (chartData.hasOwnProperty(key)) {
-                  // Check the type for each element in the array
-                  var isNumberArray = chartData[key].every(
-                    (value) => typeof value === "number"
-                  );
+    function fetchPredictionChartData() {
+      fetch("../api/getPredictionChartData")
+        .then((response) => response.json())
+        .then((chartData) => {
+          if (chartData.model === false) {
+            alert('Please start training by pressing the "Start Training" button.');
+            const trainButton = document.getElementById("train_btn");
+            trainButton.classList.add("highlight");
+          } else {
+            // Format the data
+            const moistureSeriesRounded = chartData.moistureSeries.map((value) =>
+              parseFloat(value.toFixed(2))
+            );
+            let moistureSeriesVolRounded = null;
+            if (chartData.kind === "tension" && Array.isArray(chartData.moistureSeriesVol)) {
+              moistureSeriesVolRounded = chartData.moistureSeriesVol.map((value) =>
+                parseFloat(value.toFixed(4))
+              );
+            }
+            const formattedTimestamps = chartData.timestamps.map((timestamp) =>
+              formatTimestamp(timestamp)
+            );
 
-                  if (isNumberArray) {
-                    if (totalValues > MaxValuesToBeDisplayed) {
-                      chartData[key] = chartData[key].filter((value, index) => index % step === 0);
-                    }
-                    // If all elements are numbers, push the series data
-                    elementsToDisplay.push({
-                      name: key,
-                      data: chartData[key].map((value) =>
-                        parseFloat(value.toFixed(2))
-                      ),
+            // Initialize series visibility state TODO: check for capcitive
+            const seriesVisibility = {
+              "Moisture in cbar (Soil Tension)": true,
+              "Volumetric Water Content": false,
+            };
+
+            // Configure chart options
+            const options = {
+              chart: {
+                type: "line",
+                events: {
+                  legendClick: function (chartContext, seriesIndex) {
+                    const seriesName = chartContext.w.globals.seriesNames[seriesIndex];
+                    // Toggle visibility state for the clicked series
+                    seriesVisibility[seriesName] = !seriesVisibility[seriesName];
+
+                    // Determine the new annotations
+                    const annotations = seriesVisibility["Moisture in cbar (Soil Tension)"]
+                      ? getSoilTensionAnnotations(chartData)
+                      : [];
+                    
+                    // Additional annotations from backend, like 
+                    const additionalAnnotations = seriesVisibility["Moisture in cbar (Soil Tension)"]
+                      ? chartData.annotations.yaxis
+                      : [];
+
+                    // Update the chart annotations
+                    chartContext.updateOptions({
+                      annotations: {
+                        yaxis: [...annotations, ...additionalAnnotations],
+                      },
                     });
-                  } else if (typeof chartData[key][0] === "string") {
-                    if (totalValues > MaxValuesToBeDisplayed) {
-                      chartData[key] = chartData[key].filter((value, index) => index % step === 0);
-                    }
-                    formattedTimestamps = chartData.timestamps.map(
-                      (timestamp) => formatTimestamp(timestamp)
-                    );
-                  }
-                }
-              }
-
-              var options = {
-                chart: {
-                  type: "line",
-                  title: "All values of the dataset", // Set the title here
-                },
-                series: elementsToDisplay, // Use the prepared series data
-                xaxis: {
-                  categories: formattedTimestamps || [], // Use formattedTimestamps if available, otherwise an empty array
-                  labels: {
-                    rotate: -45,
-                    minHeight: 40,
                   },
                 },
-              };
+              },
+              series: [
+                {
+                  name: chartData.unit,
+                  data: moistureSeriesRounded,
+                },
+                ...(moistureSeriesVolRounded
+                  ? [
+                    {
+                      name: "Volumetric Water Content",
+                      data: moistureSeriesVolRounded,
+                    },
+                  ]
+                  : []),
+              ],
+              xaxis: {
+                categories: formattedTimestamps,
+                labels: {
+                  rotate: -45,
+                  minHeight: 40,
+                },
+              },
+              yaxis: [
+                {
+                  title: {
+                    text: chartData.unit,
+                  },
+                  labels: {
+                    formatter: function (val) {
+                      return typeof val === "number" && !isNaN(val) ? val.toFixed(1) : "";
+                    },
+                  },
+                  min: 0,
+                  max: Math.max(...moistureSeriesRounded),
+                },
+                ...(moistureSeriesVolRounded
+                  ? [
+                    {
+                      opposite: true,
+                      title: {
+                        text: "Volumetric Water Content",
+                      },
+                      labels: {
+                        formatter: function (val) {
+                          return typeof val === "number" && !isNaN(val)
+                            ? val.toFixed(2)
+                            : "";
+                        },
+                      },
+                      min: Math.min(...moistureSeriesVolRounded).toFixed(0),
+                      max: Math.max(...moistureSeriesVolRounded).toFixed(0),
+                    },
+                  ]
+                  : []),
+              ],
+              annotations: {
+                yaxis: [
+                  ...(() => {
+                    if (chartData.kind === 'tension') {
+                      // Combine both soil tension annotations and the other y-axis annotations
+                      const soilTensionAnnotations = getSoilTensionAnnotations(chartData);
+                      const additionalAnnotations = Array.isArray(chartData.annotations?.yaxis)
+                        ? chartData.annotations.yaxis
+                        : [];
+                      return [...soilTensionAnnotations, ...additionalAnnotations];
+                    }
+                    // Return only the additional annotations if not tension
+                    return Array.isArray(chartData.annotations?.yaxis)
+                      ? chartData.annotations.yaxis
+                      : [];
+                  })(),
+                ],
 
-              var chart = new ApexCharts(
-                document.querySelector("#chart_train_data"),
-                options
-              );
+                legend: {
+                  show: true, // Ensure the legend is always shown
+                },
+              }
+            };
+
+            // Create or update the chart
+            if (!chart) {
+              chart = new ApexCharts(document.querySelector("#chart_pred"), options);
               chart.render();
-
-              // Hide some series after rendering
-              chart.hideSeries("hour");
-              chart.hideSeries("Cloudcover");
-              chart.hideSeries("Shortwave_Radiation");
-              chart.hideSeries("Soil_temperature_7-28");
-              chart.hideSeries("Soil_moisture_0-7");
-              chart.hideSeries("Et0_evapotranspiration");
+            } else {
+              chart.updateOptions(options);
             }
-          })
-          .catch((error) => console.error("Error fetching data:", error));
-      }
 
-      function fetchPredictionChartData() {
-        fetch("../api/getPredictionChartData")
-            .then((response) => response.json())
-            .then((chartData) => {
-                if (chartData.model === false) {
-                    alert('Please start training by pressing the "Start Training" button.');
-                    const trainButton = document.getElementById("train_btn");
-                    trainButton.classList.add("highlight");
-                } else {
-                    // Format the data
-                    const moistureSeriesRounded = chartData.moistureSeries.map((value) =>
-                        parseFloat(value.toFixed(2))
-                    );
-                    let moistureSeriesVolRounded = null;
-                    if (chartData.kind === "tension" && Array.isArray(chartData.moistureSeriesVol)) {
-                        moistureSeriesVolRounded = chartData.moistureSeriesVol.map((value) =>
-                            parseFloat(value.toFixed(4))
-                        );
-                    }
-                    const formattedTimestamps = chartData.timestamps.map((timestamp) =>
-                        formatTimestamp(timestamp)
-                    );
-
-                    // Initialize series visibility state TODO: check for capcitive
-                    const seriesVisibility = {
-                      "Moisture in cbar (Soil Tension)": true,
-                      "Volumetric Water Content": false,
-                    };
-    
-                    // Configure chart options
-                    const options = {
-                        chart: {
-                            type: "line",
-                            events: {
-                              legendClick: function (chartContext, seriesIndex) {
-                                  const seriesName = chartContext.w.globals.seriesNames[seriesIndex];
-                                  // Toggle visibility state for the clicked series
-                                  seriesVisibility[seriesName] = !seriesVisibility[seriesName];
-                  
-                                  // Determine the new annotations
-                                  const annotations = seriesVisibility["Moisture in cbar (Soil Tension)"]
-                                      ? getSoilTensionAnnotations(chartData)
-                                      : [];
-                  
-                                  // Update the chart annotations
-                                  chartContext.updateOptions({
-                                      annotations: {
-                                          yaxis: annotations,
-                                      },
-                                  });
-                              },
-                          },
-                        },
-                        series: [
-                            {
-                                name: chartData.unit,
-                                data: moistureSeriesRounded,
-                            },
-                            ...(moistureSeriesVolRounded
-                                ? [
-                                      {
-                                          name: "Volumetric Water Content",
-                                          data: moistureSeriesVolRounded,
-                                      },
-                                  ]
-                                : []),
-                        ],
-                        xaxis: {
-                            categories: formattedTimestamps,
-                            labels: {
-                                rotate: -45,
-                                minHeight: 40,
-                            },
-                        },
-                        yaxis: [
-                            {
-                                title: {
-                                    text: chartData.unit,
-                                },
-                                labels: {
-                                    formatter: function (val) {
-                                        return typeof val === "number" && !isNaN(val) ? val.toFixed(1) : "";
-                                    },
-                                },
-                                min: 0,
-                                max: Math.max(...moistureSeriesRounded),
-                            },
-                            ...(moistureSeriesVolRounded
-                                ? [
-                                      {
-                                          opposite: true,
-                                          title: {
-                                              text: "Volumetric Water Content",
-                                          },
-                                              labels: {
-                                                  formatter: function (val) {
-                                                      return typeof val === "number" && !isNaN(val)
-                                                          ? val.toFixed(2)
-                                                          : "";
-                                                  },
-                                              },
-                                              min: Math.min(...moistureSeriesVolRounded).toFixed(0),
-                                              max: Math.max(...moistureSeriesVolRounded).toFixed(0),
-                                      },
-                                  ]
-                                : []),
-                        ],
-                        annotations: {
-                            yaxis: [
-                              ...(() => {
-                                  if (chartData.kind === 'tension') {
-                                      return getInitialAnnotations(chartData); // if needed
-                                  }
-                                  return Array.isArray(chartData.annotations?.yaxis)
-                                      ? chartData.annotations.yaxis
-                                      : [];
-                                  })(),
-                          ],
-                        legend: {
-                            show: true, // Ensure the legend is always shown
-                        },
-                      }
-                    };
-    
-                    // Create or update the chart
-                    if (!chart) {
-                        chart = new ApexCharts(document.querySelector("#chart_pred"), options);
-                        chart.render();
-                    } else {
-                        chart.updateOptions(options);
-                    }
-    
-                    // Optionally hide "Volumetric Water Content" series
-                    if (chartData.kind === "tension" && moistureSeriesVolRounded) {
-                        chart.hideSeries("Volumetric Water Content");
-                    }
-                }
-            })
-            .catch((error) => console.error("Error fetching data:", error));
+            // Optionally hide "Volumetric Water Content" series
+            if (chartData.kind === "tension" && moistureSeriesVolRounded) {
+              chart.hideSeries("Volumetric Water Content");
+            }
+          }
+        })
+        .catch((error) => console.error("Error fetching data:", error));
     }
-    
-    // Handle legend toggles
-    function handleLegendToggle(chartContext, chartData) {
-      const activeSeries = getActiveSeries(chartContext);
-  
-      const annotations = activeSeries.includes("Moisture in cbar (Soil Tension)")
-          ? getSoilTensionAnnotations(chartData)
-          : []; // Clear annotations if "Soil Tension" is off
-  
-      chartContext.updateOptions({
-          annotations: {
-              yaxis: annotations,
-          },
-      });
-  }
-  
-    
+
     // Get active series dynamically
     function getActiveSeries(chartContext) {
       const activeSeries = [];
       chartContext.w.globals.seriesNames.forEach((name, index) => {
-          // A series is active if its value is not null
-          if (chartContext.w.globals.series[index] !== null) {
-              activeSeries.push(name);
-          }
+        // A series is active if its value is not null
+        if (chartContext.w.globals.series[index] !== null) {
+          activeSeries.push(name);
+        }
       });
       return activeSeries;
-  }
-    
+    }
+
     // Initial annotations function
     function getInitialAnnotations(chartData) {
-        if (chartData.kind === "tension") {
-            return getSoilTensionAnnotations(chartData);
-        }
-        return [];
+      if (chartData.kind === "tension") {
+        return getSoilTensionAnnotations(chartData);
+      }
+      return [];
     }
-    
+
     // Function to get annotations for soil tension with colored areas
     function getSoilTensionAnnotations(chartData) {
-        return [
-            // Area between Saturation and Field Capacity Lower
-            {
-                y: chartData.fieldCapacityLower,
-                borderColor: "transparent",
-                label: {
-                    text: "Saturation",        
-                    style: {
-                      fontSize: "12px",
-                    },
-                    position: 'right', // Align to the right
-                    offsetY: 50, // Vertical offset for middle alignment
-                    offsetX: 0, // Horizontal offset for right alignment
-                },
-                offsetX: 0,
-                offsetY: 0,
-                shape: 'rect',
-                x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-                fillColor: "rgba(173, 216, 255, 0.5)", // Color for this area (light blue)
-                y2: chartData.saturation, // Ending y value to create the filled area
+      return [
+        // Area between Saturation and Field Capacity Lower
+        {
+          y: chartData.fieldCapacityLower,
+          borderColor: "transparent",
+          label: {
+            text: "Saturation",
+            style: {
+              fontSize: "12px",
             },
-            // Area between Field Capacity Lower and Field Capacity Upper
-            {
-                y: chartData.fieldCapacityUpper,
-                borderColor: "transparent",
-                label: {
-                    text: "Field Capacity Lower",
-                    style: {
-                      fontSize: "12px",
-                    },
-                    position: 'right', // Align to the right
-                    offsetY: 50, // Vertical offset for middle alignment
-                    offsetX: 0, // Horizontal offset for right alignment
-                },
-                offsetX: 0,
-                offsetY: 0,
-                shape: 'rect',
-                x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-                fillColor: "rgba(144, 238, 144, 0.5)", // Color for this area (light green)
-                y2: chartData.fieldCapacityLower, // Ending y value to create the filled area
-            },
-            {
-              y: chartData.permanentWiltingPoint,
-              borderColor: "transparent",
-              label: {
-                  text: "Field Capacity Higher",                    
-                  style: {
-                    fontSize: "12px",
-                  },
-                  position: 'right', // Align to the right
-                  offsetY: 50, // Vertical offset for middle alignment
-                  offsetX: 0, // Horizontal offset for right alignment
-              },
-              offsetX: 0,
-              offsetY: 0,
-              shape: 'rect',
-              x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-              fillColor: "rgba(255, 200, 124, 0.5)", // Color for this area (light orange)
-              y2: chartData.fieldCapacityUpper, // Ending y value to create the filled area
+            position: 'right', // Align to the right
+            offsetY: 50, // Vertical offset for middle alignment
+            offsetX: 0, // Horizontal offset for right alignment
           },
-          {
-            y: Math.max(...chartData.moistureSeries).toFixed(0),
-            borderColor: "transparent",
-            label: {
-                text: "Permanent Wilting Point",
-                style: {
-                  fontSize: "12px",
-                },
-                position: 'right', // Align to the right
-                offsetY: 50, // Vertical offset for middle alignment
-                offsetX: 0, // Horizontal offset for right alignment
-            },
-            offsetX: 0,
-            offsetY: 0,
-            shape: 'rect',
-            x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-            fillColor: "rgba(255, 182, 193, 0.5)", // Color for this area (light red)
-            y2: chartData.permanentWiltingPoint // Ending y value to create the filled area
+          offsetX: 0,
+          offsetY: 0,
+          shape: 'rect',
+          x: chartData.timestamps.length - 1, // Rightmost position to cover the area
+          fillColor: "rgba(173, 216, 255, 0.5)", // Color for this area (light blue)
+          y2: chartData.saturation, // Ending y value to create the filled area
         },
-        ];
+        // Area between Field Capacity Lower and Field Capacity Upper
+        {
+          y: chartData.fieldCapacityUpper,
+          borderColor: "transparent",
+          label: {
+            text: "Field Capacity Lower",
+            style: {
+              fontSize: "12px",
+            },
+            position: 'right', // Align to the right
+            offsetY: 50, // Vertical offset for middle alignment
+            offsetX: 0, // Horizontal offset for right alignment
+          },
+          offsetX: 0,
+          offsetY: 0,
+          shape: 'rect',
+          x: chartData.timestamps.length - 1, // Rightmost position to cover the area
+          fillColor: "rgba(144, 238, 144, 0.5)", // Color for this area (light green)
+          y2: chartData.fieldCapacityLower, // Ending y value to create the filled area
+        },
+        {
+          y: chartData.permanentWiltingPoint,
+          borderColor: "transparent",
+          label: {
+            text: "Field Capacity Higher",
+            style: {
+              fontSize: "12px",
+            },
+            position: 'right', // Align to the right
+            offsetY: 50, // Vertical offset for middle alignment
+            offsetX: 0, // Horizontal offset for right alignment
+          },
+          offsetX: 0,
+          offsetY: 0,
+          shape: 'rect',
+          x: chartData.timestamps.length - 1, // Rightmost position to cover the area
+          fillColor: "rgba(255, 200, 124, 0.5)", // Color for this area (light orange)
+          y2: chartData.fieldCapacityUpper, // Ending y value to create the filled area
+        },
+        {
+          y: Math.max(...chartData.moistureSeries).toFixed(0),
+          borderColor: "transparent",
+          label: {
+            text: "Permanent Wilting Point",
+            style: {
+              fontSize: "12px",
+            },
+            position: 'right', // Align to the right
+            offsetY: 50, // Vertical offset for middle alignment
+            offsetX: 0, // Horizontal offset for right alignment
+          },
+          offsetX: 0,
+          offsetY: 0,
+          shape: 'rect',
+          x: chartData.timestamps.length - 1, // Rightmost position to cover the area
+          fillColor: "rgba(255, 182, 193, 0.5)", // Color for this area (light red)
+          y2: chartData.permanentWiltingPoint // Ending y value to create the filled area
+        },
+      ];
     }
-      
 
-      function fetchThreshold() {
-        fetch("../api/getThreshold")
-          .then((response) => response.json())
-          .then((timestamp_data) => {
-            if (timestamp_data.threshold == false) {
-              console.log(
-                "No timestamp, when threshold is reached, could be fetched from backend."
+
+    function fetchThreshold() {
+      fetch("../api/getThreshold")
+        .then((response) => response.json())
+        .then((timestamp_data) => {
+          if (timestamp_data.threshold == false) {
+            console.log(
+              "No timestamp, when threshold is reached, could be fetched from backend."
+            );
+            document.getElementById("timestamp_txt").innerHTML =
+              "The threshold is not reached in the current forecast horizon.";
+          } else {
+            document.getElementById("timestamp_txt").innerHTML =
+              "The threshold will be reached on " + timestamp_data.timestamp;
+          }
+        });
+    }
+
+    function canBeParsedToInt(str) {
+      let parsed = parseInt(str, 10);
+      return !isNaN(parsed);
+    }
+
+    // manually irrigate an amount
+    function irrigateManually() {
+      let amount;
+      // Get the input element
+      const inputElement = document.getElementById("irrigation_value_form");
+
+      if (canBeParsedToInt(inputElement.value)) {
+        amount = parseInt(inputElement.value, 10);
+
+        // Send the amount via a fetch request
+        fetch(`../api/irrigateManually?amount=${amount}`)
+          .then((response) => response.text())
+          .then((data) => {
+            dataObject = JSON.parse(data);
+            if (dataObject.status == "success") {
+              alert(
+                "Manual Irrigation was scheduled, will be performed within the next uplink cycle. Do not press this button again until irrigation is completed."
               );
-              document.getElementById("timestamp_txt").innerHTML =
-                "The threshold is not reached in the current forecast horizon.";
             } else {
-              document.getElementById("timestamp_txt").innerHTML =
-                "The threshold will be reached on " + timestamp_data.timestamp;
+              alert("Cannot schedule irrigation, see console for more info! Error:", data);
             }
-          });
-      }
-
-      function canBeParsedToInt(str) {
-        let parsed = parseInt(str, 10);
-        return !isNaN(parsed);
-    }
-
-      // manually irrigate an amount
-      function irrigateManually() {
-        let amount;
-        // Get the input element
-        const inputElement = document.getElementById("irrigation_value_form");
-
-        if(canBeParsedToInt(inputElement.value)) {
-          amount = parseInt(inputElement.value, 10);
-
-          // Send the amount via a fetch request
-          fetch(`../api/irrigateManually?amount=${amount}`)
-            .then((response) => response.text())
-            .then((data) => {
-              dataObject = JSON.parse(data);
-              if (dataObject.status == "success") {
-                alert(
-                  "Manual Irrigation was scheduled, will be performed within the next uplink cycle. Do not press this button again until irrigation is completed."
-                );
-              } else {
-                alert("Cannot schedule irrigation, see console for more info! Error:", data);
-              }
-              console.log(data);
+            console.log(data);
           })
           .catch((error) => {
             console.error('Error:', error);
             alert("An error occurred during the request. Please try again.");
           });
-          
-        }
-        else {
-          alert(
-            "First type a valid amount in liters to be irrigated!"
-          );
-        }
 
       }
-
-
-      // start training, encapsulated in create_model.py
-      function startTraining() {
-        fetch(`../api/startTraining`)
-          .then((response) => response.text())
-          .then((data) => {
-            if (data == "") {
-              //location.reload();
-              alert(
-                "Training process was started, page will reload when procedure is finished!"
-              );
-              train_button = document.getElementById('train_btn');
-              train_button.classList.remove('highlight');
-              waitForTraining = true;
-              isTrainingReady();
-            } else {
-              alert("Cannot start, see console for more info! Error:", data);
-            }
-            console.log(data);
-          });
+      else {
+        alert(
+          "First type a valid amount in liters to be irrigated!"
+        );
       }
 
-      function sleep(ms) {
-        return new Promise((resolve) => setTimeout(resolve, ms));
-      }
+    }
 
-      async function isTrainingReady() {
-        while (waitForTraining) {
-          fetch(`../api/isTrainingReady`)
-            .then((response) => response.json())
-            .then((response_data) => {
-              if (response_data.isTrainingFinished == true) {
-                waitForTraining = false;
-                location.reload();
-                alert("Training process is finished!");
-              }
-            });
-          await sleep(TrainingReadyCheck);
-        }
-      }
 
-      // Main function
-      function loadStuff() {
-        $.get("/devices", function (data) {
-          checkConfigPresent()
-          checkActiveIrrigation()
-            .then((ret) => {
-              if (ret) {
-                // Config is present
-                console.log("Config is already present...");
-                //checkActiveIrrigation()
-                fetchHistoricalChartData();
-                fetchCurrentValues();
-                fetchDatasetChartData();
-                fetchPredictionChartData();
-                fetchThreshold();
-              }
-            })
-            .catch((e) => {
-              // alert(
-              //   "Please press the settings button and set up the needed Parameters"
-              // );
-              console.log("Config is not present... Error: ", e);
-            });
+    // start training, encapsulated in create_model.py
+    function startTraining() {
+      fetch(`../api/startTraining`)
+        .then((response) => response.text())
+        .then((data) => {
+          if (data == "") {
+            //location.reload();
+            alert(
+              "Training process was started, page will reload when procedure is finished!"
+            );
+            train_button = document.getElementById('train_btn');
+            train_button.classList.remove('highlight');
+            waitForTraining = true;
+            isTrainingReady();
+          } else {
+            alert("Cannot start, see console for more info! Error:", data);
+          }
+          console.log(data);
         });
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function isTrainingReady() {
+      while (waitForTraining) {
+        fetch(`../api/isTrainingReady`)
+          .then((response) => response.json())
+          .then((response_data) => {
+            if (response_data.isTrainingFinished == true) {
+              waitForTraining = false;
+              location.reload();
+              alert("Training process is finished!");
+            }
+          });
+        await sleep(TrainingReadyCheck);
       }
+    }
 
-      // Called on page load => shows loading animation
-      $(function () {
-        $("#sensor_list")
-          .html('<img src="./loading.gif" /> Loading...')
-          .fadeIn();
-        loadStuff();
+    // Main function
+    function loadStuff() {
+      $.get("/devices", function (data) {
+        checkConfigPresent()
+        checkActiveIrrigation()
+          .then((ret) => {
+            if (ret) {
+              // Config is present
+              console.log("Config is already present...");
+              //checkActiveIrrigation()
+              fetchHistoricalChartData();
+              fetchCurrentValues();
+              fetchDatasetChartData();
+              fetchPredictionChartData();
+              fetchThreshold();
+            }
+          })
+          .catch((e) => {
+            // alert(
+            //   "Please press the settings button and set up the needed Parameters"
+            // );
+            console.log("Config is not present... Error: ", e);
+          });
       });
-    </script>
-  </head>
+    }
 
-  <body>
-    <div class="action-buttons">
-      <button id="settings_btn" class="settings" type="button" onclick="goToSettings()">
-        Settings
-      </button>
-      <button id="train_btn" class="training" type="button" onclick="startTraining()">
-        Start Training
-      </button>
+    // Called on page load => shows loading animation
+    $(function () {
+      $("#sensor_list")
+        .html('<img src="./loading.gif" /> Loading...')
+        .fadeIn();
+      loadStuff();
+    });
+  </script>
+</head>
+
+<body>
+  <div class="action-buttons">
+    <button id="settings_btn" class="settings" type="button" onclick="goToSettings()">
+      Settings
+    </button>
+    <button id="train_btn" class="training" type="button" onclick="startTraining()">
+      Start Training
+    </button>
+  </div>
+  <div class="center_full">
+    <div class="text-content">
+      <img src="./logo_irrigation_prediction.jpg" class="logo-content" alt="Irrigation Prediction Logo" />
+      <h1>WaziUp Irrigation Prediction</h1>
+      <p>
+        This application predicts soil moisture values for sensors attached to
+        the WaziGate.
+      </p>
     </div>
-    <div class="center_full">
-      <div class="text-content">
-        <img src="./logo_irrigation_prediction.jpg" class="logo-content" alt="Irrigation Prediction Logo"/>
-        <h1>WaziUp Irrigation Prediction</h1>
-        <p>
-          This application predicts soil moisture values for sensors attached to
-          the WaziGate.
-        </p>
-      </div>
-  
-      <div class="quick-view-container">
-        <div class="sensor-container">
-          <h3 class="sensor-heading">Sensor Readings
-            <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorTooltip">help
-              <span class="tooltiptext" id="sensorTooltip"></span>
-            </span>
-          </h3>
-          <div class="sensor-value">
-              <span class="description">Temperature:</span>
-              <span id="temp-value">-- °C</span>
-          </div>
-          <div class="sensor-value">
-              <span class="description">Soil tension:</span>
-              <span id="tension-value">-- cb</span>
-          </div>
-          <div class="sensor-value">
-            <span class="description">Soil humidity:</span>
-            <span id="humidity-value">-- %</span>
-          </div>
+
+    <div class="quick-view-container">
+      <div class="sensor-container">
+        <h3 class="sensor-heading">Sensor Readings
+          <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorTooltip">help
+            <span class="tooltiptext" id="sensorTooltip"></span>
+          </span>
+        </h3>
+        <div class="sensor-value">
+          <span class="description">Temperature:</span>
+          <span id="temp-value">-- °C</span>
         </div>
-        
-        <div class="irrigation-container">
-            <h3 class="irrigation-heading">Irrigation Status
-              <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationTooltip">help
-                <span class="tooltiptext" id="irrigationTooltip"></span>
-              </span>
-            </h3>
-            <div class="irrigation-value">
-                <span class="description">Pump Status:</span>
-                <span id="active_passiv" class="value_active">Active</span>
-            </div>
-            <div class="irrigation-value">
-              <label for="irrigation-value-input"
-                >Irrigation amount in liters</label
-              >
-              <input
-                id="irrigation_value_form"
-                type="number"
-                name="irrigation_value"
-                value="10"
-              />
-            </div>
-            <div class="action-buttons">
-              <button id="schedule_irrigation" class="settings" type="button" onclick="irrigateManually()">
-                Schedule an Irrigation
-              </button>
-            </div>
+        <div class="sensor-value">
+          <span class="description">Soil tension:</span>
+          <span id="tension-value">-- cb</span>
+        </div>
+        <div class="sensor-value">
+          <span class="description">Soil humidity:</span>
+          <span id="humidity-value">-- %</span>
         </div>
       </div>
-      <div class="chart-container">
-        <p>Raw captured sensor values:
-          <span class="tooltip material-symbols-outlined" data-tooltip-id="chart_hist_tooltip">help
-            <span class="tooltiptext" id="chart_hist_tooltip"></span>
+
+      <div class="irrigation-container">
+        <h3 class="irrigation-heading">Irrigation Status
+          <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationTooltip">help
+            <span class="tooltiptext" id="irrigationTooltip"></span>
           </span>
-        </p>
-        <div id="chart_hist"></div>
-      </div>
-      <div class="chart-container">
-        <p>Data as input for machine learning procedure:
-          <span class="tooltip material-symbols-outlined" data-tooltip-id="chart_train_data_tooltip">help
-            <span class="tooltiptext" id="chart_train_data_tooltip"></span>
-          </span>
-        </p>
-        <div id="chart_train_data"></div>
-      </div>
-      <div class="chart-container">
-        <p>Predicted sensor values:
-          <span class="tooltip material-symbols-outlined" data-tooltip-id="chart_pred_tooltip">help
-            <span class="tooltiptext" id="chart_pred_tooltip"></span>
-          </span>
-        </p>
-        <div id="chart_pred"></div>
-        <p id="timestamp_txt"></p>
+        </h3>
+        <div class="irrigation-value">
+          <span class="description">Pump Status:</span>
+          <span id="active_passiv" class="value_active">Active</span>
+        </div>
+        <div class="irrigation-value">
+          <label for="irrigation-value-input">Irrigation amount in liters</label>
+          <input id="irrigation_value_form" type="number" name="irrigation_value" value="10" />
+        </div>
+        <div class="action-buttons">
+          <button id="schedule_irrigation" class="settings" type="button" onclick="irrigateManually()">
+            Schedule an Irrigation
+          </button>
+        </div>
       </div>
     </div>
-  </body>
+    <div class="chart-container">
+      <p>Raw captured sensor values:
+        <span class="tooltip material-symbols-outlined" data-tooltip-id="chart_hist_tooltip">help
+          <span class="tooltiptext" id="chart_hist_tooltip"></span>
+        </span>
+      </p>
+      <div id="chart_hist"></div>
+    </div>
+    <div class="chart-container">
+      <p>Data as input for machine learning procedure:
+        <span class="tooltip material-symbols-outlined" data-tooltip-id="chart_train_data_tooltip">help
+          <span class="tooltiptext" id="chart_train_data_tooltip"></span>
+        </span>
+      </p>
+      <div id="chart_train_data"></div>
+    </div>
+    <div class="chart-container">
+      <p>Predicted sensor values:
+        <span class="tooltip material-symbols-outlined" data-tooltip-id="chart_pred_tooltip">help
+          <span class="tooltiptext" id="chart_pred_tooltip"></span>
+        </span>
+      </p>
+      <div id="chart_pred"></div>
+      <p id="timestamp_txt"></p>
+    </div>
+  </div>
+</body>
+
 </html>

@@ -748,7 +748,7 @@ def workerToPredict():
     def time_until_n_hours(hours):
         """Calculate the time difference from now until the next noon."""
         now = datetime.now()
-        predict_time = now + timedelta(hours=hours, minutes=0, seconds=0, microseconds=0) #TODO: change to hours
+        predict_time = now + timedelta(hours=0, minutes=hours, seconds=0, microseconds=0) #TODO: change to hours
 
         return (predict_time - now).total_seconds()
     
@@ -791,7 +791,7 @@ def workerToPredict():
 
             # Call routine to irrigate
             if len(DeviceAndSensorIdsFlow) > 0: 
-                actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
+                actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount, Sensor_kind)
 
             # After initial training and prediction, start surveillance
             threading.Timer(3600, check_threads).start()  # Check every hour if threads are alive
@@ -879,7 +879,7 @@ def workerToTrain(thread_id, url, startTrainingNow):
 
             # Call routine to irrigate
             if len(DeviceAndSensorIdsFlow) > 0: 
-                actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount)
+                actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount, Sensor_kind)
 
             # Start thread that creates predictions periodically
             if Prediction_thread is None:
