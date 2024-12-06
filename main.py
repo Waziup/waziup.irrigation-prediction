@@ -563,7 +563,7 @@ def getValuesForDashboard(url, body):
     else:
         dashboard_data = {
             "temp_average": temp_average,
-            "moisture_average": "--",
+            "moisture_average": "-- (Sensor not present)",
             "vwc_average": moisture_average
         }
     
@@ -657,23 +657,50 @@ def getPredictionChartData(url, body):
     #f_data_time = data_pred.index.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S%z').tolist()=>love python
     for item in data_pred.index:
         f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S%z'))
-    f_data_moisture = data_pred["prediction_label"].tolist()
+    f_data_moisture = data_pred["smoothed_values"].tolist()
 
+    adjustment = 1
+    adjust_threshold = lambda Threshold, adjustment: Threshold - adjustment if Sensor_kind == "tension" else Threshold + adjustment
 
-    # Add a horizontal line at Threshold
+    # Add a horizontal line at Threshold # TODO: add direction of gradient
     annotations = {
-        'yaxis': [{
-            'y': Threshold,
-            'borderColor': '#FF4560',
-            'label': {
+        'yaxis': [
+            {
+                'y': Threshold,
+                'y2': adjust_threshold(Threshold, adjustment),
                 'borderColor': '#FF4560',
-                'style': {
-                    'color': '#fff',
-                    'background': '#FF4560'
+                'fillColor': '#FF4560',
+                'opacity': 0.25,
+                'fillPattern': {
+                    'style': 'slantedLines',
+                    'width': 4,
+                    'height': 4,
+                    'strokeWidth': 1
                 },
-                'text': 'Threshold for irrigation'
+                'label': {
+                    'borderColor': '#FF4560',
+                    'style': {
+                        'color': '#fff',
+                        'background': '#FF4560'
+                    },
+                }
+            },
+            {
+                # Line annotation at Threshold
+                'y': Threshold,
+                'borderColor': '#FF4560',
+                'strokeDashArray': 0,
+                'borderWidth': 2,
+                'label': {
+                    'borderColor': '#FF4560',
+                    'style': {
+                        'color': '#fff',
+                        'background': '#FF4560'
+                    },
+                    'text': 'Threshold for irrigation'
+                }
             }
-        }]
+        ]
     }
 
     # Create the chart_data dictionary
@@ -691,7 +718,7 @@ def getPredictionChartData(url, body):
 
     # Conditionally add 'moistureSeriesVol' if available
     if Sensor_kind == 'tension':# and 'f_data_moisture_vol' in locals() and f_data_moisture_vol is not None:
-        f_data_moisture_vol = data_pred["prediction_label_vol"].tolist()
+        f_data_moisture_vol = data_pred["smoothed_values_vol"].tolist()
         chart_data["moistureSeriesVol"] = f_data_moisture_vol
 
     return 200, bytes(json.dumps(chart_data), "utf8"), []

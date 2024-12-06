@@ -50,6 +50,7 @@ from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from keras_tuner import Hyperband, HyperParameters
 import time
 from keras.callbacks import Callback
+from tensorflow.keras.callbacks import EarlyStopping
 
 # local
 import main
@@ -460,6 +461,7 @@ def get_historical_weather_api(data):
         f'&hourly=temperature_2m,relativehumidity_2m,rain,cloudcover,shortwave_radiation,windspeed_10m,winddirection_10m,soil_temperature_7_to_28cm,soil_moisture_0_to_7cm,et0_fao_evapotranspiration'
         f'&timezone={Timezone}'
     )
+
     dct = subprocess.check_output(['curl', url]).decode()
     dct = json.loads(dct)
 
@@ -1703,12 +1705,6 @@ def prepare_data_for_cnn(data, target_variable):
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
 
-    # numerical_columns = X_test.select_dtypes(include=np.number).columns
-    # X_test_numerical = X_test[numerical_columns]
-
-    # # Scale the test features using the same scaler used for training data
-    # X_test_scaled = scaler.transform(X_test_numerical)
-
     # Ensure input data is correctly reshaped for Conv1D
     X_train_cnn = X_train_scaled[..., np.newaxis]
     X_test_cnn = X_test_scaled[..., np.newaxis]
@@ -1889,42 +1885,52 @@ def evaluate_against_testset_nn(nn_models, X_test_scaled, y_test):
 
 # Train the best model on the full dataset TODO: metrics bad check again!
 def train_best_nn(best_eval, data, scaler):
-    # to rangeindex => do not use timestamps!
+    # Reset index to range index
     data = data.reset_index(drop=False, inplace=False)
     data = data.rename(columns={'index': 'Timestamp'}, inplace=False)
 
-    # Drop non important
-    data_nn = data.drop(To_be_dropped, axis=1, inplace=False) #dropping yields worse results (val_loss in training)
+    # Drop non-important columns
+    data_nn = data.drop(To_be_dropped, axis=1, inplace=False)  # Drop irrelevant columns
 
     # Split the dataset into features (X) and target variable (y)
     X = data_nn.drop('rolling_mean_grouped_soil', axis=1)  # Assuming 'soil_tension' is the target variable
     y = data_nn['rolling_mean_grouped_soil']
 
-    # Standardize features by removing the mean and scaling to unit variance
-    X_scaled = scaler.transform(X)
+    # Split data into training and validation sets
+    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # numerical_columns = X.select_dtypes(include=np.number).columns
-    # X_numerical = X[numerical_columns]
+    # Scale features using training data only
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
 
-    # # Scale the test features using the same scaler used for training data
-    # X_scaled = scaler.transform(X_numerical)
-
-    # Ensure input data is correctly reshaped for Conv1D
-    X_cnn = X_scaled[..., np.newaxis]
+    # Reshape for Conv1D
+    X_train_cnn = X_train_scaled[..., np.newaxis]
+    X_val_cnn = X_val_scaled[..., np.newaxis]
 
     function_name = best_eval.model_name
 
-    if function_name in Model_functions: 
-        # Create best model TODO: check, bad metrics, compared to other models
+    if function_name in Model_functions:
+        # Create the best model
         model = Model_functions[function_name](best_eval.hp, best_eval.shape)
         print(f"Will train the '{model.model_name}' as best model for neural nets.")
+
+        # Early stopping to avoid overfitting
+        early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+
         # Train the model
-        history_nn = model.fit(X_cnn, y, epochs=50, batch_size=32, validation_split=0.2)
+        history_nn = model.fit(
+            X_train_cnn,
+            y_train,
+            epochs=50,
+            batch_size=32,
+            validation_data=(X_val_cnn, y_val),
+            callbacks=[early_stopping],
+        )
     else:
         print(f"Function '{function_name}' not found. Using fallback.")
         model = best_eval
 
-    return model, X_scaled, y
+    return model, X_train_scaled, X_val_scaled, y_train, y_val
     
 # Create testset, not seen during training=>should be fur
 def prepare_future_values(scaler, new_data, X_train_c):
@@ -2188,14 +2194,63 @@ def generate_predictions_nn(best_model_nn, features, start, end):
 
     return predictions
 
+# Quadratic weighting function, to be used in align_with_latest_sensor_values
+def quadratic_weights(length):
+    """
+    Generate quadratic weights for blending.
+    The weights start high (1.0) and decrease quadratically. (aggressive)
+    """
+    x = np.linspace(0, 1, length)   # Normalized positions
+    weights = (1 - x**2)            # Quadratic decay
+
+    return weights
+
+# Exponential weighting function, to be used in align_with_latest_sensor_values
+def exponential_weights(length):
+    """
+    Generate exponential weights for blending.
+    The weights start high (.5) and decrease exponentially to (.1). (moderate)
+    """
+    x = np.linspace(0, 1, length)   # Normalized positions
+    weights = np.exp(-.5*x) -.5     # Exponential decay
+
+    return weights
+
+# align prediction according to latest sensor values
+def align_with_latest_sensor_values():
+    # Extract the last actual value
+    last_actual_value = Data['rolling_mean_grouped_soil'].iloc[-1]
+
+    # Generate weights for the prediction range
+    weights = exponential_weights(len(Predictions))
+
+    # Step 3: Blend the historical and predicted values
+    Predictions['smoothed_values'] = (
+        weights * last_actual_value + (1 - weights) * Predictions['prediction_label']
+    )
+
+    # # Combine for visualization
+    # combined_data = pd.concat([
+    #     Data.set_index('Timestamp'),
+    #     Predictions.index
+    # ]).reset_index()
+
+    # return combined_data
+
 # Calculates the time when threshold will be meet, according to predictions
-def calc_threshold(Predictions):
+def calc_threshold(Predictions, col):
     threshold = Current_config["Threshold"]
+    strategy = Current_config["Sensor_kind"]
+
+    # Define comparison logic based on strategy
+    comparison_fn = (lambda value, threshold: value > threshold) if strategy == "tension" else (
+        lambda value, threshold: value < threshold
+    )
 
     # calculate next occurance
     for i in range(len(Predictions)):
-        if Predictions['prediction_label'][i] > threshold:
-            print("Threshold will be reached on", Predictions.index[i], "With a value of:", Predictions['prediction_label'][i])
+        if comparison_fn(Predictions[col][i], threshold):
+            print("Threshold will be reached on", Predictions.index[i], "With a value of:", Predictions[col][i])
             return Predictions.index[i]
 
     return ""
@@ -2239,14 +2294,17 @@ def predict_with_updated_data():
         Predictions = generate_predictions(Tuned_best, Best_exp, future_features)
     
     # Cut passed time from predictions
-    Predictions = Predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]    
+    Predictions = Predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]
+        
+    # Align predictions with historical data
+    align_with_latest_sensor_values()
     
     # Calculate when threshold will be meet
-    Threshold_timestamp = calc_threshold(Predictions)
+    Threshold_timestamp = calc_threshold(Predictions, 'smoothed_values')
 
     # Add volumetric water content
     if Current_config["Sensor_kind"] == 'tension':
-        Predictions = add_volumetric_col_to_df(Predictions, "prediction_label")
+        Predictions = add_volumetric_col_to_df(Predictions, "smoothed_values")
 
     # Return last accumulated reading and threshold timestamp currentSoilTension, threshold_timestamp, predictions 
     return Data['rolling_mean_grouped_soil'][-1], Threshold_timestamp, Predictions
@@ -2324,7 +2382,7 @@ def main() -> int:
     index, Use_pycaret = eval_approach(results, results_nn, 'mae')
 
     # TODO: Debug mode
-    #Use_pycaret = True
+    Use_pycaret = False
 
     # Train best model on whole dataset (without skipping "test-set")
     if Use_pycaret:
@@ -2332,7 +2390,7 @@ def main() -> int:
         best_model, Best_exp = train_best(best_eval, Data)
     else:
         # NN -> TODO: eval properly -> still error in r2 calc, fallback to mae
-        best_model_nn, X_scaled, y = train_best_nn(best_eval_nn, Data, scaler)
+        best_model_nn, X_train_scaled, X_val_scaled, y_train, y_val= train_best_nn(best_eval_nn, Data, scaler)
 
     
     # Create future value set to feed new data to model
@@ -2382,7 +2440,7 @@ def main() -> int:
         Predictions = generate_predictions(Tuned_best, Best_exp, future_features)
     else:
         # Tune best model
-        Tuned_best = tune_model_nn(X_scaled, y, best_model_nn)
+        Tuned_best = tune_model_nn(X_train_scaled, y_train, best_model_nn)
 
         # Save best model
         save_models_nn([best_model_nn], 'models/best_models/nn/best_soil_tension_prediction_nn_model_')
@@ -2393,11 +2451,15 @@ def main() -> int:
     # Cut passed time from predictions
     Predictions = Predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]    
     
+    # Align predictions with historical data
+    align_with_latest_sensor_values()
+
     # Calculate when threshold will be meet
-    Threshold_timestamp = calc_threshold(Predictions)
+    Threshold_timestamp = calc_threshold(Predictions, 'smoothed_values')
 
     # Add volumetric water content
-    Predictions = add_volumetric_col_to_df(Predictions, "prediction_label")
+    if Current_config["Sensor_kind"] == 'tension':
+        Predictions = add_volumetric_col_to_df(Predictions, "smoothed_values")
 
     # Return last accumulated reading and threshold timestamp
     return Data['rolling_mean_grouped_soil'][-1], Threshold_timestamp, Predictions

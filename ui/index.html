@@ -332,7 +332,7 @@
         .then((response) => response.json())
         .then((chartData) => {
           if (chartData.model === false) {
-            alert('Please start training by pressing the "Start Training" button.');
+            alert('Please start training by pressing the "Start Training" button.'); //TODO: this needs to be capsulated and also checked for training in progress REFINE!!!
             const trainButton = document.getElementById("train_btn");
             trainButton.classList.add("highlight");
           } else {
@@ -456,7 +456,6 @@
                       : [];
                   })(),
                 ],
-
                 legend: {
                   show: true, // Ensure the legend is always shown
                 },

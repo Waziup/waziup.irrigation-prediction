@@ -1,21 +1,17 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Settings of the "Irrigation Prediction" WaziApp</title>
-    <meta name="description" content="" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <link rel="stylesheet" href="main.css" type="text/css" />
-    <link
-      href="https://fonts.googleapis.com/css?family=Poppins"
-      rel="stylesheet"
-    />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
-    />
-    <script type="text/javascript" src="libs/jquery-3.2.1.min.js"></script>
+<head>
+  <meta charset="utf-8" />
+  <title>Settings of the "Irrigation Prediction" WaziApp</title>
+  <meta name="description" content="" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link rel="stylesheet" href="main.css" type="text/css" />
+  <link href="https://fonts.googleapis.com/css?family=Poppins" rel="stylesheet" />
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <script type="text/javascript" src="libs/jquery-3.2.1.min.js"></script>
 
   <script type="text/javascript">
 
@@ -144,54 +140,54 @@
       }
     };
 
-      // For debug set custom API path
-      var Api_path = "";
+    // For debug set custom API path
+    var Api_path = "";
 
-      // Event listers
-      document.addEventListener('DOMContentLoaded', function() {
-        // Disable textbox based on multi-select change
-        document.getElementById('actuator_list_flow').addEventListener('change', function() {
-          var multiSelect = document.getElementById('actuator_list_flow');
-          var textBox = document.getElementById('slope_form');
-          
-          // Check if any option is selected
-          if (multiSelect.selectedOptions.length > 0) {
-              textBox.disabled = true; // Disable the textbox
-              textBox.style.backgroundColor = '#d3d3d3'; // Grey it out
+    // Event listers
+    document.addEventListener('DOMContentLoaded', function () {
+      // Disable textbox based on multi-select change
+      document.getElementById('actuator_list_flow').addEventListener('change', function () {
+        var multiSelect = document.getElementById('actuator_list_flow');
+        var textBox = document.getElementById('slope_form');
+
+        // Check if any option is selected
+        if (multiSelect.selectedOptions.length > 0) {
+          textBox.disabled = true; // Disable the textbox
+          textBox.style.backgroundColor = '#d3d3d3'; // Grey it out
+        } else {
+          textBox.disabled = false; // Enable the textbox
+          textBox.style.backgroundColor = ''; // Remove the grey-out effect
+        }
+      });
+
+      // Add edge detection to tooltips
+      document.querySelectorAll('.tooltip').forEach(tooltip => {
+        tooltip.addEventListener('mouseenter', () => {
+          const tooltipText = tooltip.querySelector('.tooltiptext');
+          if (!tooltipText) return;
+
+          const rect = tooltipText.getBoundingClientRect();
+          const margin = 100; // Add some margin to avoid touching edges
+
+          // Check if the tooltip is outside the viewport
+          if (rect.left < margin) {
+            tooltipText.classList.add('edge-left');
+          } else if (rect.right > window.innerWidth - margin) {
+            tooltipText.classList.add('edge-right');
           } else {
-              textBox.disabled = false; // Enable the textbox
-              textBox.style.backgroundColor = ''; // Remove the grey-out effect
+            tooltipText.classList.remove('edge-left', 'edge-right');
+          }
+
+          if (rect.top < margin) {
+            tooltipText.classList.add('edge-top');
+          } else {
+            tooltipText.classList.remove('edge-top');
           }
         });
-        
-        // Add edge detection to tooltips
-        document.querySelectorAll('.tooltip').forEach(tooltip => {
-          tooltip.addEventListener('mouseenter', () => {
-            const tooltipText = tooltip.querySelector('.tooltiptext');
-            if (!tooltipText) return;
-        
-            const rect = tooltipText.getBoundingClientRect();
-            const margin = 100; // Add some margin to avoid touching edges
-        
-            // Check if the tooltip is outside the viewport
-            if (rect.left < margin) {
-              tooltipText.classList.add('edge-left');
-            } else if (rect.right > window.innerWidth - margin) {
-              tooltipText.classList.add('edge-right');
-            } else {
-              tooltipText.classList.remove('edge-left', 'edge-right');
-            }
-        
-            if (rect.top < margin) {
-              tooltipText.classList.add('edge-top');
-            } else {
-              tooltipText.classList.remove('edge-top');
-            }
-          });
-        });
+      });
 
-        // Tooltips
-        fetch('tooltips.json')  // Replace with the correct path to your JSON file
+      // Tooltips
+      fetch('tooltips.json')  // Replace with the correct path to your JSON file
         .then(response => response.json())
         .then(tooltips => {
           // Loop through each tooltip element
@@ -204,63 +200,63 @@
           });
         })
         .catch(error => console.error('Error loading tooltip text:', error));
-      });
-      
+    });
 
-      // handle menu button
-      function goHome() {
-        window.location.href = "index.html";
-      }
 
-      // to get to know the API path from backend
-      async function getApiPath() {
-        await fetch(`../api/getApiUrl`)
-          .then((response) => response.json())
-          .then((response_data) => {
-            if (response_data.status_code == 200) {
-              Api_path = response_data.data;
-            }
-          })
-          .catch((error) => console.error("Error fetching data:", error));
-      }
+    // handle menu button
+    function goHome() {
+      window.location.href = "index.html";
+    }
 
-      async function getToken() {
-        var substring = "http://";
-
-        if (Api_path.startsWith(substring)) {
-          var options = {
-            method: "POST",
-            headers: {
-              Accept: "application/json",
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              username: "admin",
-              password: "loragateway",
-            }),
-          };
-          var response = await fetch(Api_path + "auth/token", options);
-          if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}`);
+    // to get to know the API path from backend
+    async function getApiPath() {
+      await fetch(`../api/getApiUrl`)
+        .then((response) => response.json())
+        .then((response_data) => {
+          if (response_data.status_code == 200) {
+            Api_path = response_data.data;
           }
-          var token = await response.json();
-          return token;
-        } else {
-          return "";
+        })
+        .catch((error) => console.error("Error fetching data:", error));
+    }
+
+    async function getToken() {
+      var substring = "http://";
+
+      if (Api_path.startsWith(substring)) {
+        var options = {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            username: "admin",
+            password: "loragateway",
+          }),
+        };
+        var response = await fetch(Api_path + "auth/token", options);
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`);
         }
+        var token = await response.json();
+        return token;
+      } else {
+        return "";
       }
+    }
 
-      function highlightElement(htmlElement, valuesToHighlight) {
-        Array.from(htmlElement.options).forEach((option) => {
-          if (valuesToHighlight.includes(option.value)) {
-            option.selected = true;
-          }
-        });
-      }
+    function highlightElement(htmlElement, valuesToHighlight) {
+      Array.from(htmlElement.options).forEach((option) => {
+        if (valuesToHighlight.includes(option.value)) {
+          option.selected = true;
+        }
+      });
+    }
 
-      // Get formerly saved config from backend
-      function getFormerConfig() {
-        return fetch(`../api/returnConfig`)
+    // Get formerly saved config from backend
+    function getFormerConfig() {
+      return fetch(`../api/returnConfig`)
         .then((response) => response.json())
         .then((data) => {
           if (data.status_code == 200) {
@@ -269,10 +265,10 @@
 
             // Assignment for Moisture
             highlightElement(document.getElementById("sensor_list_moisture"), response_data.DeviceAndSensorIdsMoisture);
-            
+
             // Assignment for DeviceAndSensorIdsTemp
             highlightElement(document.getElementById("sensor_list_temp"), response_data.DeviceAndSensorIdsTemp);
- 
+
             // Assignment for DeviceAndSensorIdsFlow
             highlightElement(document.getElementById("actuator_list_flow"), response_data.DeviceAndSensorIdsFlow);
 
@@ -281,7 +277,7 @@
 
             // Assignment for Gps_info
             document.getElementById("gps_form").value = String(response_data.Gps_info.lattitude) + ", " + String(response_data.Gps_info.longitude)
- 
+
             // Assignment for Slope
             document.getElementById("slope_form").value = response_data.Slope;
 
@@ -314,11 +310,11 @@
 
             // Assignment for Saturation
             document.getElementById("sat_form").value = response_data.Saturation;
-            
+
             // Assignment of Soil Water Retention Curve
             const soilWaterRetention = response_data.Soil_water_retention_curve;
             // Create the formatted string: "Soil tension, VWC" on each line
-            const formattedString = soilWaterRetention.map(item => 
+            const formattedString = soilWaterRetention.map(item =>
               `${item['Soil tension']}, ${item.VWC.trim()}`
             ).join("\n");
             // Set the result into a text field
@@ -328,312 +324,312 @@
             console.log("No data was formerly set or there was an error, fallback: use std values.");
           }
         });
-      }
+    }
 
 
-      // Writes water retention tuples according to select in textarea, for further refinement
-      function handleSoilTypeChange() {
-        // This function will be called when the select element changes.
-        var selectedOption = document.getElementById("soil_type_select").value;
-        var soil_water_retention = document.getElementById(
-          "soil_water_retention_text"
-        );
+    // Writes water retention tuples according to select in textarea, for further refinement
+    function handleSoilTypeChange() {
+      // This function will be called when the select element changes.
+      var selectedOption = document.getElementById("soil_type_select").value;
+      var soil_water_retention = document.getElementById(
+        "soil_water_retention_text"
+      );
 
-        // Fill textfield according to select form
-        console.log("Selected option: " + selectedOption);
-        console.log(soil_retention_tuples[selectedOption]);
+      // Fill textfield according to select form
+      console.log("Selected option: " + selectedOption);
+      console.log(soil_retention_tuples[selectedOption]);
 
-        // Clean formerly filled values
-        soil_water_retention.value = "";
+      // Clean formerly filled values
+      soil_water_retention.value = "";
 
-        for (
-          var i = 0;
-          i < soil_retention_tuples[selectedOption].waterRetention.length;
-          i++
-        )
-          soil_water_retention.value +=
-            soil_retention_tuples[selectedOption].soilTension[i] +
-            ", " +
-            soil_retention_tuples[selectedOption].waterRetention[i] +
-            "\n";
-      }
+      for (
+        var i = 0;
+        i < soil_retention_tuples[selectedOption].waterRetention.length;
+        i++
+      )
+        soil_water_retention.value +=
+          soil_retention_tuples[selectedOption].soilTension[i] +
+          ", " +
+          soil_retention_tuples[selectedOption].waterRetention[i] +
+          "\n";
+    }
 
-      // Get selected items from
-      function evalSelected(element) {
-        var selectedOptions = [];
-        var selectElement = document.getElementById(element);
+    // Get selected items from
+    function evalSelected(element) {
+      var selectedOptions = [];
+      var selectElement = document.getElementById(element);
 
-        for (var i = 0; i < selectElement.options.length; i++) {
-          var option = selectElement.options[i];
-          if (option.selected) {
-            selectedOptions.push(option.value);
-          }
-        }
-        return selectedOptions;
-      }
-
-      // Helper to check on whether textbox content is parsable as csv
-      function isStringParsableAsCSV(inputString) {
-        try {
-          // Attempt to parse the input string as CSV
-          const parsedCSV = parseCSVString(inputString); // You should define the parseCSVString function
-
-          // If parsing is successful and no error is thrown, return true
-          return true;
-        } catch (error) {
-          // If an error is thrown during parsing, return false
-          return false;
+      for (var i = 0; i < selectElement.options.length; i++) {
+        var option = selectElement.options[i];
+        if (option.selected) {
+          selectedOptions.push(option.value);
         }
       }
+      return selectedOptions;
+    }
 
-      // Parse CSV
-      function parseCSVString(csvString) {
-        // Define a CSV parsing function (you can use a CSV parsing library)
-        // For this example, we'll use a simple split approach to check for valid CSV data
-        const rows = csvString.split("\n");
-        for (const row of rows) {
-          const columns = row.split(",");
-          if (columns.length < 2) {
-            throw new Error("Invalid CSV format");
-          }
-        }
+    // Helper to check on whether textbox content is parsable as csv
+    function isStringParsableAsCSV(inputString) {
+      try {
+        // Attempt to parse the input string as CSV
+        const parsedCSV = parseCSVString(inputString); // You should define the parseCSVString function
+
+        // If parsing is successful and no error is thrown, return true
         return true;
+      } catch (error) {
+        // If an error is thrown during parsing, return false
+        return false;
       }
+    }
 
-      // Parse data from soil water retention text area
-      function parseSoilWaterRetention() {
-        var soil_water_retention = document.getElementById(
-          "soil_water_retention_text"
-        );
-
-        // Create a CSV header
-        const csvHeader = "Soil tension,VWC\n";
-
-        // Combine the header and the user-provided CSV data
-        const water_ret_csv = csvHeader + soil_water_retention.value;
-
-        // Check weather data is compliant
-        const isParsable = isStringParsableAsCSV(water_ret_csv);
-
-        // Create a Blob containing the CSV data
-        const blob = new Blob([water_ret_csv], { type: "text/csv" });
-
-        return water_ret_csv;
+    // Parse CSV
+    function parseCSVString(csvString) {
+      // Define a CSV parsing function (you can use a CSV parsing library)
+      // For this example, we'll use a simple split approach to check for valid CSV data
+      const rows = csvString.split("\n");
+      for (const row of rows) {
+        const columns = row.split(",");
+        if (columns.length < 2) {
+          throw new Error("Invalid CSV format");
+        }
       }
+      return true;
+    }
 
-      // Parse data from forms after "Save"
-      function parseForms() {
-        var selectedSensorKind = document.querySelector(
-          'input[name="sensor_kind_radio"]:checked'
-          ).value;
-        var gps_info = document.getElementById(
-          "gps_form"
-          ).value;
-        var irrgation_slope = document.getElementById(
-          "slope_form"
-          ).value;
-        var tension_threshold = document.getElementById(
-          "tension_threshold_form"
-          ).value;
-        var irrigation_amount = document.getElementById(
-          "irrigation_amount_form"
-          ).value;
-        var look_ahead_time = document.getElementById(
-          "look_ahead_time_form"
-          ).value;
-        var starting_date = document.getElementById(
-          "starting_timestamp_form"
-          ).value;
-        var time_period = document.getElementById(
-          "maximum_time_period_form"
-          ).value;
-        var soil_type = document.getElementById(
-          "soil_type_select"
-          ).value;
-        var pwp = document.getElementById(
-          "pwp_form"
-          ).value;
-        var fcu = document.getElementById(
-          "fcu_form"
-          ).value;
-        var fcl = document.getElementById(
-          "fcl_form"
-          ).value;
-        var sat = document.getElementById(
-          "sat_form"
-          ).value;
+    // Parse data from soil water retention text area
+    function parseSoilWaterRetention() {
+      var soil_water_retention = document.getElementById(
+        "soil_water_retention_text"
+      );
 
-        // Convert the selected date to an ISO timestamp => TODO: check timestamp
-        var isoTimestamp = new Date(starting_date).toISOString();
+      // Create a CSV header
+      const csvHeader = "Soil tension,VWC\n";
 
-        const Params =
-          "&sensor_kind=" +
-          encodeURIComponent(selectedSensorKind) +
-          "&gps=" +
-          encodeURIComponent(gps_info) +
-          "&slope=" +
-          encodeURIComponent(irrgation_slope) +
-          "&thres=" +
-          encodeURIComponent(tension_threshold) +
-          "&amount=" +
-          encodeURIComponent(irrigation_amount) +
-          "&lookahead=" + 
-          encodeURIComponent(look_ahead_time) +
-          "&start=" +
-          encodeURIComponent(isoTimestamp) +
-          "&period=" +
-          encodeURIComponent(time_period) +
-          "&soil=" +
-          encodeURIComponent(soil_type) +
-          "&pwp=" +
-          encodeURIComponent(pwp) +
-          "&fcu=" +
-          encodeURIComponent(fcu) +
-          "&fcl=" +
-          encodeURIComponent(fcl) +
-          "&sat=" +
-          encodeURIComponent(sat);
+      // Combine the header and the user-provided CSV data
+      const water_ret_csv = csvHeader + soil_water_retention.value;
 
-        return Params;
-      }
+      // Check weather data is compliant
+      const isParsable = isStringParsableAsCSV(water_ret_csv);
 
-      // Call backend to sync past values
-      function setConfig() {
-        selectedOptionsMoisture = evalSelected("sensor_list_moisture");
-        selectedOptionsTemp = evalSelected("sensor_list_temp");
-        selectedOptionsFlow = evalSelected("actuator_list_flow");
+      // Create a Blob containing the CSV data
+      const blob = new Blob([water_ret_csv], { type: "text/csv" });
 
-        //console.log("SensorID: " + selectedOptions)
+      return water_ret_csv;
+    }
 
-        // Encode the list as a query parameter & all other forms
-        const queryParamsMoisture = selectedOptionsMoisture.join(
-          "&selectedOptionsMoisture="
-        );
-        const queryParamsTemp = selectedOptionsTemp.join(
-          "&selectedOptionsTemp="
-        );
-        const queryParamsFlow = selectedOptionsFlow.join(
-          "&selectedOptionsFlow="
-        );
-        const queryForms = parseForms();
-        const queryRetention = parseSoilWaterRetention();
+    // Parse data from forms after "Save"
+    function parseForms() {
+      var selectedSensorKind = document.querySelector(
+        'input[name="sensor_kind_radio"]:checked'
+      ).value;
+      var gps_info = document.getElementById(
+        "gps_form"
+      ).value;
+      var irrgation_slope = document.getElementById(
+        "slope_form"
+      ).value;
+      var tension_threshold = document.getElementById(
+        "tension_threshold_form"
+      ).value;
+      var irrigation_amount = document.getElementById(
+        "irrigation_amount_form"
+      ).value;
+      var look_ahead_time = document.getElementById(
+        "look_ahead_time_form"
+      ).value;
+      var starting_date = document.getElementById(
+        "starting_timestamp_form"
+      ).value;
+      var time_period = document.getElementById(
+        "maximum_time_period_form"
+      ).value;
+      var soil_type = document.getElementById(
+        "soil_type_select"
+      ).value;
+      var pwp = document.getElementById(
+        "pwp_form"
+      ).value;
+      var fcu = document.getElementById(
+        "fcu_form"
+      ).value;
+      var fcl = document.getElementById(
+        "fcl_form"
+      ).value;
+      var sat = document.getElementById(
+        "sat_form"
+      ).value;
 
-        // Make a GET request to Python backend
-        fetch(`../api/setConfig`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: `selectedOptionsMoisture=${queryParamsMoisture}&selectedOptionsTemp=${queryParamsTemp}&selectedOptionsFlow=${queryParamsFlow}&${queryForms}&ret=${encodeURIComponent(
-            queryRetention
-          )}`,
+      // Convert the selected date to an ISO timestamp => TODO: check timestamp
+      var isoTimestamp = new Date(starting_date).toISOString();
+
+      const Params =
+        "&sensor_kind=" +
+        encodeURIComponent(selectedSensorKind) +
+        "&gps=" +
+        encodeURIComponent(gps_info) +
+        "&slope=" +
+        encodeURIComponent(irrgation_slope) +
+        "&thres=" +
+        encodeURIComponent(tension_threshold) +
+        "&amount=" +
+        encodeURIComponent(irrigation_amount) +
+        "&lookahead=" +
+        encodeURIComponent(look_ahead_time) +
+        "&start=" +
+        encodeURIComponent(isoTimestamp) +
+        "&period=" +
+        encodeURIComponent(time_period) +
+        "&soil=" +
+        encodeURIComponent(soil_type) +
+        "&pwp=" +
+        encodeURIComponent(pwp) +
+        "&fcu=" +
+        encodeURIComponent(fcu) +
+        "&fcl=" +
+        encodeURIComponent(fcl) +
+        "&sat=" +
+        encodeURIComponent(sat);
+
+      return Params;
+    }
+
+    // Call backend to sync past values
+    function setConfig() {
+      selectedOptionsMoisture = evalSelected("sensor_list_moisture");
+      selectedOptionsTemp = evalSelected("sensor_list_temp");
+      selectedOptionsFlow = evalSelected("actuator_list_flow");
+
+      //console.log("SensorID: " + selectedOptions)
+
+      // Encode the list as a query parameter & all other forms
+      const queryParamsMoisture = selectedOptionsMoisture.join(
+        "&selectedOptionsMoisture="
+      );
+      const queryParamsTemp = selectedOptionsTemp.join(
+        "&selectedOptionsTemp="
+      );
+      const queryParamsFlow = selectedOptionsFlow.join(
+        "&selectedOptionsFlow="
+      );
+      const queryForms = parseForms();
+      const queryRetention = parseSoilWaterRetention();
+
+      // Make a GET request to Python backend
+      fetch(`../api/setConfig`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: `selectedOptionsMoisture=${queryParamsMoisture}&selectedOptionsTemp=${queryParamsTemp}&selectedOptionsFlow=${queryParamsFlow}&${queryForms}&ret=${encodeURIComponent(
+          queryRetention
+        )}`,
+      })
+        .then((response) => response.text())
+        .then((data) => {
+          if (data != "") {
+            alert(data);
+          } else {
+            alert(
+              "Configuration was saved and successfully transmitted to the backend.\n" +
+              selectedOptions
+            );
+          }
+          console.log(data);
         })
-          .then((response) => response.text())
-          .then((data) => {
-            if (data != "") {
-              alert(data);
-            } else {
-              alert(
-                "Configuration was saved and successfully transmitted to the backend.\n" +
-                  selectedOptions
-              );
-            }
-            console.log(data);
-          })
-          .catch((error) => {
-            console.error("Error:", error);
+        .catch((error) => {
+          console.error("Error:", error);
+        });
+
+      goHome();
+    }
+
+    // JavaScript function to toggle visibility
+    function showElements() {
+      var inputElements = document.querySelector(".input_elements");
+      inputElements.style.display = "block";
+    }
+
+    // Display Snesor values for temp and moisture
+    function displaySensorsAndElements(sensorList) {
+      // Get the <select> element by its ID
+      const sensor_list_moisture = document.getElementById("sensor_list_moisture");
+      const sensor_list_temp = document.getElementById("sensor_list_temp");
+      const actuator_list_flow = document.getElementById("actuator_list_flow");
+
+      showElements();
+
+      // Loop through the sensor names and create <option> elements
+      sensorList.forEach((sensor) => {
+        // Create separate <option> elements for each select element
+        const optionElement_moisture = document.createElement("option");
+        const optionElement_temp = document.createElement("option");
+        const optionElement_flow = document.createElement("option")
+
+        // Set the value and text of the <option> elements
+        optionElement_moisture.value =
+          sensor.deviceId + "/" + sensor.sensorId;
+        optionElement_moisture.text =
+          sensor.deviceName + " / " + sensor.sensorName;
+
+        optionElement_temp.value = sensor.deviceId + "/" + sensor.sensorId;
+        optionElement_temp.text =
+          sensor.deviceName + " / " + sensor.sensorName;
+
+        optionElement_flow.value =
+          sensor.deviceId + "/" + sensor.sensorId;
+        optionElement_flow.text =
+          sensor.deviceName + " / " + sensor.sensorName;
+
+        // Append the <option> elements to the <select> elements
+        sensor_list_moisture.appendChild(optionElement_moisture);
+        sensor_list_temp.appendChild(optionElement_temp);
+        actuator_list_flow.appendChild(optionElement_flow);
+      });
+    }
+
+    // Creates List of sensors
+    function parseSensorData(jsonData) {
+      const sensorList = [];
+
+      // Loop through the array of objects (devices) in jsonData
+      jsonData.forEach((device) => {
+        // Check if the device has a "sensors" property
+        if (device.sensors && Array.isArray(device.sensors)) {
+          // Loop through the sensors array of the device
+          device.sensors.forEach((sensor) => {
+            // Extract sensor information
+            const sensorInfo = {
+              deviceId: device.id,
+              deviceName: device.name,
+              sensorId: sensor.id,
+              sensorName: sensor.name,
+              sensorValue: sensor.value,
+            };
+
+            // Push the sensor information to the sensorList
+            sensorList.push(sensorInfo);
           });
+        }
+        if (device.actuators && Array.isArray(device.actuators)) {
+          // Loop through the actuators array of the device
+          device.actuators.forEach((actuator) => {
+            // Extract actuator information
+            const sensorInfo = {
+              deviceId: device.id,
+              deviceName: device.name,
+              sensorId: actuator.id,
+              sensorName: actuator.name,
+              sensorValue: actuator.value,
+            };
 
-        goHome();
-      }
+            // Push the actuator information to the sensorList
+            sensorList.push(sensorInfo);
+          });
+        }
+      });
 
-      // JavaScript function to toggle visibility
-      function showElements() {
-        var inputElements = document.querySelector(".input_elements");
-        inputElements.style.display = "block";
-      }
-
-      // Display Snesor values for temp and moisture
-      function displaySensorsAndElements(sensorList) {
-        // Get the <select> element by its ID
-        const sensor_list_moisture = document.getElementById("sensor_list_moisture");
-        const sensor_list_temp = document.getElementById("sensor_list_temp");
-        const actuator_list_flow = document.getElementById("actuator_list_flow");
-
-        showElements();
-
-        // Loop through the sensor names and create <option> elements
-        sensorList.forEach((sensor) => {
-          // Create separate <option> elements for each select element
-          const optionElement_moisture = document.createElement("option");
-          const optionElement_temp = document.createElement("option");
-          const optionElement_flow = document.createElement("option")
-
-          // Set the value and text of the <option> elements
-          optionElement_moisture.value =
-            sensor.deviceId + "/" + sensor.sensorId;
-          optionElement_moisture.text =
-            sensor.deviceName + " / " + sensor.sensorName;
-
-          optionElement_temp.value = sensor.deviceId + "/" + sensor.sensorId;
-          optionElement_temp.text =
-            sensor.deviceName + " / " + sensor.sensorName;
-
-          optionElement_flow.value = 
-            sensor.deviceId + "/" + sensor.sensorId;
-          optionElement_flow.text =
-            sensor.deviceName + " / " + sensor.sensorName;
-
-          // Append the <option> elements to the <select> elements
-          sensor_list_moisture.appendChild(optionElement_moisture);
-          sensor_list_temp.appendChild(optionElement_temp);
-          actuator_list_flow.appendChild(optionElement_flow);
-        });
-      }
-
-      // Creates List of sensors
-      function parseSensorData(jsonData) {
-        const sensorList = [];
-
-        // Loop through the array of objects (devices) in jsonData
-        jsonData.forEach((device) => {
-          // Check if the device has a "sensors" property
-          if (device.sensors && Array.isArray(device.sensors)) {
-            // Loop through the sensors array of the device
-            device.sensors.forEach((sensor) => {
-              // Extract sensor information
-              const sensorInfo = {
-                deviceId: device.id,
-                deviceName: device.name,
-                sensorId: sensor.id,
-                sensorName: sensor.name,
-                sensorValue: sensor.value,
-              };
-
-              // Push the sensor information to the sensorList
-              sensorList.push(sensorInfo);
-            });
-          }
-          if(device.actuators && Array.isArray(device.actuators)) {
-            // Loop through the actuators array of the device
-            device.actuators.forEach((actuator) => {
-              // Extract actuator information
-              const sensorInfo = {
-                deviceId: device.id,
-                deviceName: device.name,
-                sensorId: actuator.id,
-                sensorName: actuator.name,
-                sensorValue: actuator.value,
-              };
-
-              // Push the actuator information to the sensorList
-              sensorList.push(sensorInfo);
-            });
-          }
-        });
-
-        return sensorList;
-      }
+      return sensorList;
+    }
 
     // Main function for from same device fetching
     function loadStuff() {
@@ -665,202 +661,169 @@
           headers: headers,
         });
 
-          if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}`);
-          }
-
-          const data = await response.json();
-
-          // Handle the data
-          const sensors = parseSensorData(data);
-          console.log("Sensors: ", sensors);
-          displaySensorsAndElements(sensors);
-          getFormerConfig();
-        } catch (error) {
-          // Handle errors
-          console.error("Error during fetch:", error);
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`);
         }
+
+        const data = await response.json();
+
+        // Handle the data
+        const sensors = parseSensorData(data);
+        console.log("Sensors: ", sensors);
+        displaySensorsAndElements(sensors);
+        getFormerConfig();
+      } catch (error) {
+        // Handle errors
+        console.error("Error during fetch:", error);
       }
+    }
 
-      // Called on page load => shows loading animation
-      $(function () {
-        $("#sensor_list")
-          .html('<img src="./loading.gif" /> Loading...')
-          .fadeIn();
-        //loadStuff();
-        loadStuff_remote() // DEBUG
-      });
-    </script>
-  </head>
+    // Called on page load => shows loading animation
+    $(function () {
+      $("#sensor_list")
+        .html('<img src="./loading.gif" /> Loading...')
+        .fadeIn();
+      //loadStuff();
+      loadStuff_remote() // DEBUG
+    });
+  </script>
+</head>
 
-  <body>
-    <div class="action-buttons">
-      <button class="home" type="button" onclick="goHome()">Home</button>
+<body>
+  <div class="action-buttons">
+    <button class="home" type="button" onclick="goHome()">Home</button>
+  </div>
+  <div class="center">
+    <div class="settings-heading">
+      <img src="./settings.svg" alt="settings" />
+      <h1>Settings</h1>
     </div>
-    <div class="center">
-      <div class="settings-heading">
-        <img src="./settings.svg" alt="settings" />
-        <h1>Settings</h1>
-      </div>
-      <p>Here you can setup the parameters needed to perfom the prediction.</p>
-      <div class="input_elements">
-        <div class="inputs">
-          <div class="main-sensors">
-            <div class="moisture">
-              <label for="sensor_list_moisture">
-                Choose soil moisture sensors:
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="moistureTooltip">help
-                  <span class="tooltiptext" id="moistureTooltip"></span>
-                </span>
-              </label>
-              <select id="sensor_list_moisture" multiple size="5"></select>
+    <p>Here you can setup the parameters needed to perfom the prediction.</p>
+    <div class="input_elements">
+      <div class="inputs">
+        <div class="main-sensors">
+          <div class="moisture">
+            <label for="sensor_list_moisture">
+              Choose soil moisture sensors:
+              <span class="tooltip material-symbols-outlined" data-tooltip-id="moistureTooltip">help
+                <span class="tooltiptext" id="moistureTooltip"></span>
+              </span>
+            </label>
+            <select id="sensor_list_moisture" multiple size="5"></select>
+          </div>
+          <div class="moisture">
+            <label for="moisture_kind">
+              Soil moisture sensors kind:
+              <span class="tooltip material-symbols-outlined" data-tooltip-id="moistureKindTooltip">help
+                <span class="tooltiptext" id="moistureKindTooltip"></span>
+              </span>
+            </label>
+            <div class="radio">
+              <input type="radio" id="capacitive" name="sensor_kind_radio" value="capacitive" />
+              <label for="capacitive">Capacitive soil moisture sensor (Humidity in %)</label>
             </div>
-            <div class="moisture">
-              <label for="moisture_kind">
-                Soil moisture sensors kind:
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="moistureKindTooltip">help
-                  <span class="tooltiptext" id="moistureKindTooltip"></span>
-                </span>
-              </label>
-              <div class="radio">
-                <input type="radio" id="capacitive" name="sensor_kind_radio" value="capacitive" />
-                <label for="capacitive">Capacitive soil moisture sensor (Humidity in %)</label>
-              </div>
-              <div class="radio">
-                <input type="radio" id="tension" name="sensor_kind_radio" value="tension" checked/>
-                <label for="tension">Soil tension sensor (Soil tension in kPa, cBar)</label>
-              </div>
-            </div>
-            <div class="temperature">
-              <label for="sensor_list_temp"
-                >Choose soil temperature sensors:
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="tempTooltip">help
-                  <span class="tooltiptext" id="tempTooltip"></span>
-                </span>
-              </label>
-              <select id="sensor_list_temp" multiple size="5"></select>
-            </div>
-            <div class="actuation">
-              <label for="actuator_list_flow"
-                >Choose soil water flow sensor:
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="waterFlowTooltip">help
-                  <span class="tooltiptext" id="waterFlowTooltip"></span>
-                </span>
-              </label>
-              <select id="actuator_list_flow" multiple size="5"></select>
+            <div class="radio">
+              <input type="radio" id="tension" name="sensor_kind_radio" value="tension" checked />
+              <label for="tension">Soil tension sensor (Soil tension in kPa, cBar)</label>
             </div>
           </div>
-          <div class="main-sensors">
-            <div>
-              <label for="gps">GPS coordinates:
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="gpsCoordinates">help
-                  <span class="tooltiptext" id="gpsCoordinates"></span>
-                </span>
-              </label>
-              <input
-                id="gps_form"
-                type="text"
-                name="gps"
-                value="51.023591, 13.744087"
-              />
-            </div>
-            <div><!--TODO: needs to be deactivated without reload-->
-              <label for="slope"
-                >Slope for detecting artificial irrgation:
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="slopeTooltip">help
-                  <span class="tooltiptext" id="slopeTooltip"></span>
-                </span>
-              </label>
-              <input id="slope_form" type="number" name="slope" value="-0.07" />
-            </div>
-            <div>
-              <label for="irrigation_amount"
-                >Amount of one irrigation cycle (in liters):
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationAmountTooltip">help
-                  <span class="tooltiptext" id="irrigationAmountTooltip"></span>
-                </span>
-              </label>
-              <input
-                id="irrigation_amount_form"
-                type="number"
-                name="irrigation_amount"
-                value="10"
-              />
-            </div>
-            <div>
-              <label for="look_ahead_time"
-                >Time to look ahead in forecast how long soil tension threshold can be exceeded in hours:
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="lookAheadTimeTooltip">help
-                  <span class="tooltiptext" id="lookAheadTimeTooltip"></span>
-                </span>
-              </label>
-              <input
-                id="look_ahead_time_form"
-                type="number"
-                name="look_ahead_time"
-                value="6"
-              />
-            </div>
-            <div>
-              <label for="starting_timestamp">Starting date:
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="startingDateTooltip">help
-                  <span class="tooltiptext" id="startingDateTooltip"></span>
-                </span>
-              </label>
-              <input
-                id="starting_timestamp_form"
-                type="date"
-                name="starting_timestamp"
-              />
-            </div>
-            <div>
-              <label for="maximum_time_period">Max time period:
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="maxTimePeriodTooltip">help
-                  <span class="tooltiptext" id="maxTimePeriodTooltip"></span>
-                </span>
-              </label>
-              <input
-                id="maximum_time_period_form"
-                type="number"
-                name="maximum_time_period"
-                value="0"
-              />
-            </div>
-            <div>
-              <label for="soil_type">
-                Select a Soil type:
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="soilTypeTooltip">help
-                  <span class="tooltiptext" id="soilTypeTooltip"></span>
-              </label>
-              <select
-                class="soil-type"
-                id="soil_type_select"
-                name="soil_type"
-                onchange="handleSoilTypeChange()"
-              >
-                <option value="Sandy_Soil">Sandy Soil</option>
-                <option value="Fine_sandy_loams">Fine sandy loams</option>
-                <option value="Loams_and_silt_loams">
-                  Loams and silt loams
-                </option>
-                <option value="Clay_loams">Clay loams</option>
-                <option value="Clays">Clays</option>
-                <option value="Kaolinite">Kaolinite</option>
-                <option value="Illite">Illite</option>
-                <option value="Montmorillonite">Montmorillonite</option>
-                <option value="Vermiculite">
-                  Vermiculite (similar to illite)
-                </option>
-                <option value="Humus">Humus</option>
-                <option value="Peat_Soil">Peat Soil</option>
-                <option value="Sandy_Clay_Loam">Sandy Clay Loam</option>
-                <option value="Silty_Clay">Silty Clay</option>
-                <option value="Loess_Soil">Loess Soil</option>
-                <option value="Chalky_Soil">Chalky Soil</option>
-                <option value="Volcanic_Ash_Soil">Volcanic Ash Soil</option>
-                <option value="Sesquioxides">Sesquioxides</option>
-              </select>
-            </div>
+          <div class="temperature">
+            <label for="sensor_list_temp">Choose soil temperature sensors:
+              <span class="tooltip material-symbols-outlined" data-tooltip-id="tempTooltip">help
+                <span class="tooltiptext" id="tempTooltip"></span>
+              </span>
+            </label>
+            <select id="sensor_list_temp" multiple size="5"></select>
+          </div>
+          <div class="actuation">
+            <label for="actuator_list_flow">Choose soil water flow sensor:
+              <span class="tooltip material-symbols-outlined" data-tooltip-id="waterFlowTooltip">help
+                <span class="tooltiptext" id="waterFlowTooltip"></span>
+              </span>
+            </label>
+            <select id="actuator_list_flow" multiple size="5"></select>
+          </div>
+        </div>
+        <div class="main-sensors">
+          <div>
+            <label for="gps">GPS coordinates:
+              <span class="tooltip material-symbols-outlined" data-tooltip-id="gpsCoordinates">help
+                <span class="tooltiptext" id="gpsCoordinates"></span>
+              </span>
+            </label>
+            <input id="gps_form" type="text" name="gps" value="51.023591, 13.744087" />
+          </div>
+          <div><!--TODO: needs to be deactivated without reload-->
+            <label for="slope">Slope for detecting artificial irrgation:
+              <span class="tooltip material-symbols-outlined" data-tooltip-id="slopeTooltip">help
+                <span class="tooltiptext" id="slopeTooltip"></span>
+              </span>
+            </label>
+            <input id="slope_form" type="number" name="slope" value="-0.07" />
+          </div>
+          <div>
+            <label for="irrigation_amount">Amount of one irrigation cycle (in liters):
+              <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationAmountTooltip">help
+                <span class="tooltiptext" id="irrigationAmountTooltip"></span>
+              </span>
+            </label>
+            <input id="irrigation_amount_form" type="number" name="irrigation_amount" value="10" />
+          </div>
+          <div>
+            <label for="look_ahead_time">Time to look ahead in forecast how long soil tension threshold can be exceeded
+              in hours:
+              <span class="tooltip material-symbols-outlined" data-tooltip-id="lookAheadTimeTooltip">help
+                <span class="tooltiptext" id="lookAheadTimeTooltip"></span>
+              </span>
+            </label>
+            <input id="look_ahead_time_form" type="number" name="look_ahead_time" value="6" />
+          </div>
+          <div>
+            <label for="starting_timestamp">Starting date:
+              <span class="tooltip material-symbols-outlined" data-tooltip-id="startingDateTooltip">help
+                <span class="tooltiptext" id="startingDateTooltip"></span>
+              </span>
+            </label>
+            <input id="starting_timestamp_form" type="date" name="starting_timestamp" />
+          </div>
+          <div>
+            <label for="maximum_time_period">Max time period:
+              <span class="tooltip material-symbols-outlined" data-tooltip-id="maxTimePeriodTooltip">help
+                <span class="tooltiptext" id="maxTimePeriodTooltip"></span>
+              </span>
+            </label>
+            <input id="maximum_time_period_form" type="number" name="maximum_time_period" value="0" />
+          </div>
+          <div>
+            <label for="soil_type">
+              Select a Soil type:
+              <span class="tooltip material-symbols-outlined" data-tooltip-id="soilTypeTooltip">help
+                <span class="tooltiptext" id="soilTypeTooltip"></span>
+            </label>
+            <select class="soil-type" id="soil_type_select" name="soil_type" onchange="handleSoilTypeChange()">
+              <option value="Sandy_Soil">Sandy Soil</option>
+              <option value="Fine_sandy_loams">Fine sandy loams</option>
+              <option value="Loams_and_silt_loams">
+                Loams and silt loams
+              </option>
+              <option value="Clay_loams">Clay loams</option>
+              <option value="Clays">Clays</option>
+              <option value="Kaolinite">Kaolinite</option>
+              <option value="Illite">Illite</option>
+              <option value="Montmorillonite">Montmorillonite</option>
+              <option value="Vermiculite">
+                Vermiculite (similar to illite)
+              </option>
+              <option value="Humus">Humus</option>
+              <option value="Peat_Soil">Peat Soil</option>
+              <option value="Sandy_Clay_Loam">Sandy Clay Loam</option>
+              <option value="Silty_Clay">Silty Clay</option>
+              <option value="Loess_Soil">Loess Soil</option>
+              <option value="Chalky_Soil">Chalky Soil</option>
+              <option value="Volcanic_Ash_Soil">Volcanic Ash Soil</option>
+              <option value="Sesquioxides">Sesquioxides</option>
+            </select>
+          </div>
           <div class="water-retention">
             <div>
               <label for="slope">Custom soil water retention curve:
@@ -868,7 +831,7 @@
                   <span class="tooltiptext" id="soilWaterRetentionTooltip"></span>
                 </span>
               </label>
-                <textarea id="soil_water_retention_text" name="myText" rows="6">
+              <textarea id="soil_water_retention_text" name="myText" rows="6">
 0, 0.225
 5, 0.2
 10, 0.185
@@ -878,85 +841,60 @@
 200, 0.075
 500, 0.05
 1000, 0.025</textarea>
-              </div>
+            </div>
+          </div>
+          <div>
+            <div>
+              <label for="pwp">Permanent Wilting Point:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="pwpTooltip">help
+                  <span class="tooltiptext" id="pwpTooltip"></span>
+                </span>
+              </label>
+              <input id="pwp_form" type="number" name="pwp" value="40" />
             </div>
             <div>
-              <div>
-                <label for="pwp">Permanent Wilting Point:
-                  <span class="tooltip material-symbols-outlined" data-tooltip-id="pwpTooltip">help
-                    <span class="tooltiptext" id="pwpTooltip"></span>
-                  </span>
-                </label>
-                <input
-                  id="pwp_form"
-                  type="number"
-                  name="pwp"
-                  value="40"
-                />
-              </div>
-              <div>
-                <label for="fcu">Field Capacity upper bound:
-                  <span class="tooltip material-symbols-outlined" data-tooltip-id="fcuTooltip">help
-                    <span class="tooltiptext" id="fcuTooltip"></span>
-                </label>
-                <input
-                  id="fcu_form"
-                  type="number"
-                  name="fcu"
-                  value="30"
-                />
-              </div>
-              <div>
-                <label for="fcl">Field Capacity lower bound:
-                  <span class="tooltip material-symbols-outlined" data-tooltip-id="fclTooltip">help
-                    <span class="tooltiptext" id="fclTooltip"></span>
-                </label>
-                <input
-                  id="fcl_form"
-                  type="number"
-                  name="fcl"
-                  value="10"
-                />
-              </div>
-              <div>
-                <label for="sat">Saturation:
-                  <span class="tooltip material-symbols-outlined" data-tooltip-id="satTooltip">help
-                    <span class="tooltiptext" id="satTooltip"></span>
-                </label>
-                <input
-                  id="sat_form"
-                  type="number"
-                  name="sat"
-                  value="0"
-                />
-              </div>
-              <div>
-                <label for="tension_threshold"
-                  >Soil tension threshold (in cbar, hPa)
-                  <span class="tooltip material-symbols-outlined" data-tooltip-id="tensionThresholdTooltip">help
-                    <span class="tooltiptext" id="tensionThresholdTooltip"></span>
-                </label>
-                <input
-                  id="tension_threshold_form"
-                  type="number"
-                  name="tension_threshold"
-                  value="7"
-                />
-              </div>
+              <label for="fcu">Field Capacity upper bound:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="fcuTooltip">help
+                  <span class="tooltiptext" id="fcuTooltip"></span>
+              </label>
+              <input id="fcu_form" type="number" name="fcu" value="30" />
+            </div>
+            <div>
+              <label for="fcl">Field Capacity lower bound:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="fclTooltip">help
+                  <span class="tooltiptext" id="fclTooltip"></span>
+              </label>
+              <input id="fcl_form" type="number" name="fcl" value="10" />
+            </div>
+            <div>
+              <label for="sat">Saturation:
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="satTooltip">help
+                  <span class="tooltiptext" id="satTooltip"></span>
+              </label>
+              <input id="sat_form" type="number" name="sat" value="0" />
+            </div>
+            <div>
+              <label for="tension_threshold">Soil tension threshold (in cbar, hPa)
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="tensionThresholdTooltip">help
+                  <span class="tooltiptext" id="tensionThresholdTooltip"></span>
+              </label>
+              <input id="tension_threshold_form" type="number" name="tension_threshold" value="7" />
             </div>
           </div>
         </div>
       </div>
-        <br />
-        <div class="action-buttons">
-          <button class="save" type="button" onclick="setConfig()">
-            Save Settings
-          </button>
-          <button class="button_cancel" type="button" onclick="goHome()">
-            Cancel
-          </button>
-        </div>
-      </div>
     </div>
-  </body>
+    <br />
+    <div class="action-buttons">
+      <button class="save" type="button" onclick="setConfig()">
+        Save Settings
+      </button>
+      <button class="button_cancel" type="button" onclick="goHome()">
+        Cancel
+      </button>
+    </div>
+  </div>
+  </div>
+</body>
+
 </html>

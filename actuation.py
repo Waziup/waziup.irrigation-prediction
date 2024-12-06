@@ -14,11 +14,11 @@ import create_model
 # Globals
 # Timespan of hours 
 TimeSpanOverThreshold = 12
-OverThresholdAllowed = 1.2
+OverThresholdAllowed = 1.2 # 20% allowed
 Last_irrigation = ''
 
 # Find global max and min => not used any more
-def get_max_min(df, target_col='prediction_label'):
+def get_max_min(df, target_col='smoothed_values'):
     # reset "new" index
     df = df.reset_index(inplace=False)
     
@@ -214,7 +214,7 @@ def main_old(currentSoilTension, threshold_timestamp, predictions, irrigation_am
             return e
         
         # Check predictions
-        next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'prediction_label', threshold)
+        next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'smoothed_values', threshold)
 
         # If no lower value is predicted within the forecast horizon, trigger irrigation
         if not next_lower_idx:
@@ -279,7 +279,7 @@ def main(
             return irrigate_amount(irrigation_amount)
 
         # Check predictions for next occurrence below/above threshold
-        next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'prediction_label', threshold)
+        next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'smoothed_values', threshold)
 
         # No recovery predicted within forecast horizon
         if (strategy == "tension" and not next_lower_idx) or (strategy == "humidity" and not next_higher_idx):

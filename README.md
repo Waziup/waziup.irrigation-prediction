@@ -34,4 +34,7 @@ Create a folder with the name of the app at the following path: "/var/lib/waziga
 Issue the following cmd to push to dockerhub (you have to be logged in):
 
     docker save {id of image} | gzip | pv | ssh pi@{ip of rpi} docker load
+    
+    # Example:
+    docker save my-docker-image | gzip | pv | ssh pi@192.168.0.10 docker load
 
