@@ -36,5 +36,29 @@ pipeline {
                 }
             }
         }
+        stage('Clean Old Untagged Images') {
+            steps {
+                script {
+                    def imageName = 'waziup/irrigation-prediction' // Define the image name here
+                    def removeImageCommand = """
+                        docker rmi $(docker images -q --filter "reference=${imageName}:<none>")
+                    """
+
+                    try {
+                        def result = sh(script: removeImageCommand, returnStdout: true, returnStatus: true)
+                        if (result.exitCode != 0) {
+                            echo "Error removing untagged images: ${result.output}"
+                            error "Failed to remove untagged images."
+                        } else {
+                            echo "Successfully removed untagged images."
+                        }
+                    }
+                    catch (Exception e) {
+                        echo "Exception thrown during image removal: ${e.getMessage()}"
+                        error "Failed to remove untagged images due to an exception."
+                    }
+                }
+            }
+        }
     }
 }
