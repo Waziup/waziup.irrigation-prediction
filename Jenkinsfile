@@ -10,10 +10,10 @@ pipeline {
         stage('Buildx Setup') {
             steps {
                 script {
-                   // Check if the builder already exists, if not create it
+                    // Check if the builder already exists, if not create it
                     def builderExists = sh(script: "docker buildx ls | grep crossbuilder || true", returnStatus: true)
                     if (builderExists != 0) {
-                       sh 'docker buildx create --name crossbuilder --use'
+                        sh 'docker buildx create --name crossbuilder --use'
                     } else {
                        sh 'docker buildx use crossbuilder'
                     }
@@ -23,16 +23,16 @@ pipeline {
             }
         }
 
-       stage('Docker Cross-Build') {
+        stage('Docker Cross-Build') {
             steps {
                 script {
                     sh """
-                        docker buildx build \
-                            --platform ${DOCKER_PLATFORM} \
-                            -t ${DOCKER_IMAGE_NAME} \
-                            --no-cache \
-                            --pull \
-                            --build-arg CACHEBUST=$(date +%s) \
+                        docker buildx build \\
+                            --platform ${DOCKER_PLATFORM} \\
+                            -t ${DOCKER_IMAGE_NAME} \\
+                            --no-cache \\
+                            --pull \\
+                            --build-arg CACHEBUST=\$(date +%s) \\
                             --load .
                     """
                 }
