@@ -10,20 +10,18 @@ pipeline {
         stage('Buildx Setup') {
             steps {
                 script {
-                    // Check if the builder already exists, if not create it
-                    def builderExists = sh(script: "docker buildx ls | grep crossbuilder || true", returnStatus: true)
-                    if (builderExists != 0) {
-                        sh 'docker buildx create --name crossbuilder --use'
-                    } else {
-                       sh 'docker buildx use crossbuilder'
+                    //Install docker buildx builder
+                    sh 'docker run --rm --privileged multiarch/qemu-user-static --reset -p yes'
+                    catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+                        sh 'docker buildx create --name rpibuilder --platform linux/arm64/v8; true'
                     }
-
-                    sh 'docker buildx inspect crossbuilder' // TODO: Verify builder
+                    sh 'docker buildx use rpibuilder'
+                    sh 'docker buildx inspect --bootstrap'
                 }
             }
         }
 
-        stage('Docker Cross-Build') {
+       stage('Docker Cross-Build') {
             steps {
                 script {
                     sh """
