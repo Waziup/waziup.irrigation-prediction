@@ -416,43 +416,49 @@ def getConfigFromFile():
 def returnConfig(url, body):
     try:
         # Call the getConfigFromFile function to load variables
-        getConfigFromFile()
+        if getConfigFromFile():
 
-        # Check if all necessary global variables are properly defined
-        if not all(isinstance(var, (int, float, str, list, dict)) for var in [
-            DeviceAndSensorIdsMoisture, DeviceAndSensorIdsTemp, DeviceAndSensorIdsFlow, 
-            Sensor_kind, Gps_info, Slope, Threshold, Irrigation_amount, Look_ahead_time, 
-            Start_date, Period, PermanentWiltingPoint, FieldCapacityUpper, 
-            FieldCapacityLower, Saturation]):
-            raise ValueError("Variables are still missing or of incorrect type after loading from config.")
-    
-        # Construct the response data
-        response_data = {
-            "DeviceAndSensorIdsMoisture": DeviceAndSensorIdsMoisture,
-            "DeviceAndSensorIdsTemp": DeviceAndSensorIdsTemp,
-            "DeviceAndSensorIdsFlow": DeviceAndSensorIdsFlow,
-            "Sensor_kind": Sensor_kind,
-            "Gps_info": Gps_info,
-            "Slope": Slope,
-            "Threshold": Threshold,
-            "Irrigation_amount": Irrigation_amount,
-            "Look_ahead_time": Look_ahead_time,
-            "Start_date": Start_date,
-            "Period": Period,
-            "Soil_type": Soil_type,
-            "Soil_water_retention_curve": Soil_water_retention_curve,
-            "PermanentWiltingPoint": PermanentWiltingPoint,
-            "FieldCapacityUpper": FieldCapacityUpper,
-            "FieldCapacityLower": FieldCapacityLower,
-            "Saturation": Saturation
-        }
+            # Check if all necessary global variables are properly defined
+            if not all(isinstance(var, (int, float, str, list, dict)) for var in [
+                DeviceAndSensorIdsMoisture, DeviceAndSensorIdsTemp, DeviceAndSensorIdsFlow, 
+                Sensor_kind, Gps_info, Slope, Threshold, Irrigation_amount, Look_ahead_time, 
+                Start_date, Period, PermanentWiltingPoint, FieldCapacityUpper, 
+                FieldCapacityLower, Saturation]):
+                raise ValueError("Variables are still missing or of incorrect type after loading from config.")
+        
+            # Construct the response data
+            response_data = {
+                "DeviceAndSensorIdsMoisture": DeviceAndSensorIdsMoisture,
+                "DeviceAndSensorIdsTemp": DeviceAndSensorIdsTemp,
+                "DeviceAndSensorIdsFlow": DeviceAndSensorIdsFlow,
+                "Sensor_kind": Sensor_kind,
+                "Gps_info": Gps_info,
+                "Slope": Slope,
+                "Threshold": Threshold,
+                "Irrigation_amount": Irrigation_amount,
+                "Look_ahead_time": Look_ahead_time,
+                "Start_date": Start_date,
+                "Period": Period,
+                "Soil_type": Soil_type,
+                "Soil_water_retention_curve": Soil_water_retention_curve,
+                "PermanentWiltingPoint": PermanentWiltingPoint,
+                "FieldCapacityUpper": FieldCapacityUpper,
+                "FieldCapacityLower": FieldCapacityLower,
+                "Saturation": Saturation
+            }
 
-        # If all is good, return a 200 status code and the data
-        response = {
-            "data": response_data,
-            "status_code": 200
-        }
-        return 200, bytes(json.dumps(response), "utf8"), []
+            # If all is good, return a 200 status code and the data
+            response = {
+                "data": response_data,
+                "status_code": 200
+            }
+            return 200, bytes(json.dumps(response), "utf8"), []
+        else:
+            error_response = {
+                "error": "No config data present. Perform configuration.",
+                "status_code": 400
+            }
+            return 400, bytes(json.dumps(error_response), "utf8"), []
 
     except ValueError as ve:
         # Return a 400 error for missing or invalid data
@@ -775,7 +781,7 @@ def workerToPredict():
     def time_until_n_hours(hours):
         """Calculate the time difference from now until the next noon."""
         now = datetime.now()
-        predict_time = now + timedelta(hours=0, minutes=hours, seconds=0, microseconds=0) #TODO: change to hours
+        predict_time = now + timedelta(hours=hours, minutes=0, seconds=0, microseconds=0) #TODO: change to hours DEBUG
 
         return (predict_time - now).total_seconds()
     
