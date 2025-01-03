@@ -40,9 +40,8 @@ pipeline {
             steps {
                 script {
                     def imageName = 'waziup/irrigation-prediction' // Define the image name here
-                    def removeImageCommand = """
-                        docker rmi $(docker images -q --filter "reference=${imageName}:<none>")
-                    """
+                def removeImageCommand = 'docker rmi $(docker images -q --filter "reference=${imageName}:<none>")'
+
 
                     try {
                         def result = sh(script: removeImageCommand, returnStdout: true, returnStatus: true)
