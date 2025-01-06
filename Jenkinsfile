@@ -89,7 +89,7 @@ pipeline {
         stage('Save Docker Image') {
             steps {
                 sh "docker save ${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME} > irrigation_prediction_docker_image.tar"
-                archiveArtifacts artifacts: 'irrigation_prediction_docker_image.tar', fingerprint: true, overwrite: true
+                archiveArtifacts artifacts: 'irrigation_prediction_docker_image.tar', fingerprint: true
             }
         }
 
