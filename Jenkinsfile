@@ -82,11 +82,18 @@ pipeline {
             }
         }
 
+        stage('Save Docker Image') {
+            steps {
+                sh "docker save ${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME} > irrigation_prediction_docker_image.tar"
+                archiveArtifacts artifacts: 'irrigation_prediction_docker_image.tar', fingerprint: true, overwrite: true
+            }
+        }
+
         stage('Push to dockerhub'){
             when { expression { params.perform_push_duckerhub } }
             steps {
                 script {
-                    def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME }" // Combines image name and tag
+                    def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}" // Combines image name and tag
                     try {
                         sh "docker push ${dockerImage}"
                         echo "Successfully pushed image ${dockerImage} to Docker Hub."
