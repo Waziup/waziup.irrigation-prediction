@@ -10,7 +10,7 @@ pipeline {
         DOCKER_IMAGE_NAME = 'waziup/irrigation-prediction'
         DOCKER_TAG_NAME = 'dev'
         DOCKER_PLATFORM = 'linux/arm64/v8'
-        FORMER_IMAGES_DOCKER_ID = null
+        FORMER_IMAGES_DOCKER_ID = ''
     }
 
     stages {
@@ -31,16 +31,18 @@ pipeline {
        stage('Docker Cross-Build') {
             steps {
                 script {
-                     // Capture the ID of the existing image at start of job if image exists, used for removal later on.
-                    def existingImageId = sh(
+                    // Capture the ID of the existing image at start of job if image exists, used for removal later on.
+                     def existingImageId = sh(
                        script: "docker images -q --filter reference=${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}",
                        returnStdout: true
                        ).trim()
+
                      if(existingImageId) {
                           env.FORMER_IMAGES_DOCKER_ID = existingImageId
-                          echo "Saving image id ${existingImageId} before rebuilding."
+                          echo "Saving image id ${existingImageId} before rebuilding. After the buildx cmd succeeded, it will be deleted."
                       } else {
-                       echo "No existing images to remove. No image id will be saved."
+                        echo "No existing images to remove. No image id will be saved."
+                        env.FORMER_IMAGES_DOCKER_ID = ''
                      }
                     sh """
                         docker buildx build \\
@@ -54,10 +56,11 @@ pipeline {
                 }
             }
         }
+
         stage('Clean Old Untagged Images') {
             steps {
                 script {
-                    if(env.FORMER_IMAGES_DOCKER_ID) {
+                   if(env.FORMER_IMAGES_DOCKER_ID) {
                         try {
                             def result = sh(script: "docker rmi ${env.FORMER_IMAGES_DOCKER_ID}", returnStdout: true, returnStatus: true)
                             if (result.exitCode != 0) {
@@ -78,8 +81,9 @@ pipeline {
                 }
             }
         }
+
         stage('Push to dockerhub'){
-            when { expression { params.perform_push_duckerhub != true } }
+            when { expression { params.perform_push_duckerhub } }
             steps {
                 script {
                     def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME }" // Combines image name and tag
