@@ -1,7 +1,7 @@
 pipeline {
     agent any
     parameters {
-        booleanParam(name: 'perform_push_duckerhub', defaultValue: false, description: 'Set to true to skip the perf test stage')
+        booleanParam(name: 'perform_push_duckerhub', defaultValue: false, description: 'Set true to push to dockerhub.')
     }
     options {
         timeout(time: 1, unit: 'HOURS')
@@ -28,22 +28,19 @@ pipeline {
             }
         }
 
-       stage('Docker Cross-Build') {
+        stage('Docker Cross-Build') {
             steps {
                 script {
-                    // Capture the ID of the existing image at start of job if image exists, used for removal later on.
-                     def existingImageId = sh(
-                       script: "docker images -q --filter reference=${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}",
-                       returnStdout: true
-                       ).trim()
+                    formerImagesDockerID = sh(
+                        script: "docker images -q --filter reference=${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}",
+                        returnStdout: true
+                    ).trim()
 
-                     if(existingImageId) {
-                          env.FORMER_IMAGES_DOCKER_ID = existingImageId
-                          echo "Saving image id ${existingImageId} before rebuilding. After the buildx cmd succeeded, it will be deleted."
-                      } else {
+                    if(formerImagesDockerID) {
+                        echo "Saving image id ${formerImagesDockerID} before rebuilding. After the buildx cmd succeeded, it will be deleted."
+                    } else {
                         echo "No existing images to remove. No image id will be saved."
-                        env.FORMER_IMAGES_DOCKER_ID = ''
-                     }
+                    }
                     sh """
                         docker buildx build \\
                             --platform ${DOCKER_PLATFORM} \\
@@ -53,6 +50,9 @@ pipeline {
                             --build-arg CACHEBUST=\$(date +%s) \\
                             --load .
                     """
+                     // Stash the ID for use in later stages
+                    writeFile file: 'former_image_id.txt', text: formerImagesDockerID
+                    stash name: 'former_image_id', includes: 'former_image_id.txt'
                 }
             }
         }
@@ -60,11 +60,15 @@ pipeline {
         stage('Clean Old Untagged Images') {
             steps {
                 script {
-                   if(env.FORMER_IMAGES_DOCKER_ID) {
+                    // Unstash the ID from the previous stage
+                    unstash 'former_image_id'
+                    def formerID = readFile('former_image_id.txt').trim()
+
+                    if(formerID) {
                         try {
-                            def result = sh(script: "docker rmi ${env.FORMER_IMAGES_DOCKER_ID}", returnStdout: true, returnStatus: true)
-                            if (result.exitCode != 0) {
-                                echo "Error removing old image: ${result.output}"
+                            def result = sh(script: "docker rmi ${formerID}", returnStdout: true, returnStatus: true)
+                            if (result != 0) {
+                                echo "Error removing old image: ${result}"
                                 error "Failed to remove old image."
                             } else {
                                 echo "Successfully removed old image."
