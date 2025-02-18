@@ -359,3 +359,57 @@ input[type="text"] {
     margin: 0 auto;
   }
 }
+
+/* This is the tabs section*/
+.tab-container {
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid #ccc;
+}
+
+.tabs {
+  display: flex;
+  gap: 5px;
+}
+
+/* Tab styling */
+.tab, .add-tab-button {
+  padding: 10px 20px;
+  cursor: pointer;
+  border: 1px solid #ccc;
+  border-radius: 8px 8px 0 0;
+  background-color: #f1f1f1;
+  transition: background-color 0.3s;
+  font-size: 14px;
+}
+
+.tab:hover, .add-tab-button:hover {
+  background-color: #e0e0e0;
+}
+
+.tab.active {
+  background-color: #fff;
+  border-bottom: 2px solid #fff;
+  font-weight: bold;
+}
+
+.add-tab-button {
+  background-color: #d9edf7;
+  color: #31708f;
+}
+
+/* Tab content */
+.tab-content {
+  border: 1px solid #ccc;
+  padding: 20px;
+  border-radius: 0 8px 8px 8px;
+  background-color: #fff;
+}
+
+.tab-pane {
+  display: none;
+}
+
+.tab-pane:first-child {
+  display: block;
+}

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from io import StringIO
 import json
 import pickle
+import re
 import threading
 import time
 from urllib.parse import urlparse, parse_qs
@@ -20,6 +21,8 @@ import numpy as np
 
 import create_model
 import actuation
+from plot import Plot 
+import plot_manager
 
 
 
@@ -31,7 +34,7 @@ import actuation
 PATH = os.path.dirname(os.path.abspath(__file__))
 
 # Path of config file
-ConfigPath = 'config/current_config.json'
+ConfigPath = 'config/current_config_plot1.json'
 
 # global list of device and sensor ids
 DeviceAndSensorIdsMoisture = []
@@ -266,6 +269,54 @@ def getApiUrl(url, body):
 
 usock.routerGET("/api/getApiUrl", getApiUrl)
 
+# Currently choosen plot in UI
+def setPlot(url, body):
+    global ConfigPath
+
+    # Parse the query parameters from Body
+    parsed_data = parse_qs(body.decode('utf-8'))
+
+    # Get currentPlot
+    plot_manager.CurrentPlot = int(parsed_data.get('currentPlot', [])[0])
+
+    # Point to config file of current plot
+    ConfigPath = re.sub(r'plot\d+\.json$', f'plot{plot_manager.CurrentPlot }.json', ConfigPath)
+
+    # Get config from json and load data to vars
+    getConfigFromFile()
+
+    return 200, b"", []
+
+usock.routerPOST("/api/setPlot", setPlot)
+
+# When App starts it looks through fromer plot configuration and reloads them, also creates object of a class that represents plots
+def loadPlots(url, body):
+    # Call function in plot manager
+    amount = plot_manager.loadPlots()
+
+    response = {
+        "length": amount,
+        "status_code": 200
+    }
+
+    return response["status_code"], bytes(json.dumps(response), "utf8"), []
+
+usock.routerGET("/api/loadPlots", loadPlots)
+
+# Add a plot during runtine TODO: finish
+def addPlot(url, body):
+    # Call function in plot manager
+    next_number, newfilename = plot_manager.addPlot()
+
+    response = {
+        "plot_number": next_number,
+        "filename": newfilename,
+        "status_code": 200
+    }
+
+    return response["status_code"], bytes(json.dumps(response), "utf8"), []
+
+usock.routerGET("/api/addPlot", addPlot)
 
 # Get historical sensor values from WaziGates API
 def setConfig(url, body):
@@ -352,6 +403,7 @@ def setConfig(url, body):
 
 usock.routerPOST("/api/setConfig", setConfig)
 
+# Load config from file
 def getConfigFromFile():
     global DeviceAndSensorIdsMoisture
     global DeviceAndSensorIdsTemp
@@ -373,7 +425,7 @@ def getConfigFromFile():
     global Sensor_unit
 
 
-    if os.path.exists(ConfigPath):
+    if os.path.exists(plot_manager.Plots[plot_manager.CurrentPlot-1].configPath):
         with open(ConfigPath, 'r') as file:
             # Parse JSON from the file
             data = json.load(file)
@@ -585,9 +637,9 @@ def getHistoricalChartData(url, body):
     #data_flow = [] # TODO:later also show flow in vis
 
     for moisture in DeviceAndSensorIdsMoisture:
-        data_moisture.append(create_model.load_data_api(moisture, "sensors", Start_date))
+        data_moisture.append(create_model.load_data_api(moisture, "sensors", Start_date))#, CurrentPlot))
     for temp in DeviceAndSensorIdsTemp:
-        data_temp.append(create_model.load_data_api(temp, "sensors", Start_date))
+        data_temp.append(create_model.load_data_api(temp, "sensors", Start_date))#, CurrentPlot))
     # for flow in DeviceAndSensorIdsFlow:
     #     data_flow.append(create_model.load_data_api(flow, "actuators", Start_date))
     

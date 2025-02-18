@@ -23,7 +23,7 @@ The **Irrigation Prediction Application** is designed to predict soil moisture l
 ## System Requirements
 - **Supported OS:** WaziGateOS
 - **Required Hardware:** WaziGate, soil moisture sensor(s), temperature sensor(s)
-- **Optional Hardware:** Flow meter, pump actuated with relay
+- **Optional Hardware:** Flow meter and a pump actuated with relay, to conduct the actuation
 - **Software Dependencies:** None, comes as docker container with all dependencies included
 - **Internet Connection:** Required for retriving weather data and model updates
 

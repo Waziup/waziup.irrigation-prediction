@@ -18,12 +18,13 @@
     var waitForTraining = true;
     var timestamp = "";
     // Apex charts is rather slow in handeling many datapoints => needs to be restricted
-    var MaxValuesToBeDisplayed = 1000
-    let chart
-    var TrainingReadyCheck = 5000
+    var MaxValuesToBeDisplayed = 1000;
+    let chart;
+    var TrainingReadyCheck = 5000;
+    let tabCounter = 1;
 
 
-    // Event listers
+    // Event listeners
     document.addEventListener('DOMContentLoaded', function () {
       // Tooltips
       fetch('tooltips.json')  // Replace with the correct path to your JSON file
@@ -39,7 +40,123 @@
           });
         })
         .catch(error => console.error('Error loading tooltip text:', error));
+
+      // Get plots formerly saved
+      fetch(`../api/loadPlots`)
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.length == 0) {
+            // First Plot, added manually
+            document.getElementById('tab-1').addEventListener('click', () => {
+              switchTab(1);
+            });
+          } else {
+            newTab = document.getElementById('tab-1')
+            newTab.addEventListener('click', () => {
+              switchTab(1);
+            });
+            // Add the new tab to the tabs container
+            document.getElementById('tabs').appendChild(newTab);
+            // just create tabs amount
+            let lastTab = 1
+            for (let i = 2; i <= data.length; i++) {
+              addTab();
+              lastTab = i
+            }
+            switchTab(lastTab)
+          }
+          console.log("LoadPlots: ", data);
+        });
+
+      // Add plot when add button is clicked
+      document.getElementById('addTabButton').addEventListener('click', () => {
+        const tabId = ++tabCounter; // Increment tabCounter
+
+        // Create a new tab
+        const newTab = document.createElement('div');
+        newTab.id = `tab-${tabId}`;
+        newTab.className = 'tab';
+        newTab.textContent = `Plot ${tabId}`;
+        newTab.addEventListener('click', () => switchTab(tabId));
+
+        // Add the new tab to the tabs container
+        document.getElementById('tabs').appendChild(newTab);
+
+      // Add plot to backend
+      fetch(`../api/addPlot`)
+      .then((response) => response.json())
+      .then((data) => {
+        console.log("Next Plot was added with nr: ", data.next_number);
+      });
+
+        // Switch to the new tab
+        switchTab(tabId);
+      });
     });
+
+    function addTab(){
+      const tabId = ++tabCounter; // Increment tabCounter
+
+      // Create a new tab
+      const newTab = document.createElement('div');
+      newTab.id = `tab-${tabId}`;
+      newTab.className = 'tab';
+      newTab.textContent = `Plot ${tabId}`;
+      newTab.addEventListener('click', () => switchTab(tabId));
+
+      // Add the new tab to the tabs container
+      document.getElementById('tabs').appendChild(newTab);
+    }
+
+    function switchTab(tabId) {
+      // Remove active class from all tabs
+      document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+
+      // Hide all tab content and remove previous content
+      document.querySelectorAll('.tab-pane').forEach(content => content.remove());
+
+      // Activate the selected tab
+      const currentTab = document.getElementById(`tab-${tabId}`);
+      if (currentTab) {
+        currentTab.classList.add('active');
+      } else {
+        console.error(`Tab with id tab-${tabId} not found.`);
+      }
+
+      // API Call to set plot
+      fetch(`../api/setPlot`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: `currentPlot=${tabId}`
+      })
+        .then((response) => response.text())
+        .then((data) => console.log(data))
+        .catch((error) => console.error("Error:", error));
+
+      loadStuff()
+
+      // Reload with updated content
+      //fetchContentForTab(tabId);
+    }
+
+    function fetchContentForTab(tabId) {
+      const centerFullDiv = document.querySelector('center_full');
+    
+      if (centerFullDiv) {
+        // Store the original HTML structure of center_full
+        const originalContent = centerFullDiv.outerHTML;
+    
+        // Remove existing center_full
+        centerFullDiv.remove();
+    
+        // Reinsert the original structure inside its parent container
+        document.getElementById('tabContent').insertAdjacentHTML('beforeend', originalContent);
+      } else {
+        console.error(`center_full div not found.`);
+      }
+    }
 
     // Nav
     function goToSettings() {
@@ -105,6 +222,11 @@
         .then((response) => response.json())
         .then((data) => {
           if (data.data.config_present == true) {
+            set_button = document.getElementById('settings_btn');
+            set_button.classList.remove('highlight');
+            train_button = document.getElementById('train_btn');
+            train_button.className = 'button-cancel';
+            train_button.disabled = false;
             return true;
           } else {
             // TODO: do not display chart or do display without values
@@ -370,7 +492,7 @@
                     const annotations = seriesVisibility["Moisture in cbar (Soil Tension)"]
                       ? getSoilTensionAnnotations(chartData)
                       : [];
-                    
+
                     // Additional annotations from backend, like 
                     const additionalAnnotations = seriesVisibility["Moisture in cbar (Soil Tension)"]
                       ? chartData.annotations.yaxis
@@ -456,6 +578,7 @@
                       : [];
                   })(),
                 ],
+                xaxis: getMidnightAnnotations(chartData.timestamps), // Add midnight annotations here
                 legend: {
                   show: true, // Ensure the legend is always shown
                 },
@@ -477,6 +600,18 @@
           }
         })
         .catch((error) => console.error("Error fetching data:", error));
+    }
+
+    // Function to get midnight annotations
+    function getMidnightAnnotations(timestamps) {
+      days = 0
+      return timestamps
+        .filter((timestamp) => new Date(timestamp).getHours() === 0 && new Date(timestamp).getMinutes() === 0)
+        .map((midnight) => ({
+          x: formatTimestamp(midnight),
+          borderColor: '#FF5733', // Choose any color you like for midnight lines
+          strokeDashArray: 4, // Dashed lines
+        }));
     }
 
     // Get active series dynamically
@@ -715,96 +850,106 @@
       $("#sensor_list")
         .html('<img src="./loading.gif" /> Loading...')
         .fadeIn();
-      loadStuff();
+      //loadStuff();
     });
   </script>
 </head>
 
 <body>
-  <div class="action-buttons">
-    <button id="settings_btn" class="settings" type="button" onclick="goToSettings()">
-      Settings
-    </button>
-    <button id="train_btn" class="training" type="button" onclick="startTraining()">
-      Start Training
-    </button>
+  <div class="tab-container">
+    <div id="tabs" class="tabs">
+      <button id="tab-1" class="tab">Plot 1</button>
+    </div>
+    <div>
+      <button id="addTabButton" class="add-tab-button">+ Add Plot</button>
+    </div>
   </div>
-  <div class="center_full">
-    <div class="text-content">
-      <img src="./logo_irrigation_prediction.jpg" class="logo-content" alt="Irrigation Prediction Logo" />
-      <h1>WaziUp Irrigation Prediction</h1>
-      <p>
-        This application predicts soil moisture values for sensors attached to
-        the WaziGate.
-      </p>
+  <div class="tabContent" class="tab-content">
+    <div class="action-buttons">
+      <button id="settings_btn" class="settings" type="button" onclick="goToSettings()">
+        Settings
+      </button>
+      <button id="train_btn" class="training" type="button" onclick="startTraining()">
+        Start Training
+      </button>
     </div>
-
-    <div class="quick-view-container">
-      <div class="sensor-container">
-        <h3 class="sensor-heading">Sensor Readings
-          <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorTooltip">help
-            <span class="tooltiptext" id="sensorTooltip"></span>
-          </span>
-        </h3>
-        <div class="sensor-value">
-          <span class="description">Temperature:</span>
-          <span id="temp-value">-- °C</span>
-        </div>
-        <div class="sensor-value">
-          <span class="description">Soil tension:</span>
-          <span id="tension-value">-- cb</span>
-        </div>
-        <div class="sensor-value">
-          <span class="description">Soil humidity:</span>
-          <span id="humidity-value">-- %</span>
-        </div>
+    <div class="center_full">
+      <div class="text-content">
+        <img src="./logo_irrigation_prediction.jpg" class="logo-content" alt="Irrigation Prediction Logo" />
+        <h1>WaziUp Irrigation Prediction</h1>
+        <p>
+          This application predicts soil moisture values for sensors attached to
+          the WaziGate.
+        </p>
       </div>
 
-      <div class="irrigation-container">
-        <h3 class="irrigation-heading">Irrigation Status
-          <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationTooltip">help
-            <span class="tooltiptext" id="irrigationTooltip"></span>
-          </span>
-        </h3>
-        <div class="irrigation-value">
-          <span class="description">Pump Status:</span>
-          <span id="active_passiv" class="value_active">Active</span>
+      <div class="quick-view-container">
+        <div class="sensor-container">
+          <h3 class="sensor-heading">Sensor Readings
+            <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorTooltip">help
+              <span class="tooltiptext" id="sensorTooltip"></span>
+            </span>
+          </h3>
+          <div class="sensor-value">
+            <span class="description">Temperature:</span>
+            <span id="temp-value">-- °C</span>
+          </div>
+          <div class="sensor-value">
+            <span class="description">Soil tension:</span>
+            <span id="tension-value">-- cb</span>
+          </div>
+          <div class="sensor-value">
+            <span class="description">Soil humidity:</span>
+            <span id="humidity-value">-- %</span>
+          </div>
         </div>
-        <div class="irrigation-value">
-          <label for="irrigation-value-input">Irrigation amount in liters</label>
-          <input id="irrigation_value_form" type="number" name="irrigation_value" value="10" />
-        </div>
-        <div class="action-buttons">
-          <button id="schedule_irrigation" class="settings" type="button" onclick="irrigateManually()">
-            Schedule an Irrigation
-          </button>
+
+        <div class="irrigation-container">
+          <h3 class="irrigation-heading">Irrigation Status
+            <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationTooltip">help
+              <span class="tooltiptext" id="irrigationTooltip"></span>
+            </span>
+          </h3>
+          <div class="irrigation-value">
+            <span class="description">Pump Status:</span>
+            <span id="active_passiv" class="value_active">Active</span>
+          </div>
+          <div class="irrigation-value">
+            <label for="irrigation-value-input">Irrigation amount in liters</label>
+            <input id="irrigation_value_form" type="number" name="irrigation_value" value="10" />
+          </div>
+          <div class="action-buttons">
+            <button id="schedule_irrigation" class="settings" type="button" onclick="irrigateManually()">
+              Schedule an Irrigation
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-    <div class="chart-container">
-      <p>Raw captured sensor values:
-        <span class="tooltip material-symbols-outlined" data-tooltip-id="chart_hist_tooltip">help
-          <span class="tooltiptext" id="chart_hist_tooltip"></span>
-        </span>
-      </p>
-      <div id="chart_hist"></div>
-    </div>
-    <div class="chart-container">
-      <p>Data as input for machine learning procedure:
-        <span class="tooltip material-symbols-outlined" data-tooltip-id="chart_train_data_tooltip">help
-          <span class="tooltiptext" id="chart_train_data_tooltip"></span>
-        </span>
-      </p>
-      <div id="chart_train_data"></div>
-    </div>
-    <div class="chart-container">
-      <p>Predicted sensor values:
-        <span class="tooltip material-symbols-outlined" data-tooltip-id="chart_pred_tooltip">help
-          <span class="tooltiptext" id="chart_pred_tooltip"></span>
-        </span>
-      </p>
-      <div id="chart_pred"></div>
-      <p id="timestamp_txt"></p>
+      <div class="chart-container">
+        <p>Raw captured sensor values:
+          <span class="tooltip material-symbols-outlined" data-tooltip-id="chart_hist_tooltip">help
+            <span class="tooltiptext" id="chart_hist_tooltip"></span>
+          </span>
+        </p>
+        <div id="chart_hist"></div>
+      </div>
+      <div class="chart-container">
+        <p>Data as input for machine learning procedure:
+          <span class="tooltip material-symbols-outlined" data-tooltip-id="chart_train_data_tooltip">help
+            <span class="tooltiptext" id="chart_train_data_tooltip"></span>
+          </span>
+        </p>
+        <div id="chart_train_data"></div>
+      </div>
+      <div class="chart-container">
+        <p>Predicted sensor values:
+          <span class="tooltip material-symbols-outlined" data-tooltip-id="chart_pred_tooltip">help
+            <span class="tooltiptext" id="chart_pred_tooltip"></span>
+          </span>
+        </p>
+        <div id="chart_pred"></div>
+        <p id="timestamp_txt"></p>
+      </div>
     </div>
   </div>
 </body>

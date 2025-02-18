@@ -54,6 +54,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 
 # local
 import main
+import plot_manager
 
 
 # URL of API to retrive devices
@@ -87,7 +88,7 @@ Forcast_horizon = 5 #days
 To_be_dropped = ['minute', 'Timestamp','gradient','grouped_soil','grouped_soil_temp','Winddirection','month','day_of_year','date']
 
 
-# Mapping to identify models TODO: check for correctness
+# Mapping to identify models
 Model_mapping = {
     'LinearRegression': 'lr',
     'Lasso': 'lasso',
@@ -155,7 +156,8 @@ def read_config():
     global LoadDataFromCSV
 
     # Specify the path to the JSON file you want to read
-    json_file_path = 'config/current_config.json'
+    json_file_path = plot_manager.Plots[plot_manager.CurrentPlot-1].configPath
+    
 
     try:
         with open(CSVFile, "r") as file:
@@ -234,7 +236,7 @@ def get_token():
             else:
                 print("Request failed with status code:", response.status_code)
         except requests.exceptions.RequestException as e:
-            # Handle request exceptions (e.g., connection errors)
+            # Handle request exceptions (e.g., connection errors)https://soundcloud.com/dj-gysi/dj-gysi-verfassungsschutz
             print("Request error:", e)
             
             return "", e #TODO: intruduce error handling!
@@ -301,13 +303,13 @@ def load_data(path):
     return data
 
 # Load from wazigate API
-def load_data_api(sensor_name, type, from_timestamp):#, token)
+def load_data_api(sensor_name, type, from_timestamp):#, plot):#, token)
     global ApiUrl
     global Timezone
     global Current_config
 
     # Load config to obtain GPS coordinates
-    Current_config = read_config()
+    Current_config = read_config()#plot)
 
     # Token
     load_dotenv()
@@ -1312,8 +1314,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        exclude=['lar']
-        #include=['xgboost', 'llar', 'catboost'] #DEBUG
+        #exclude=['lar']
+        include=['xgboost', 'llar', 'catboost'] #DEBUG
     )
 
     return re_exp, best_re
@@ -2123,7 +2125,7 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
     tuner = Hyperband(
         model_builder_with_shape(Model_functions[best_model_nn.model_name], best_model_nn.shape),
         objective='val_mae',
-        max_epochs=50,              # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
+        max_epochs=10,              # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
         factor=5,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
         hyperband_iterations=1,     # Limits the number full hyperband runs
         directory='hyperband_dir',
@@ -2137,7 +2139,7 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
 
     tuner.search(X_train_scaled, 
                     y_train, 
-                    epochs=hp.Int('epochs', 10, 50), #10 100 DEBUG
+                    epochs=hp.Int('epochs', 5, 50), #10 50 DEBUG
                     batch_size=32, 
                     validation_split=0.2,
                     callbacks=[time_limit_callback]  # Add the time limit callback here TODO: fix: it is not working
