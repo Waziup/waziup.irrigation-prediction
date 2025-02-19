@@ -33,9 +33,6 @@ import plot_manager
 # Path to the root of the code
 PATH = os.path.dirname(os.path.abspath(__file__))
 
-# Path of config file
-ConfigPath = 'config/current_config_plot1.json'
-
 # global list of device and sensor ids
 DeviceAndSensorIdsMoisture = []
 DeviceAndSensorIdsTemp = []
@@ -96,12 +93,7 @@ Saturation = 0
 # Array of active threads TODO: if training started kill other threads.
 Threads = []
 ThreadId = 0
-Training_thread = None
-Prediction_thread = None
-Restart_time = 1800 # DEBUG
-
-TrainingFinished = False
-CurrentlyTraining = False
+Restart_time = 1800 # DEBUG 1800 ~ 30 min in s
 
 # Load variables of training from file, to debug actuation part
 Perform_training = True
@@ -271,16 +263,14 @@ usock.routerGET("/api/getApiUrl", getApiUrl)
 
 # Currently choosen plot in UI
 def setPlot(url, body):
-    global ConfigPath
-
     # Parse the query parameters from Body
     parsed_data = parse_qs(body.decode('utf-8'))
 
     # Get currentPlot
-    plot_manager.CurrentPlot = int(parsed_data.get('currentPlot', [])[0])
+    plot_manager.setCurrentPlot(int(parsed_data.get('currentPlot', [])[0]))
 
     # Point to config file of current plot
-    ConfigPath = re.sub(r'plot\d+\.json$', f'plot{plot_manager.CurrentPlot }.json', ConfigPath)
+    plot_manager.Plots[plot_manager.CurrentPlot-1].configPath = re.sub(r'plot\d+\.json$', f'plot{plot_manager.CurrentPlot }.json', plot_manager.getCurrentConfig())
 
     # Get config from json and load data to vars
     getConfigFromFile()
@@ -395,7 +385,7 @@ def setConfig(url, body):
     }
 
     # Save the JSON data to the file
-    with open(ConfigPath, 'w') as json_file:
+    with open(plot_manager.getCurrentConfig(), 'w') as json_file:
         json.dump(data, json_file, indent=4)
 
 
@@ -424,9 +414,9 @@ def getConfigFromFile():
     global Saturation
     global Sensor_unit
 
-
-    if os.path.exists(plot_manager.Plots[plot_manager.CurrentPlot-1].configPath):
-        with open(ConfigPath, 'r') as file:
+    currentConfigPath = plot_manager.getCurrentConfig()
+    if os.path.exists(currentConfigPath):
+        with open(currentConfigPath, 'r') as file:
             # Parse JSON from the file
             data = json.load(file)
 
@@ -531,7 +521,7 @@ def returnConfig(url, body):
 usock.routerGET("/api/returnConfig", returnConfig)
 
 def checkConfigPresent(url, body):
-    if os.path.exists(ConfigPath):
+    if os.path.exists(plot_manager.getCurrentConfig()):
         response_data = {"config_present": True}
         status_code = 200
         getConfigFromFile()
@@ -717,10 +707,11 @@ def getPredictionChartData(url, body):
         f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S%z'))
     f_data_moisture = data_pred["smoothed_values"].tolist()
 
+    # Quick and dirty adjusting predictions to match sensor values TODO: right approach?
     adjustment = 1
     adjust_threshold = lambda Threshold, adjustment: Threshold - adjustment if Sensor_kind == "tension" else Threshold + adjustment
 
-    # Add a horizontal line at Threshold # TODO: add direction of gradient
+    # Add a horizontal line at Threshold
     annotations = {
         'yaxis': [
             {
@@ -812,7 +803,7 @@ usock.routerGET("/api/getSensorKind", getSensorKind)
 
 # Frontend polls this to reload page when training is ready => only active for first round of training
 def isTrainingReady(url, body):
-    response_data = {"isTrainingFinished": TrainingFinished}
+    response_data = {"isTrainingFinished": plot_manager.getCurrentPlot().TrainingFinished}
 
     return 200, bytes(json.dumps(response_data), "utf8"), []
 
@@ -890,11 +881,11 @@ def workerToPredict():
             time.sleep(Restart_time)  # Retry after 30 minute if there is an error
 
 # Starts a thread that runs prediction
-def startPrediction():
+def startPrediction(currentPlot):
     global ThreadId
     global Prediction_thread
 
-    if not CurrentlyTraining:
+    if not currentPlot.CurrentlyTraining:
         # Create a new thread for training
         Prediction_thread = threading.Thread(target=workerToPredict)
         ThreadId += 1
@@ -907,14 +898,11 @@ def startPrediction():
 
     
 # Thread that runs training
-def workerToTrain(thread_id, url, startTrainingNow):
-    global TrainingFinished
-    global CurrentlyTraining
-
+def workerToTrain(thread_id, currentPlot, url, startTrainingNow):
     def time_until_noon(train_period_days):
         """Calculate the time difference from now until the next noon."""
         now = datetime.now()
-        noon_today = now.replace(hour=12, minute=0, second=0, microsecond=0)
+        noon_today = now.replace(hour=12, minute=0, second=0, microsecond=0) # TODO: adjust time so that 
         if now >= noon_today:
             # If it's already past noon, calculate for the next day
             noon_today += timedelta(days=train_period_days)
@@ -935,7 +923,7 @@ def workerToTrain(thread_id, url, startTrainingNow):
 
             if Perform_training:
                 # Call create model function
-                currentSoilTension, threshold_timestamp, predictions = create_model.main()
+                currentSoilTension, threshold_timestamp, predictions = create_model.main(currentPlot)
 
                 # Create object to save
                 variables_to_save = {
@@ -954,23 +942,22 @@ def workerToTrain(thread_id, url, startTrainingNow):
                 threshold_timestamp = loaded_variables['threshold_timestamp']
                 predictions = loaded_variables['predictions']
 
-            TrainingFinished = True
-            CurrentlyTraining = False
+            currentPlot.TrainingFinished = True
+            currentPlot.CurrentlyTraining = False
             startTrainingNow = False
 
             end_time = datetime.now().replace(microsecond=0)
             duration = end_time - start_time
             print("Training finished at: ", end_time, "The duration was: ", duration)
 
-            # Call routine to irrigate
+            # Call routine to irrigate TODO:plots
             if len(DeviceAndSensorIdsFlow) > 0: 
                 actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount, Sensor_kind)
 
             # Start thread that creates predictions periodically
-            if Prediction_thread is None:
-                startPrediction()
-            # if not Prediction_thread.is_alive():
-            #     startPrediction()
+            if currentPlot.Prediction_thread is None:
+                startPrediction(currentPlot)
+
         except Exception as e:
             print(f"Training error: {e}. Retrying after 30 minute.")
             time.sleep(Restart_time)  # Retry after 30 minute if there is an error
@@ -978,28 +965,27 @@ def workerToTrain(thread_id, url, startTrainingNow):
 # Starts a thread that runs training
 def startTraining(url, body):
     global ThreadId
-    global TrainingFinished
-    global CurrentlyTraining
-    global Training_thread
 
-    if not CurrentlyTraining:
+    currentPlot = plot_manager.getCurrentPlot()
+
+    if not currentPlot.CurrentlyTraining:
         # Stop/kill all other threads for training a model
-        if Training_thread is not None:
-            Training_thread.terminate()
+        if currentPlot.Training_thread is not None:
+            currentPlot.Training_thread.terminate()
 
         # Reset flags for a new round
-        TrainingFinished = False
-        CurrentlyTraining = True
+        currentPlot.TrainingFinished = False
+        currentPlot.CurrentlyTraining = True
 
         # Create a new thread for training
-        Training_thread = threading.Thread(target=workerToTrain, args=(ThreadId, url, True))
+        currentPlot.Training_thread = threading.Thread(target=workerToTrain, args=(ThreadId, currentPlot, url, True))
         ThreadId += 1
 
         # Append thread to list
-        Threads.append(Training_thread)
+        Threads.append(currentPlot.Training_thread)
 
         # Start the thread
-        Training_thread.start()
+        currentPlot.Training_thread.start()
 
     return 200, b"", []
 

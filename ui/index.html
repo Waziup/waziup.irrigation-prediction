@@ -20,7 +20,7 @@
     // Apex charts is rather slow in handeling many datapoints => needs to be restricted
     var MaxValuesToBeDisplayed = 1000;
     let chart;
-    var TrainingReadyCheck = 5000;
+    var TrainingReadyCheck = 10000;
     let tabCounter = 1;
 
 
@@ -58,12 +58,12 @@
             // Add the new tab to the tabs container
             document.getElementById('tabs').appendChild(newTab);
             // just create tabs amount
-            let lastTab = 1
+            //let lastTab = 1
             for (let i = 2; i <= data.length; i++) {
               addTab();
-              lastTab = i
+              //lastTab = i
             }
-            switchTab(lastTab)
+            switchTab(1)
           }
           console.log("LoadPlots: ", data);
         });

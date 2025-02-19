@@ -4,6 +4,7 @@ import re
 
 Plots = []  # This stores all plots
 CurrentPlot = 1
+ConfigPath = 'config/current_config_plot1.json' #init with first plot
 
 
 # When App starts it looks through fromer plot configuration and reloads them, also creates object of a class that represents plots
@@ -52,6 +53,7 @@ def addPlot():
 
     return next_number, newfilename
 
+# Creates a new 
 def create_new_plot():
     global Plots
     folder_path = "config/"
@@ -64,5 +66,20 @@ def create_new_plot():
         plot_obj = Plot(index, file)
         Plots.append(plot_obj)
 
+# Just access 
 def getPlots():
     return Plots  # Returns the list of Plot objects
+
+def getCurrentConfig():
+    return Plots[CurrentPlot-1].configPath
+
+def getCurrentPlot():
+    return Plots[CurrentPlot-1]
+
+def setCurrentConfig(path):
+    Plots[CurrentPlot-1].configPath = path
+
+def setCurrentPlot(nr):
+    global CurrentPlot
+
+    CurrentPlot = nr
