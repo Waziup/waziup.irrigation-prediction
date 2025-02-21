@@ -14,7 +14,6 @@ import logging
 import os
 from dateutil import parser
 import subprocess
-from dotenv import load_dotenv
 import pycaret 
 #from pycaret.time_series import *
 from pycaret.regression import *
@@ -24,10 +23,6 @@ import matplotlib.pyplot as plt
 #import missingno as msno 
 import sys
 import pytz
-import requests
-import urllib
-from geopy.geocoders import Nominatim
-from timezonefinder import TimezoneFinder
 
 # new imports nn
 import tensorflow
@@ -55,23 +50,10 @@ from tensorflow.keras.callbacks import EarlyStopping
 # local
 import main
 import plot_manager
-
-
-# URL of API to retrive devices
-ApiUrl = ""#"http://wazigate/" # Production mode
-
-Token = None
-
-# Initialize an empty dictionary to store the current config
-Current_config = {}
+from utils import NetworkUtils
 
 # Current timezone
 Timezone = ''
-
-# Extracted variables from Current_config
-DeviceAndSensorIdsMoisture = []
-DeviceAndSensorIdsTemp = []
-DeviceAndSensorIdsFlow = []
 
 # Rolling mean window
 RollingMeanWindowData = 15
@@ -83,9 +65,11 @@ Sample_rate = 60
 # Forecast horizon TODO: add config or adjust automa
 Forcast_horizon = 5 #days
 
-# Created features that are dropped later
-#To_be_dropped = ['Timestamp', 'minute', 'grouped_soil', 'grouped_soil_temp', 'gradient']
-To_be_dropped = ['minute', 'Timestamp','gradient','grouped_soil','grouped_soil_temp','Winddirection','month','day_of_year','date']
+# Created features that are dropped later -> TODO: evaluate this!!!
+To_be_dropped = ['minute', 'Timestamp', 'gradient', 
+                 'grouped_soil', 'grouped_soil_temp', 
+                 'Winddirection', 'month', 'day_of_year', 
+                 'date']
 
 
 # Mapping to identify models
@@ -118,22 +102,6 @@ Model_mapping = {
     'DummyRegressor': 'dummy'
 }
 
-# predictions 
-Data = pd.DataFrame
-Data_w = pd.DataFrame
-Predictions = pd.DataFrame
-Threshold_timestamp = ""
-Use_pycaret = True
-Tuned_best = None
-Best_exp = None
-
-# Load data from CSV, is set if there is a file in the root directory
-CSVFile = "binned_removed_new_for_app_ww.csv"
-LoadDataFromCSV = False # DEBUG
-
-# Load former irrigations from file "data/irrigations.json" DEBUG
-Load_irrigations_from_file = False
-
 # Restrict time to training
 class TimeLimitCallback(Callback):
     def __init__(self, max_time_seconds):
@@ -147,230 +115,6 @@ class TimeLimitCallback(Callback):
         if elapsed_time > self.max_time_seconds:
             self.model.stop_training = True
             print(f"Training stopped after {self.max_time_seconds} seconds")
-
-
-def read_config():
-    global DeviceAndSensorIdsMoisture
-    global DeviceAndSensorIdsTemp
-    global DeviceAndSensorIdsFlow
-    global LoadDataFromCSV
-
-    # Specify the path to the JSON file you want to read
-    json_file_path = plot_manager.Plots[plot_manager.CurrentPlot-1].configPath
-    
-
-    try:
-        with open(CSVFile, "r") as file:
-            # Perform operations on the file
-            data = pd.read_csv(file, header=0)
-            DeviceAndSensorIdsMoisture = []
-            DeviceAndSensorIdsTemp = []
-            DeviceAndSensorIdsFlow = []
-            
-            # create array with sensors strings
-            for col in data.columns:
-                if col.startswith("tension"):
-                    DeviceAndSensorIdsMoisture.append(col)
-                elif col.startswith("soil_temp"):
-                    DeviceAndSensorIdsTemp.append(col)
-            LoadDataFromCSV = True
-            # This is not implemented: DeviceAndSensorIdsFlow = config["DeviceAndSensorIdsFlow"]
-    except FileNotFoundError:
-        # Read the JSON data from the file
-        with open(json_file_path, 'r') as json_file:
-            config = json.load(json_file)
-
-        DeviceAndSensorIdsMoisture = config["DeviceAndSensorIdsMoisture"]
-        DeviceAndSensorIdsTemp = config["DeviceAndSensorIdsTemp"]
-        if "DeviceAndSensorIdsFlow" in config:
-            DeviceAndSensorIdsFlow = config["DeviceAndSensorIdsFlow"]
-    except Exception as e:
-        print("An error occurred: No devices are set in settings, there is also no local config file.", e)
-
-    return config
-
-# not ready
-def get_token():
-    global Token
-    # Generate token to fetch data from another gateway
-    if ApiUrl.startswith('http://wazigate/'):
-        print('There is no token needed, fetch data from local gateway.')
-    # Get token, important for non localhost devices
-    else:
-        # curl -X POST "http://192.168.189.2/auth/token" -H "accept: application/json" -d "{\"username\": \"admin\", \"password\": \"loragateway\"}"
-        token_url = ApiUrl + "auth/token"
-        
-        # Parse the URL
-        parsed_token_url = urllib.parse.urlsplit(token_url)
-        
-        # Encode the query parameters
-        encoded_query = urllib.parse.quote(parsed_token_url.query, safe='=&')
-        
-        # Reconstruct the URL with the encoded query
-        encoded_url = urllib.parse.urlunsplit((parsed_token_url.scheme, 
-                                            parsed_token_url.netloc, 
-                                            parsed_token_url.path, 
-                                            encoded_query, 
-                                            parsed_token_url.fragment))
-        
-        # Define headers for the POST request
-        headers = {
-            'accept': 'application/json',
-            #'Content-Type': 'application/json',  # Make sure to set Content-Type
-        }
-        
-        # Define data for the GET request
-        data = {
-            'username': 'admin',
-            'password': 'loragateway',
-        }
-
-        try:
-            # Send a GET request to the API
-            response = requests.post(encoded_url, headers=headers, json=data)
-
-            # Check if the request was successful (status code 200)
-            if response.status_code == 200:
-                # The response content contains the data from the API
-                Token = response.json()
-            else:
-                print("Request failed with status code:", response.status_code)
-        except requests.exceptions.RequestException as e:
-            # Handle request exceptions (e.g., connection errors)https://soundcloud.com/dj-gysi/dj-gysi-verfassungsschutz
-            print("Request error:", e)
-            
-            return "", e #TODO: intruduce error handling!
-        
-def load_latest_data_api(sensor_name, type):#, token)
-    global ApiUrl
-
-    # Token
-    load_dotenv()
-    ApiUrl = os.getenv('API_URL')
-
-    if ApiUrl.startswith('http://wazigate/'):
-        print('There is no token needed, fetch data from local gateway.')
-    elif Token != None:
-        print('There is no token needed, already present.')
-    # Get token, important for non localhost devices
-    else:
-        get_token()
-
-    # Create URL for API call e.g.:curl -X GET "http://192.168.189.15/devices/669780aa68f319066a12444a/sensors/6697875968f319066a12444d/value" -H "accept: application/json"
-    api_url = ApiUrl + "devices/" + sensor_name.split('/')[0] + "/" + type + "/" + sensor_name.split('/')[1] + "/value"
-    # Parse the URL
-    parsed_url = urllib.parse.urlsplit(api_url)
-
-    # Encode the query parameters
-    encoded_query = urllib.parse.quote(parsed_url.query, safe='=&')
-
-    # Reconstruct the URL with the encoded query
-    encoded_url = urllib.parse.urlunsplit((parsed_url.scheme, 
-                                            parsed_url.netloc, 
-                                            parsed_url.path, 
-                                            encoded_query, 
-                                            parsed_url.fragment))
-    
-    # Define headers for the GET request
-    headers = {
-        'Authorization': f'Bearer {Token}',
-    }
-
-    try:
-        # Send a GET request to the API
-        response = requests.get(encoded_url, headers=headers)
-
-        # Check if the request was successful (status code 200)
-        if response.status_code == 200:
-            # The response content contains the data from the API
-            response_ok = response.json()
-        else:
-            print("Request failed with status code:", response.status_code)
-            print("Response content:", response.text)
-            response_ok = None
-    except requests.exceptions.RequestException as e:
-        # Handle request exceptions (e.g., connection errors)
-        print("Request error:", e)
-        return "Error in 'load_latest_data_api()'! ", e #TODO: intruduce error handling!
-    
-    return response_ok
-
-# Load from CSV file
-def load_data(path):
-    # creating a data frame
-    data = pd.read_csv("binned_removed.csv",header=0)
-    print(data.head())
-    return data
-
-# Load from wazigate API
-def load_data_api(sensor_name, type, from_timestamp):#, plot):#, token)
-    global ApiUrl
-    global Timezone
-    global Current_config
-
-    # Load config to obtain GPS coordinates
-    Current_config = read_config()#plot)
-
-    # Token
-    load_dotenv()
-    ApiUrl = os.getenv('API_URL')
-
-    # Convert timestamp
-    if not isinstance(from_timestamp, str):
-        from_timestamp = from_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-
-    # Get timezone if no information avalable
-    if Timezone == '':
-        Timezone = get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"])
-
-    # Correct timestamp for timezone => TODO: here is an ERROR, timezone var is not available in first start
-    from_timestamp = (datetime.datetime.strptime(from_timestamp, "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(hours=get_timezone_offset(Timezone))).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-    
-    if ApiUrl.startswith('http://wazigate/'):
-        print('There is no token needed, fetch data from local gateway.')
-    elif Token != None:
-        print('There is no token needed, already present.')
-    # Get token, important for non localhost devices
-    else:
-        get_token()
-
-
-    # Create URL for API call
-    api_url = ApiUrl + "devices/" + sensor_name.split('/')[0] + "/" + type + "/" + sensor_name.split('/')[1] + "/values" + "?from=" + from_timestamp
-    # Parse the URL
-    parsed_url = urllib.parse.urlsplit(api_url)
-
-    # Encode the query parameters
-    encoded_query = urllib.parse.quote(parsed_url.query, safe='=&')
-
-    # Reconstruct the URL with the encoded query
-    encoded_url = urllib.parse.urlunsplit((parsed_url.scheme, 
-                                            parsed_url.netloc, 
-                                            parsed_url.path, 
-                                            encoded_query, 
-                                            parsed_url.fragment))
-    
-    # Define headers for the GET request
-    headers = {
-        'Authorization': f'Bearer {Token}',
-    }
-
-    try:
-        # Send a GET request to the API
-        response = requests.get(encoded_url, headers=headers)
-
-        # Check if the request was successful (status code 200)
-        if response.status_code == 200:
-            # The response content contains the data from the API
-            response_ok = response.json()
-        else:
-            print("Request failed with status code:", response.status_code) 
-    except requests.exceptions.RequestException as e:
-        # Handle request exceptions (e.g., connection errors)
-        print("Request error:", e)
-        return "", e #TODO: intruduce error handling!
-    
-    return response_ok
 
 # Resample and interpolate
 def check_gaps(data):
@@ -411,48 +155,23 @@ def remove_large_gaps(df, col, gap_threshold = 6):
     
     return df_filtered
 
-# Get offset to UTC time
-def get_timezone_offset(timezone_str):
-    timezone = pytz.timezone(timezone_str)
-    current_time = datetime.datetime.now(tz=timezone)
-
-    utc_offset = current_time.utcoffset().total_seconds() / 3600.0
-
-    return utc_offset
-
-# Get timezone string
-def get_timezone(latitude_str, longitude_str):
-    # Convert to floats
-    latitude = float(latitude_str)
-    longitude = float(longitude_str)
-
-    geolocator = Nominatim(user_agent="timezone_finder")
-    location = geolocator.reverse((latitude, longitude), language="en")
-    
-    # Extract timezone using timezonefinder
-    timezone_finder = TimezoneFinder()
-    timezone_str = timezone_finder.timezone_at(lng=longitude, lat=latitude)
-    
-    return timezone_str
-
 # Get historical values from open-meteo TODO: include timezone service: https://stackoverflow.com/questions/16086962/how-to-get-a-time-zone-from-a-location-using-latitude-and-longitude-coordinates
-def get_historical_weather_api(data):
-    global Data_w
-
-    # TODO: remove that one day overlapping data
-    if Data_w.empty:
+def get_historical_weather_api(data, plot):
+    # TODO: remove that one day: overlapping data
+    if plot.data_w.empty:
         first_day_minus_one_str = (data.index[0] - timedelta(days = 1)).strftime("%Y-%m-%d")
     else:
-        first_day_minus_one_str = (Data_w.index[-1] - timedelta(days = 1)).strftime("%Y-%m-%d")
+        first_day_minus_one_str = (plot.data_w.index[-1] - timedelta(days = 1)).strftime("%Y-%m-%d")
 
-    #data_w_former_end = Data_w.index[-1]
+    #plot.data_w_former_end = plot.data_w.index[-1]
 
     # need to add one day, overlapping have to be cut off later => useless because data is not available to fetch via api
     last_date = data.index[-1]
     last_date_str = last_date.strftime("%Y-%m-%d")
 
-    lat = Current_config["Gps_info"]["lattitude"]
-    long = Current_config["Gps_info"]["longitude"]
+    # TODO: save in instance of specific plot as [] not string :|
+    lat = plot.gps_info.split(',')[0].lstrip()
+    long = plot.split(',')[1].lstrip()
 
     url = (
         f'https://archive-api.open-meteo.com/v1/era5'
@@ -493,29 +212,29 @@ def get_historical_weather_api(data):
     data_w_fetched = convert_cols(data_w_fetched)
 
     # If empty
-    if Data_w.empty:
+    if plot.data_w.empty:
         # Set as global
-        Data_w = data_w_fetched
+        plot.data_w = data_w_fetched
     # If it is the same
-    elif data_w_fetched.index[-1] == Data_w.index[-1]:
-        return Data_w
+    elif data_w_fetched.index[-1] == plot.data_w.index[-1]:
+        return plot.data_w
     # Concat data
     else:
         # Merge former historical weather data and fetched one into one dataframe
-        Data_w = pd.concat([Data_w.loc[Data_w.index[0]:],
-                            data_w_fetched.loc[Data_w.index[-1] + 
+        plot.data_w = pd.concat([plot.data_w.loc[plot.data_w.index[0]:],
+                            data_w_fetched.loc[plot.data_w.index[-1] + 
                                             timedelta(minutes=Sample_rate) 
                                             : data.index[-1]]
                                             ])
 
-    return Data_w
+    return plot.data_w
 
 # Get weather forecast from open-meteo
-def get_weather_forecast_api(start_date, end_date):
+def get_weather_forecast_api(start_date, end_date, plot):
 
     # Timezone and geo_location
-    lat = Current_config["Gps_info"]["lattitude"]
-    long = Current_config["Gps_info"]["longitude"]
+    lat = plot.gps_info.split(',')[0].lstrip()
+    long = plot.split(',')[1].lstrip()
 
     # Define the API URL for weather forecast
     url = (
@@ -655,9 +374,9 @@ def soil_tension_to_volumetric_water_content_spline(soil_tension, soil_water_ret
     # Clip the result to ensure it remains within the valid range [0, 1]
     return np.clip(interpolated_water_content, 0, 1)
 
-def add_volumetric_col_to_df(df, col_name):
+def add_volumetric_col_to_df(df, col_name, plot):
     # Iterate over the rows of the dataframe and calculate volumetric water content
-    soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in Current_config['Soil_water_retention_curve']]
+    soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in plot.config['Soil_water_retention_curve']]
     # Sort the soil-water retention curve points by soil tension in ascending order => TODO: NOT EFFICIENT HERE, move out
     sorted_curve = sorted(soil_water_retention_tupel_list, key=lambda x: x[0])
     for index, row in df.iterrows():
@@ -669,13 +388,13 @@ def add_volumetric_col_to_df(df, col_name):
 
     return df
 
-def calc_volumetric_water_content_single_value(soil_tension_value):
-    global Current_config
+# Calculate a single soil tension value to VWC 
+def calc_volumetric_water_content_single_value(soil_tension_value, currentPlot):
     # Check config beeing loaded, otherwise read it
-    if 'Current_config' not in globals() and 'Soil_water_retention_curve' not in globals()['Current_config']:
-        Current_config = read_config()
+    if not currentPlot.config:
+        currentPlot.config = currentPlot.read_config() # this is just for the case of returning to index, after settings was created/changed
     # Iterate over the rows of the dataframe and calculate volumetric water content
-    soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in Current_config['Soil_water_retention_curve']]
+    soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in currentPlot.config['Soil_water_retention_curve']]
     # Sort the soil-water retention curve points by soil tension in ascending order => TODO: NOT EFFICIENT HERE, move out
     sorted_curve = sorted(soil_water_retention_tupel_list, key=lambda x: x[0])
     # Calculate volumetric water content
@@ -683,6 +402,7 @@ def calc_volumetric_water_content_single_value(soil_tension_value):
 
     return volumetric_water_content
 
+# This function will align values sensor values with weather data from API -> not used any more
 def align_retention_curve_with_api(data, data_weather_api):
     soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in Current_config['Soil_water_retention_curve']]
     # Sort the soil-water retention curve points by soil tension in ascending order => TODO: NOT EFFICIENT HERE, move out
@@ -698,8 +418,8 @@ def align_retention_curve_with_api(data, data_weather_api):
     return modified_curve
 
 # TODO: more sophisticated approach needed: needs to learn from former => introduce model, is now excluded when flow meter is installed
-def add_pump_state(data):
-    slope = float(Current_config["Slope"])
+def add_pump_state(data, plot):
+    slope = plot.slope
     # for index, row in data.iterrows():
     #     if row['gradient'] < slope:
     #         #print(index, row['rolling_mean_grouped_soil'], row['gradient'], row['Rain'])
@@ -749,12 +469,12 @@ def ensure_json_file(file_path):
         print(f"Created new JSON file at: {file_path}")
 
 # include the (on device saved) amount of irrigation given
-def include_irrigation_amount(df):
-    irrigation_file = 'data/irrigations.json'
+def include_irrigation_amount(df, plot):
+    irrigation_file = plot.irrigations_from_json
     # Check and ensure the JSON file exists
     ensure_json_file(irrigation_file)
 
-    if Load_irrigations_from_file:
+    if plot.load_irrigations_from_file:
         # Load JSON data from file
         with open(irrigation_file, 'r') as file:
             irrigations_json = json.load(file)
@@ -789,9 +509,9 @@ def include_irrigation_amount(df):
         # Add the reindexed irrigation amounts to the main dataframe
         df['irrigation_amount'] = irrigations_reindexed['amount']
     else:
-        if (len(DeviceAndSensorIdsFlow) >  0):
+        if (len(plot.device_and_sensor_ids_flow) >  0):
             # Load data and create the dataframe
-            data_irrigation = load_data_api(DeviceAndSensorIdsFlow[0], "actuators", Current_config['Start_date'])
+            data_irrigation = plot.load_data_api(plot.device_and_sensor_ids_flow[0], "actuators", plot.start_date)
             df_irrigation = pd.DataFrame(data_irrigation)
             df_irrigation.rename(columns={'time': 'Timestamp'}, inplace=True)
             df_irrigation['Timestamp'] = pd.to_datetime(df_irrigation['Timestamp'], utc=True)
@@ -825,10 +545,10 @@ def include_irrigation_amount(df):
 
 
 # Augment the dataset creating new features
-def create_features(data):
+def create_features(data, plot):
     # Create average cols
-    data['grouped_soil'] = data[DeviceAndSensorIdsMoisture].mean(axis=1)
-    data['grouped_soil_temp'] = data[DeviceAndSensorIdsTemp].mean(axis=1)
+    data['grouped_soil'] = data[plot.device_and_sensor_ids_moisture].mean(axis=1)
+    data['grouped_soil_temp'] = data[plot.device_and_sensor_ids_temp].mean(axis=1)
     
     # Create rolling mean: introduces NaN again -> later just cut off
     data['rolling_mean_grouped_soil'] = data['grouped_soil'].rolling(window=RollingMeanWindowGrouped, win_type='gaussian').mean(std=RollingMeanWindowGrouped)
@@ -848,7 +568,7 @@ def create_features(data):
     data['day_of_year'] = data.index.dayofyear#.astype("float64")
 
     # Get weather from weather meteo
-    data_weather = get_historical_weather_api(data)
+    data_weather = get_historical_weather_api(data, plot)
 
     # Resample weatherdata before merge => takes a long time
     data_weather = resample(data_weather)
@@ -858,7 +578,7 @@ def create_features(data):
     data_endtime = data.index[-1]
 
     # Get forecast for the ~last two days
-    data_weather_recent_forecast = get_weather_forecast_api(data_weather_endtime, data_endtime)
+    data_weather_recent_forecast = get_weather_forecast_api(data_weather_endtime, data_endtime, plot)
 
     # Merge weather data to one dataframe
     data_weather_merged = pd.concat([data_weather.loc[data.index[0]:], 
@@ -873,7 +593,7 @@ def create_features(data):
     # # Calculate and add volumetric water content => do not use this approach, does not yield better results
     # data = add_volumetric_col_to_df(data, 'rolling_mean_grouped_soil')
     # # align soil water retention curve with data from API => do not use this approach, does not yield better results
-    # corrected_water_retention_curve = align_retention_curve_with_api(data, data_weather)
+    # corrected_water_retention_curve = (data, data_weather)
     # # Drop not aligned curve
     # data = data.drop(columns=['rolling_mean_grouped_soil_vol'])
     # # Calculate and add CORRECTED volumetric water content
@@ -890,11 +610,11 @@ def create_features(data):
     f = data.rolling_mean_grouped_soil
     data['gradient'] = np.gradient(f)
     # Skip the pump state if there is a flow meter where the artificial irrigation amount is messured
-    if "DeviceAndSensorIdsFlow" in Current_config:
-        data = include_irrigation_amount(data)
+    if "DeviceAndSensorIdsFlow" in plot.config:
+        data = include_irrigation_amount(data, plot)
     else:
         data['pump_state'] = int(0)
-        data = add_pump_state(data)
+        data = add_pump_state(data, plot)
         
 
     # also add hours since last irrigation => TODO: check later, still an error, !!!!!questionable whether it is useful!!!!!
@@ -1126,24 +846,22 @@ def combine_dfs(cut_sub_dfs):
 
 
 # Data preparation pipeline, calls other subfunction to perform the task
-def prepare_data():
-    global Timezone
-
+def prepare_data(plot):
     # Load data from local wazigate api -> each sensor individually
     data_moisture = []
     data_temp = []
 
     # start date is in UTC, but user expects it in his timezone
-    start_date = Current_config['Start_date']
-    lat = Current_config["Gps_info"]["lattitude"]
-    long = Current_config["Gps_info"]["longitude"]
-    Timezone = get_timezone(lat, long)
+    start_date = plot.start_date
+    lat = plot.gps_info.split(',')[0].lstrip()
+    long = plot.split(',')[1].lstrip()
+    Timezone = NetworkUtils.get_timezone(lat, long) #TODO: save somewhere else
     start_date = parser.parse(start_date)
     start_date = start_date.replace(tzinfo=pytz.timezone(Timezone))
 
-    if LoadDataFromCSV:
+    if plot.load_data_from_csv:
         # Load from CSV
-        data = pd.read_csv(CSVFile, header=0)
+        data = pd.read_csv(plot.data_from_csv, header=0)
         data.rename(columns={'timestamp': 'Time'}, inplace=True)
         data['Time'] = pd.to_datetime(data['Time'])
         data.set_index('Time', inplace=True)
@@ -1153,35 +871,35 @@ def prepare_data():
         #data.index = pd.to_datetime(data.index) + pd.DateOffset(hours=get_timezone_offset(Timezone))
     else:
         # Load data from API
-        for moisture in DeviceAndSensorIdsMoisture:
-            data_moisture.append(load_data_api(moisture, "sensors", start_date))
-        for temp in DeviceAndSensorIdsTemp:
-            data_temp.append(load_data_api(temp, "sensors", start_date))
+        for moisture in plot.device_and_sensor_ids_moisture:
+            data_moisture.append(plot.load_data_api(moisture, "sensors", start_date))
+        for temp in plot.device_and_sensor_ids_temp:
+            data_temp.append(plot.load_data_api(temp, "sensors", start_date))
     
         # Save JSON data to one dataframe for further processing
         # Create first dataframe with first moisture sensor -> dfs have to be of same length, same timestamps
         data = pd.DataFrame(data_moisture[0])
         data.rename(columns={'time': 'Time'}, inplace=True)
-        data.rename(columns={'value': DeviceAndSensorIdsMoisture[0]}, inplace=True)
+        data.rename(columns={'value': plot.device_and_sensor_ids_moisture[0]}, inplace=True)
         data['Time'] = pd.to_datetime(data['Time'])
         data.set_index('Time', inplace=True)
         
         # Append the other cols and match timestamps
-        for i in range(len(DeviceAndSensorIdsMoisture)):
+        for i in range(len(plot.device_and_sensor_ids_moisture)):
             if i==0:
                 continue
             else:
                 d = pd.DataFrame(data_moisture[i])
                 d.rename(columns={'time': 'Time'}, inplace=True)
-                d.rename(columns={'value': DeviceAndSensorIdsMoisture[i]}, inplace=True)
+                d.rename(columns={'value': plot.device_and_sensor_ids_moisture[i]}, inplace=True)
                 d['Time'] = pd.to_datetime(d['Time'])
                 d.set_index('Time', inplace=True)
                 data = pd.merge(data, d, left_index=True, right_index=True, how='outer')
                 
-        for i in range(len(DeviceAndSensorIdsTemp)):
+        for i in range(len(plot.device_and_sensor_ids_temp)):
             d = pd.DataFrame(data_temp[i])
             d.rename(columns={'time': 'Time'}, inplace=True)
-            d.rename(columns={'value': DeviceAndSensorIdsTemp[i]}, inplace=True)
+            d.rename(columns={'value': plot.device_and_sensor_ids_temp[i]}, inplace=True)
             d['Time'] = pd.to_datetime(d['Time'])
             d.set_index('Time', inplace=True)
             data = pd.merge(data, d, left_index=True, right_index=True, how='outer')
@@ -1204,10 +922,10 @@ def prepare_data():
     #     data = data_re
     
     # create additional features
-    data = create_features(data)
+    data = create_features(data, plot)
 
     # Drop the raw values -> better without raw values-> overfitting
-    data.drop(columns = DeviceAndSensorIdsMoisture + DeviceAndSensorIdsTemp, errors='ignore', inplace=True)
+    data.drop(columns = plot.device_and_sensor_ids_moisture + plot.device_and_sensor_ids_temp, errors='ignore', inplace=True)
     
     # Convert datatype of cols to float64 -> otherwise json parse will parse negative values as object
     #data = data.apply(pd.to_numeric, errors='coerce')
@@ -1410,7 +1128,7 @@ def evaluate_results_and_choose_best(results_for_one_df, best_for_one_df):
     return best_model_for_df
 
 # Create future value testset for prediction
-def create_future_values(data):
+def create_future_values(data, plot):
     # Create ranges and dataframe with timestamps 
     start = data.index[0]
     print("start: ", start)
@@ -1422,7 +1140,7 @@ def create_future_values(data):
     print("all dates: ", all_dates,"\n")
 
     # Fetch data from weather API
-    data_weather_api_cut = get_weather_forecast_api(train_end, end)
+    data_weather_api_cut = get_weather_forecast_api(train_end, end, plot)
     data_weather_api_cut.rename_axis('Timestamp', inplace=True)
 
     # Create features and merge data from weather API
@@ -1446,7 +1164,7 @@ def create_future_values(data):
     new_data['rolling_mean_grouped_soil_temp'] = new_data['Soil_temperature_7-28'] # TODO: calculate/calibrate diviation for better alignment
 
     # also include pump_state or irrigation_amount depending on config, set to zero as we want to assume the behavior without watering
-    if "DeviceAndSensorIdsFlow" in Current_config:
+    if "DeviceAndSensorIdsFlow" in plot.config:
         new_data = new_data.assign(irrigation_amount=0)
     else:
         new_data = new_data.assign(pump_state=0)
@@ -2219,16 +1937,16 @@ def exponential_weights(length):
     return weights
 
 # align prediction according to latest sensor values
-def align_with_latest_sensor_values():
+def align_with_latest_sensor_values(plot):
     # Extract the last actual value
-    last_actual_value = Data['rolling_mean_grouped_soil'].iloc[-1]
+    last_actual_value = plot.data['rolling_mean_grouped_soil'].iloc[-1]
 
     # Generate weights for the prediction range
-    weights = exponential_weights(len(Predictions))
+    weights = exponential_weights(len(plot.predictions))
 
     # Step 3: Blend the historical and predicted values
-    Predictions['smoothed_values'] = (
-        weights * last_actual_value + (1 - weights) * Predictions['prediction_label']
+    plot.predictions['smoothed_values'] = (
+        weights * last_actual_value + (1 - weights) * plot.predictions['prediction_label']
     )
 
     # # Combine for visualization
@@ -2240,9 +1958,9 @@ def align_with_latest_sensor_values():
     # return combined_data
 
 # Calculates the time when threshold will be meet, according to predictions
-def calc_threshold(Predictions, col):
-    threshold = Current_config["Threshold"]
-    strategy = Current_config["Sensor_kind"]
+def calc_threshold(predictions, col, plot):
+    threshold = plot.threshold
+    strategy = plot.sensor_kind
 
     # Define comparison logic based on strategy
     comparison_fn = (lambda value, threshold: value > threshold) if strategy == "tension" else (
@@ -2250,110 +1968,90 @@ def calc_threshold(Predictions, col):
     )
 
     # calculate next occurance
-    for i in range(len(Predictions)):
-        if comparison_fn(Predictions[col][i], threshold):
-            print("Threshold will be reached on", Predictions.index[i], "With a value of:", Predictions[col][i])
-            return Predictions.index[i]
+    for i in range(len(predictions)):
+        if comparison_fn(predictions[col][i], threshold):
+            print("Threshold will be reached on", predictions.index[i], "With a value of:", predictions[col][i])
+            return predictions.index[i]
 
     return ""
 
 # Data Getter
-def get_Data():
-    if Data.empty:
+def get_Data(currentPlot):
+    if currentPlot.data.empty:
         return False
     else:
-        return Data.drop([item for item in To_be_dropped if item != "Timestamp"], axis=1) # This is needed to prevent the timestamp is being omitted
+        return currentPlot.data.drop([item for item in To_be_dropped if item != "Timestamp"], axis=1) # This is needed to prevent the timestamp is being omitted
 
 # Predictions Getter
-def get_predictions():
-    if Predictions.empty:
+def get_predictions(currentPlot):
+    if currentPlot.predictions.empty:
         return False
     else:
-        return Predictions
+        return currentPlot.predictions
     
 # threshold timestamp Getter
-def get_threshold_timestamp():
-    if not Threshold_timestamp:
+def get_threshold_timestamp(currentPlot):
+    if not currentPlot.threshold_timestamp:
         return False
     else:
-        return Threshold_timestamp
+        return currentPlot.threshold_timestamp
 
-def predict_with_updated_data():
-    global Predictions
-    global Best_exp
-    global Threshold_timestamp
-
+def predict_with_updated_data(plot):
+    # Run data pipeline to obtain latest data
     train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = data_pipeline()
     # Create future value set to feed new data to model
-    future_features = create_future_values(Data)
+    future_features = create_future_values(plot.data, plot)
     # Compare dataframes cols to be sure that they match, otherwise drop
     future_features = compare_train_predictions_cols(train, future_features)
     # NN
-    if not Use_pycaret:
+    if not plot.use_pycaret:
         Z, Z_scaled, Z_cnn = prepare_future_values(scaler, future_features, X_train.columns)
-        Predictions = generate_predictions_nn(Tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])
+        plot.predictions = generate_predictions_nn(plot.tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])
     else:
-        Predictions = generate_predictions(Tuned_best, Best_exp, future_features)
+        plot.predictions = generate_predictions(plot.tuned_best, plot.best_exp, future_features)
     
     # Cut passed time from predictions
-    Predictions = Predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]
+    plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]
         
     # Align predictions with historical data
-    align_with_latest_sensor_values()
+    align_with_latest_sensor_values(plot)
     
     # Calculate when threshold will be meet
-    Threshold_timestamp = calc_threshold(Predictions, 'smoothed_values')
+    plot.threshold_timestamp = calc_threshold(plot.predictions, 'smoothed_values', plot)
 
     # Add volumetric water content
-    if Current_config["Sensor_kind"] == 'tension':
-        Predictions = add_volumetric_col_to_df(Predictions, "smoothed_values")
+    if plot.sensor_kind == 'tension':
+        plot.predictions = add_volumetric_col_to_df(plot.predictions, "smoothed_values", plot)
 
     # Return last accumulated reading and threshold timestamp currentSoilTension, threshold_timestamp, predictions 
-    return Data['rolling_mean_grouped_soil'][-1], Threshold_timestamp, Predictions
+    return plot.data['rolling_mean_grouped_soil'][-1], plot.threshold_timestamp, plot.predictions
 
 
-def data_pipeline():
-    global Data
-    global ApiUrl
-    global Current_config
-
-    # Check version of pycaret, should be >= 3.0
-    print("Check version of pycaret:", pycaret.__version__, "should be >= 3.0")
-
-    load_dotenv()
-    ApiUrl = os.getenv("API_URL")
-
-    # Read user set config and save to Current_config(global)
-    Current_config = read_config()
-
-    # Generate token if data is not present on GW
-    get_token()
-    
+def data_pipeline(plot):
     # Data preparation pipeline, calls other subfunction to perform the task
     # Classical regression
-    Data = prepare_data()
+    plot.data = prepare_data(plot)
 
     # Search for gaps in data again (quick fix) => tackle problem with latest data "nan", in case of irrigations saved
-    if Data.isna().any().any():
+    if plot.data.isna().any().any():
         #Data.drop(Data.index[-1], inplace=True)
-        Data.dropna(inplace=True)
-      
-    train, test = split_by_ratio(Data, 20) # here a split is done to rule out the models that are overfitting
+        plot.data.dropna(inplace=True)
+
+    # Split dataset  
+    train, test = split_by_ratio(plot.data, 20) # here a split is done to rule out the models that are overfitting
+    
     # NN
-    X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = prepare_data_for_cnn(Data, 'rolling_mean_grouped_soil')
+    X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = prepare_data_for_cnn(plot.data, 'rolling_mean_grouped_soil')
 
     return train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler
 
-# Mighty main fuction ;)
-def main() -> int:
-    global Predictions
-    global Threshold_timestamp
-    global Use_pycaret
-    global Tuned_best
-    global Best_exp
-
+# Mighty main fuction ;) -> create some meaningful logs
+def main(plot) -> int:
+    # Check version of pycaret, should be >= 3.0
+    print("Check version of pycaret:", pycaret.__version__, "should be >= 3.0")
+    
     # Data preparation: get config, fetch, align, clean, sample....
-    train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = data_pipeline()
+    train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = data_pipeline(plot)
 
     # Start training pipeline: setup, train models the best ones to best-array
     # Classical regression
@@ -2381,47 +2079,47 @@ def main() -> int:
     best_eval_nn, results_nn = evaluate_against_testset_nn(nn_models, X_test_scaled, y_test)
 
     # Decide which approach is best
-    index, Use_pycaret = eval_approach(results, results_nn, 'mae')
+    index, plot.use_pycaret = eval_approach(results, results_nn, 'mae')
 
     # TODO: Debug mode
     #Use_pycaret = False
 
     # Train best model on whole dataset (without skipping "test-set")
-    if Use_pycaret:
+    if plot.use_pycaret:
         # Classical regression
-        best_model, Best_exp = train_best(best_eval, Data)
+        best_model, plot.best_exp = train_best(best_eval, plot.data)
     else:
         # NN -> TODO: eval properly -> still error in r2 calc, fallback to mae
-        best_model_nn, X_train_scaled, X_val_scaled, y_train, y_val= train_best_nn(best_eval_nn, Data, scaler)
+        best_model_nn, X_train_scaled, X_val_scaled, y_train, y_val= train_best_nn(best_eval_nn, plot.data, scaler)
 
     
     # Create future value set to feed new data to model
-    future_features = create_future_values(Data)
+    future_features = create_future_values(plot.data, plot)
     # Compare dataframes cols to be sure that they match, otherwise drop
     future_features = compare_train_predictions_cols(train, future_features)
     # NN
-    if not Use_pycaret:
+    if not plot.use_pycaret:
         Z, Z_scaled, Z_cnn = prepare_future_values(scaler, future_features, X_train.columns)
 
 
-    if Use_pycaret:
+    if plot.use_pycaret:
         # Before tuning
-        #best_model_before_tuning = best_exp.compare_models()
+        #best_model_before_tuning = plot.best_exp.compare_models()
         
         # Tune hyperparameters of the 3 best models, see notebook
         try:
-            Tuned_best = tune_model(Best_exp, best_model)
+            plot.tuned_best = tune_model(plot.best_exp, best_model)
         except Exception as e:
             print(f"Error during tuning: {e}, using the original model.")
-            Tuned_best = best_model  # Keep original model if tuning fails
+            plot.tuned_best = best_model  # Keep original model if tuning fails
 
         
         # After tuning
-        #best_model_after_tuning = best_exp.compare_models()
+        #best_model_after_tuning = plot.best_exp.compare_models()
         
         # Manually compare metrics
-        #metrics_before_tuning = best_exp.get_metrics(model=best_model_before_tuning)
-        #metrics_after_tuning = best_exp.get_metrics(model=best_model_after_tuning)
+        #metrics_before_tuning = plot.best_exp.get_metrics(model=best_model_before_tuning)
+        #metrics_after_tuning = plot.best_exp.get_metrics(model=best_model_after_tuning)
 
         # Compare relevant metrics
         # compare_df = pd.DataFrame({
@@ -2435,36 +2133,36 @@ def main() -> int:
         # Ensemble, Stacking & ... not implemented yet, see notebook
 
         # Save best pycaret model
-        model_names = save_models(exp, [Tuned_best], 'models/best_models/pycaret/best_soil_tension_prediction_pycaret_model_')
+        model_names = save_models(exp, [plot.tuned_best], 'models/best_models/pycaret/best_soil_tension_prediction_pycaret_model_')
 
         # Create predictions to forecast values
         # Classical regression
-        Predictions = generate_predictions(Tuned_best, Best_exp, future_features)
+        plot.predictions = generate_predictions(plot.tuned_best, plot.best_exp, future_features)
     else:
         # Tune best model
-        Tuned_best = tune_model_nn(X_train_scaled, y_train, best_model_nn)
+        plot.tuned_best = tune_model_nn(X_train_scaled, y_train, best_model_nn)
 
         # Save best model
         save_models_nn([best_model_nn], 'models/best_models/nn/best_soil_tension_prediction_nn_model_')
 
         # Generate predictions with NN model
-        Predictions = generate_predictions_nn(Tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])
+        plot.predictions = generate_predictions_nn(plot.tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])
 
     # Cut passed time from predictions
-    Predictions = Predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]    
+    plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]    
     
     # Align predictions with historical data
-    align_with_latest_sensor_values()
+    align_with_latest_sensor_values(plot)
 
     # Calculate when threshold will be meet
-    Threshold_timestamp = calc_threshold(Predictions, 'smoothed_values')
+    plot.threshold_timestamp = calc_threshold(plot.predictions, 'smoothed_values', plot)
 
     # Add volumetric water content
-    if Current_config["Sensor_kind"] == 'tension':
-        Predictions = add_volumetric_col_to_df(Predictions, "smoothed_values")
+    if plot.sensor_kind == 'tension':
+        plot.predictions = add_volumetric_col_to_df(plot.predictions, "smoothed_values", plot)
 
     # Return last accumulated reading and threshold timestamp
-    return Data['rolling_mean_grouped_soil'][-1], Threshold_timestamp, Predictions
+    return plot.data['rolling_mean_grouped_soil'][-1], plot.threshold_timestamp, plot.predictions
 
 if __name__ == '__main__':
     sys.exit(main())

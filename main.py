@@ -23,6 +23,7 @@ import create_model
 import actuation
 from plot import Plot 
 import plot_manager
+from utils import NetworkUtils
 
 
 
@@ -243,8 +244,8 @@ def schedule_model_cleanup(folder_path, interval_days=7):
 
 # Get URL of API from .env file => TODO: better with try catch than locals, getenv can still stop backend
 def getApiUrl(url, body):
-    #load_dotenv()
-    url = os.getenv("API_URL")
+    url = NetworkUtils.ApiUrl
+
     if url not in (None, ''):
         data = url
         status_code = 200
@@ -590,10 +591,12 @@ def getValuesForDashboard(url, body):
     data_moisture = []
     data_temp = []
 
+    currentPlot = plot_manager.getCurrentPlot()
+
     for temp in DeviceAndSensorIdsTemp:
-        data_temp.append(create_model.load_latest_data_api(temp, "sensors"))
+        data_temp.append(currentPlot.load_latest_data_api(temp, "sensors"))
     for moisture in DeviceAndSensorIdsMoisture:
-        data_moisture.append(create_model.load_latest_data_api(moisture, "sensors"))
+        data_moisture.append(currentPlot.load_latest_data_api(moisture, "sensors"))
 
     # Calculate the temp average
     temp_average = sum(data_temp) / len(data_temp)
@@ -601,7 +604,7 @@ def getValuesForDashboard(url, body):
     moisture_average = sum(data_moisture) / len(data_moisture)
     # Calculate the VVO average if tension sensor is used
     if Sensor_kind == "tension":
-        vwc_average = round(create_model.calc_volumetric_water_content_single_value(moisture_average)*100,2) 
+        vwc_average = round(create_model.calc_volumetric_water_content_single_value(moisture_average, currentPlot)*100,2) 
 
         dashboard_data = {
             "temp_average": temp_average,
@@ -626,12 +629,14 @@ def getHistoricalChartData(url, body):
     data_temp = []
     #data_flow = [] # TODO:later also show flow in vis
 
+    currentPlot = plot_manager.getCurrentPlot()
+
     for moisture in DeviceAndSensorIdsMoisture:
-        data_moisture.append(create_model.load_data_api(moisture, "sensors", Start_date))#, CurrentPlot))
+        data_moisture.append(currentPlot.load_data_api(moisture, "sensors", Start_date))
     for temp in DeviceAndSensorIdsTemp:
-        data_temp.append(create_model.load_data_api(temp, "sensors", Start_date))#, CurrentPlot))
-    # for flow in DeviceAndSensorIdsFlow:
-    #     data_flow.append(create_model.load_data_api(flow, "actuators", Start_date))
+        data_temp.append(currentPlot.load_data_api(temp, "sensors", Start_date))
+    # for flow in DeviceAndSensorIdsFlow: # TODO: maybe display that also here (is displayed in datasets data)
+    #     data_flow.append(currentPlot.load_data_api(flow, "actuators", Start_date))
     
     # extract series from key value pairs
     f_data_time = extract_and_format(data_moisture, "time", "str")
@@ -652,7 +657,11 @@ usock.routerGET("/api/getHistoricalChartData", getHistoricalChartData)
 
 # get values train + testset and display all elements -> stupid
 def getDatasetChartData(url, body):
-    data_dataset = create_model.get_Data()
+    # Get current plot (selected in UI)
+    currentPlot = plot_manager.getCurrentPlot()
+
+    # Get dataset data for chart of current plot
+    data_dataset = create_model.get_Data(currentPlot)
 
     if data_dataset is False:
         response_data = {"model": False}
@@ -691,8 +700,12 @@ usock.routerGET("/api/getDatasetChartData", getDatasetChartData)
 
 
 # get values from create_model.py if models had been trained
-def getPredictionChartData(url, body): 
-    data_pred = create_model.get_predictions()
+def getPredictionChartData(url, body):
+    # Get current plot (selected in UI)
+    currentPlot = plot_manager.getCurrentPlot()
+
+    # Get prediction data for chart of current plot
+    data_pred = create_model.get_predictions(currentPlot)
 
     if data_pred is False:
         response_data = {"model": False}
@@ -707,7 +720,7 @@ def getPredictionChartData(url, body):
         f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S%z'))
     f_data_moisture = data_pred["smoothed_values"].tolist()
 
-    # Quick and dirty adjusting predictions to match sensor values TODO: right approach?
+    # Quick and dirty adjusting predictions to match sensor values TODO: ??? right approach ???
     adjustment = 1
     adjust_threshold = lambda Threshold, adjustment: Threshold - adjustment if Sensor_kind == "tension" else Threshold + adjustment
 
@@ -775,8 +788,12 @@ def getPredictionChartData(url, body):
 usock.routerGET("/api/getPredictionChartData", getPredictionChartData)
 
 # get values from create_model.py if models had been trained
-def getThreshold(url, body): 
-    threshold_timestamp = create_model.get_threshold_timestamp()
+def getThreshold(url, body):
+    # Get current plot (selected in UI)
+    currentPlot = plot_manager.getCurrentPlot()
+
+    # Get prediction data for chart of current plot
+    threshold_timestamp = create_model.get_threshold_timestamp(currentPlot)
 
     if threshold_timestamp is False:
         response_data = {"threshold": False}
@@ -820,7 +837,7 @@ def check_threads():
         startPrediction()
 
 # Thread that runs prediction
-def workerToPredict():
+def workerToPredict(plot):
     def time_until_n_hours(hours):
         """Calculate the time difference from now until the next noon."""
         now = datetime.now()
@@ -842,7 +859,7 @@ def workerToPredict():
 
             if Perform_training: #same var is used here to preserve functionality
                 # Call predict_with_updated_data function
-                currentSoilTension, threshold_timestamp, predictions = create_model.predict_with_updated_data()
+                currentSoilTension, threshold_timestamp, predictions = create_model.predict_with_updated_data(plot)
 
                 # Create object to save
                 variables_to_save = {
@@ -870,7 +887,7 @@ def workerToPredict():
                 actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount, Sensor_kind)
 
             # After initial training and prediction, start surveillance
-            threading.Timer(3600, check_threads).start()  # Check every hour if threads are alive
+            threading.Timer(3600, check_threads(plot)).start()  # Check every hour if threads are alive
 
             # Wait for Predict_period_hours periodically for next cycle
             time_to_sleep = time_until_n_hours(Predict_period_hours)
@@ -881,13 +898,13 @@ def workerToPredict():
             time.sleep(Restart_time)  # Retry after 30 minute if there is an error
 
 # Starts a thread that runs prediction
-def startPrediction(currentPlot):
+def startPrediction(plot):
     global ThreadId
     global Prediction_thread
 
-    if not currentPlot.CurrentlyTraining:
+    if not plot.CurrentlyTraining:
         # Create a new thread for training
-        Prediction_thread = threading.Thread(target=workerToPredict)
+        Prediction_thread = threading.Thread(target=workerToPredict, args=(plot))
         ThreadId += 1
 
         # Append thread to list
@@ -995,11 +1012,11 @@ usock.routerGET("/api/startTraining", startTraining)
 
 
 if __name__ == "__main__":
-    # Load variables
-    load_dotenv()
+    # Load environment variables
+    NetworkUtils.get_env()
 
     # Start serving
-    usock.sockAddr = os.getenv("Proxy_URL")
+    usock.sockAddr = NetworkUtils.Proxy
     usock.start()
 
     # Start thread that deletes old models

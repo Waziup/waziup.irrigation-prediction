@@ -9,6 +9,7 @@ import pandas as pd
 import requests
 
 import create_model
+from utils import NetworkUtils
 
 
 # Globals
@@ -147,24 +148,22 @@ def irrigate_amount(amount):
     # Example API call: 
     # curl -X POST "http://192.168.189.2/devices/6645c4d468f31971148f2ab1/actuators/6673fcb568f31971148ff5f7/value"
     # -H "accept: */*" -H "Content-Type: application/json" -d "7.2"
-    global ApiUrl
     global Timezone
     global Last_irrigation
 
-    # Name of flow meter sensor to initiate irrigation
+    # Name of flow meter sensor to initiate irrigation TODO: plots
     flow_meter_name = create_model.DeviceAndSensorIdsFlow[0]
 
     # API URL
-    load_dotenv()
-    ApiUrl = create_model.os.getenv('API_URL')
+    apiUrl = NetworkUtils.ApiUrl
 
     # Create URL for API call
-    request_url = f"{ApiUrl}devices/{flow_meter_name.split('/')[0]}/actuators/{flow_meter_name.split('/')[1]}/value"
+    request_url = f"{apiUrl}devices/{flow_meter_name.split('/')[0]}/actuators/{flow_meter_name.split('/')[1]}/value"
     
     # Define headers for the POST request
     headers = {
         'Content-Type': 'application/json',
-        'Authorization': f'Bearer {create_model.Token}'
+        'Authorization': f'Bearer {NetworkUtils.Token}'
     }
     
     # Define the payload
