@@ -16,6 +16,7 @@ class Plot:
     # Fundamental
     self.plot_number = plot_number                # Int to enumerate plots
     self.configPath = configPath                  # Path to current_config.json
+    self.user_given_name = "Plot " + str(plot_number)
 
     # Variables that were global before, now plot-specific TODO: implement everywhere
     # Device
@@ -74,6 +75,15 @@ class Plot:
     self.data_from_csv = "binned_removed_new_for_app_ww.csv"
     self.load_irrigations_from_file = False # Load former irrigations from file "data/irrigations.json" DEBUG
     self.irrigations_from_json = "data/irrigations.json"
+
+    def __repr__(self):
+        return (
+            f"Plot(plot_number={self.plot_number}, "
+            f"name='{self.user_given_name}', "
+            f"configPath='{self.configPath}', "
+            f"training_active={self.currently_training}, "
+            f"prediction_active={self.prediction_thread is not None})"
+        )
 
 
   # Just print some class properies

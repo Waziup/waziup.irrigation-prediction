@@ -254,12 +254,16 @@ usock.routerGET("/api/addPlot", addPlot)
 
 # Delete a plot during runtine TODO: ids adjust on remove, API call
 def removePlot(url, body):
+    # Parse the query parameters from Body
+    parsed_data = parse_qs(body.decode('utf-8'))
+    plot_to_be_removed = int(parsed_data.get('currentPlot', [])[0])
+
     # Call function in plot manager
-    removed_plot_id, newfilename = plot_manager.removePlot()
+    removed_plot_id, oldfilename = plot_manager.removePlot(plot_to_be_removed)
 
     response = {
         "plot_number": removed_plot_id,
-        "filename": newfilename,
+        "filename": oldfilename,
         "status_code": 200
     }
 
@@ -844,10 +848,10 @@ def workerToPredict(plot):
 # Starts a thread that runs prediction
 def startPrediction(plot):
     global ThreadId
-    
+
     if not plot.currently_training:
         # Create a new thread for training
-        plot.prediction_thread = threading.Thread(target=workerToPredict, args=(plot))
+        plot.prediction_thread = threading.Thread(target=workerToPredict, args=(plot,))
         ThreadId += 1
 
         # Append thread to list
@@ -877,7 +881,7 @@ def workerToTrain(thread_id, currentPlot, url, startTrainingNow):
                 time.sleep(time_to_sleep)  # Sleep until noon
 
             start_time = datetime.now().replace(microsecond=0)
-            print("Training started at:", start_time)
+            print("Training for Plot with the name ", str(currentPlot.user_given_name)," started at:", start_time)
 
             file_path = pathlib.Path('saved_variables.pkl')
 

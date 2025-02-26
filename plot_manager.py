@@ -59,10 +59,25 @@ def addPlot():
     return next_number, newfilename
 
 # Remove a plot from the list
-def removePlot():
+def removePlot(plot_nr_to_be_removed):
     global Plots
 
-    
+    # Get current plot and remove
+    plot_to_remove = getCurrentPlot()
+
+    # Compare plot scope
+    if plot_nr_to_be_removed is not CurrentPlot:
+        print("Will remove plot number: ", plot_nr_to_be_removed)
+    else:
+        print("IndexError: Number of plot in frontend is different than backend, might have just deleted the wrong plot.")
+
+    # Remove json config file
+    os.remove(plot_to_remove.configPath)
+
+    # Finally remove the plot from the list TODO: not array not suitable
+    del Plots[CurrentPlot-1]
+
+    return plot_to_remove.CurrentPlot, plot_to_remove.configPath
 
 # Just access 
 def getPlots():
