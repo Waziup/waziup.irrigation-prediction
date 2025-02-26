@@ -50,10 +50,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 # local
 import main
 import plot_manager
-from utils import NetworkUtils
-
-# Current timezone
-Timezone = ''
+from utils import NetworkUtils, TimeUtils
 
 # Rolling mean window
 RollingMeanWindowData = 15
@@ -170,8 +167,8 @@ def get_historical_weather_api(data, plot):
     last_date_str = last_date.strftime("%Y-%m-%d")
 
     # TODO: save in instance of specific plot as [] not string :|
-    lat = plot.gps_info.split(',')[0].lstrip()
-    long = plot.split(',')[1].lstrip()
+    lat = plot.gps_info['lattitude']
+    long = plot.gps_info['longitude']
 
     url = (
         f'https://archive-api.open-meteo.com/v1/era5'
@@ -180,7 +177,7 @@ def get_historical_weather_api(data, plot):
         f'&start_date={first_day_minus_one_str}'
         f'&end_date={last_date_str}'
         f'&hourly=temperature_2m,relativehumidity_2m,rain,cloudcover,shortwave_radiation,windspeed_10m,winddirection_10m,soil_temperature_7_to_28cm,soil_moisture_0_to_7cm,et0_fao_evapotranspiration'
-        f'&timezone={Timezone}'
+        f'&timezone={TimeUtils.Timezone}'
     )
 
     dct = subprocess.check_output(['curl', url]).decode()
@@ -205,7 +202,7 @@ def get_historical_weather_api(data, plot):
             .dropna())
 
     # Add timezone information without converting 
-    data_w_fetched.index = data_w_fetched.index.map(lambda x: x.replace(tzinfo=pytz.timezone(Timezone)))
+    data_w_fetched.index = data_w_fetched.index.map(lambda x: x.replace(tzinfo=pytz.timezone(TimeUtils.Timezone)))
     #data_w.index = pd.to_datetime(data_w.index) + pd.DateOffset(hours=get_timezone_offset(timezone))
     
     # convert cols to float64
@@ -232,9 +229,9 @@ def get_historical_weather_api(data, plot):
 # Get weather forecast from open-meteo
 def get_weather_forecast_api(start_date, end_date, plot):
 
-    # Timezone and geo_location
-    lat = plot.gps_info.split(',')[0].lstrip()
-    long = plot.split(',')[1].lstrip()
+    # Geo_location
+    lat = plot.gps_info['lattitude']
+    long = plot.gps_info['longitude']
 
     # Define the API URL for weather forecast
     url = (
@@ -244,7 +241,7 @@ def get_weather_forecast_api(start_date, end_date, plot):
         f'&hourly=temperature_2m,relative_humidity_2m,precipitation,cloud_cover,et0_fao_evapotranspiration,wind_speed_10m,wind_direction_10m,soil_temperature_18cm,soil_moisture_3_to_9cm,shortwave_radiation'
         f'&start_date={start_date.strftime("%Y-%m-%d")}'
         f'&end_date={end_date.strftime("%Y-%m-%d")}'
-        f'&timezone={Timezone}'
+        f'&timezone={TimeUtils.Timezone}'
     )
 
     # Use subprocess to run the curl command and decode the output
@@ -273,7 +270,7 @@ def get_weather_forecast_api(start_date, end_date, plot):
     #data_forecast.index = data_forecast.index.tz_localize('UTC').tz_convert(timezone)
     #data_forecast.index = data_forecast.index.tz_localize(timezone, utc=True)
     #data_forecast.index = pd.DatetimeIndex(data_forecast.index).tz_localize('UTC').tz_convert('Europe/Berlin')
-    data_forecast.index = data_forecast.index.map(lambda x: x.replace(tzinfo=pytz.timezone(Timezone)))
+    data_forecast.index = data_forecast.index.map(lambda x: x.replace(tzinfo=pytz.timezone(TimeUtils.Timezone)))
     #data_forecast.index = pd.to_datetime(data_forecast.index) + pd.DateOffset(hours=get_timezone_offset(timezone)) + pd.DateOffset(hours=1.0)
     
     # convert cols to float64
@@ -515,7 +512,7 @@ def include_irrigation_amount(df, plot):
             df_irrigation = pd.DataFrame(data_irrigation)
             df_irrigation.rename(columns={'time': 'Timestamp'}, inplace=True)
             df_irrigation['Timestamp'] = pd.to_datetime(df_irrigation['Timestamp'], utc=True)
-            df_irrigation['Timestamp'] = df_irrigation['Timestamp'].dt.tz_convert(Timezone)  # Replace with the correct timezone
+            df_irrigation['Timestamp'] = df_irrigation['Timestamp'].dt.tz_convert(TimeUtils.Timezone)  # Replace with the correct timezone
 
             df_irrigation.rename(columns={'value': 'irrigation_amount'}, inplace=True)
 
@@ -533,7 +530,7 @@ def include_irrigation_amount(df, plot):
             df_irrigation.set_index('Timestamp', inplace=True)
 
             # Timezone has to be set for df_irrigation
-            df_irrigation = df_irrigation.tz_convert(Timezone)
+            df_irrigation = df_irrigation.tz_convert(TimeUtils.Timezone)
 
             # Merge the dataframes
             df = pd.merge(df, df_irrigation, left_index=True, right_index=True, how='outer', suffixes=('_main', '_irrigation'))
@@ -853,11 +850,11 @@ def prepare_data(plot):
 
     # start date is in UTC, but user expects it in his timezone
     start_date = plot.start_date
-    lat = plot.gps_info.split(',')[0].lstrip()
-    long = plot.split(',')[1].lstrip()
-    Timezone = NetworkUtils.get_timezone(lat, long) #TODO: save somewhere else
+    lat = plot.gps_info['lattitude']
+    long = plot.gps_info['longitude']
+    TimeUtils.Timezone = TimeUtils.get_timezone(lat, long)
     start_date = parser.parse(start_date)
-    start_date = start_date.replace(tzinfo=pytz.timezone(Timezone))
+    start_date = start_date.replace(tzinfo=pytz.timezone(TimeUtils.Timezone))
 
     if plot.load_data_from_csv:
         # Load from CSV
@@ -867,7 +864,7 @@ def prepare_data(plot):
         data.set_index('Time', inplace=True)
         # Correct timestamp for timezone
         # Add timezone information without converting 
-        data.index = data.index.map(lambda x: x.replace(tzinfo=pytz.timezone(Timezone)))
+        data.index = data.index.map(lambda x: x.replace(tzinfo=pytz.timezone(TimeUtils.Timezone)))
         #data.index = pd.to_datetime(data.index) + pd.DateOffset(hours=get_timezone_offset(Timezone))
     else:
         # Load data from API
@@ -909,7 +906,7 @@ def prepare_data(plot):
 
     # Convert index
     data.index = pd.to_datetime(data.index, utc=True)
-    data.index = data.index.tz_convert(Timezone)
+    data.index = data.index.tz_convert(TimeUtils.Timezone)
         
     # Impute gaps in data
     data = fill_gaps(data)
@@ -1975,26 +1972,6 @@ def calc_threshold(predictions, col, plot):
 
     return ""
 
-# Data Getter
-def get_Data(currentPlot):
-    if currentPlot.data.empty:
-        return False
-    else:
-        return currentPlot.data.drop([item for item in To_be_dropped if item != "Timestamp"], axis=1) # This is needed to prevent the timestamp is being omitted
-
-# Predictions Getter
-def get_predictions(currentPlot):
-    if currentPlot.predictions.empty:
-        return False
-    else:
-        return currentPlot.predictions
-    
-# threshold timestamp Getter
-def get_threshold_timestamp(currentPlot):
-    if not currentPlot.threshold_timestamp:
-        return False
-    else:
-        return currentPlot.threshold_timestamp
 
 def predict_with_updated_data(plot):
     # Run data pipeline to obtain latest data
@@ -2011,7 +1988,7 @@ def predict_with_updated_data(plot):
         plot.predictions = generate_predictions(plot.tuned_best, plot.best_exp, future_features)
     
     # Cut passed time from predictions
-    plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]
+    plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]
         
     # Align predictions with historical data
     align_with_latest_sensor_values(plot)
@@ -2149,7 +2126,7 @@ def main(plot) -> int:
         plot.predictions = generate_predictions_nn(plot.tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])
 
     # Cut passed time from predictions
-    plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(Timezone):]    
+    plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]    
     
     # Align predictions with historical data
     align_with_latest_sensor_values(plot)

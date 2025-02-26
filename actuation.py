@@ -9,7 +9,7 @@ import pandas as pd
 import requests
 
 import create_model
-from utils import NetworkUtils
+from utils import NetworkUtils, TimeUtils
 
 
 # Globals
@@ -38,7 +38,7 @@ def get_max_min(df, target_col='smoothed_values'):
 
 # Function to find next lower and higher value occurrence
 def find_next_occurrences(df, column, threshold):
-    timezone = create_model.Timezone
+    timezone = TimeUtils.Timezone
 
     # Start @current time
     # timezone = create_model.get_timezone(Current_config["Gps_info"]["lattitude"], Current_config["Gps_info"]["longitude"])
@@ -126,7 +126,7 @@ def save_irrigation_time(amount):
     data = read_data_from_file(filename)
 
     # obtain timezone
-    timezone = pytz.timezone(create_model.Timezone)
+    timezone = pytz.timezone(TimeUtils.Timezone)
     # add to current timestamp without converting it
     now = timezone.localize(datetime.now())
 
@@ -148,7 +148,6 @@ def irrigate_amount(amount):
     # Example API call: 
     # curl -X POST "http://192.168.189.2/devices/6645c4d468f31971148f2ab1/actuators/6673fcb568f31971148ff5f7/value"
     # -H "accept: */*" -H "Content-Type: application/json" -d "7.2"
-    global Timezone
     global Last_irrigation
 
     # Name of flow meter sensor to initiate irrigation TODO: plots
@@ -237,8 +236,7 @@ def main(
     current_value, 
     threshold_timestamp, 
     predictions, 
-    irrigation_amount, 
-    strategy="tension"
+    plot
 ) -> int:
     """
     Handles irrigation logic for soil tension and soil humidity based on the specified strategy.
@@ -246,25 +244,24 @@ def main(
     :param current_value: Current sensor value (e.g., soil tension or humidity).
     :param threshold_timestamp: Predicted threshold crossing timestamp.
     :param predictions: Predictions data (list or dataframe).
-    :param irrigation_amount: Amount of irrigation to apply.
-    :param strategy: Either "tension" or "humidity".
+    :param plot: holds amount and strategy or kind: either "tension" or "humidity".
     :return: 1 if irrigation is triggered, otherwise 0.
     """
     global TimeSpanOverThreshold
 
     # Get configuration
-    threshold = create_model.Current_config['Threshold']
-    TimeSpanOverThreshold = create_model.Current_config['Look_ahead_time']
+    threshold = plot.threshold
+    TimeSpanOverThreshold = plot.look_ahead_time
 
-    # Define comparison logic based on strategy
-    comparison_fn = (lambda value, threshold: value > threshold) if strategy == "tension" else (
+    # Define comparison logic based on sensor_kind
+    comparison_fn = (lambda value, threshold: value > threshold) if plot.sensor_kind == "tension" else (
         lambda value, threshold: value < threshold
     )
 
     # Define over-threshold logic
     over_threshold_fn = (
         lambda value, threshold: value > threshold * OverThresholdAllowed
-        if strategy == "tension"
+        if plot.sensor_kind == "tension"
         else lambda value, threshold: value < threshold / OverThresholdAllowed
     )
 
@@ -274,20 +271,20 @@ def main(
 
         # Immediate irrigation if over-threshold logic is satisfied
         if over_threshold_fn(current_value, threshold):
-            print(f"Immediate irrigation triggered for strategy '{strategy}'!")
-            return irrigate_amount(irrigation_amount)
+            print(f"Immediate irrigation triggered for sensor_kind '{plot.sensor_kind}'!")
+            return irrigate_amount(plot.irrigation_amount)
 
         # Check predictions for next occurrence below/above threshold
         next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'smoothed_values', threshold)
 
         # No recovery predicted within forecast horizon
-        if (strategy == "tension" and not next_lower_idx) or (strategy == "humidity" and not next_higher_idx):
+        if (plot.sensor_kind == "tension" and not next_lower_idx) or (plot.sensor_kind == "humidity" and not next_higher_idx):
             print(f"No recovery predicted within {TimeSpanOverThreshold} hours, irrigate now!")
-            return irrigate_amount(irrigation_amount)
+            return irrigate_amount(plot.irrigation_amount)
 
         # Otherwise, delay irrigation
         else:
-            target_time = next_lower_idx if strategy == "tension" else next_higher_idx
+            target_time = next_lower_idx if plot.sensor_kind == "tension" else next_higher_idx
             print(f"Irrigation can wait. Recovery expected at: {target_time}")
             return 0
 

@@ -413,3 +413,18 @@ input[type="text"] {
 .tab-pane:first-child {
   display: block;
 }
+
+/* Close button styling */
+.close-tab {
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  font-size: 14px;
+  color: #888;
+  cursor: pointer;
+  transition: color 0.3s;
+}
+
+.close-tab:hover {
+  color: #ff0000;
+}

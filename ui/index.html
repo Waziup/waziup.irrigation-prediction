@@ -82,27 +82,43 @@
         // Add the new tab to the tabs container
         document.getElementById('tabs').appendChild(newTab);
 
-      // Add plot to backend
-      fetch(`../api/addPlot`)
-      .then((response) => response.json())
-      .then((data) => {
-        console.log("Next Plot was added with nr: ", data.next_number);
-      });
+        // Add plot to backend
+        fetch(`../api/addPlot`)
+          .then((response) => response.json())
+          .then((data) => {
+            console.log("Next Plot was added with nr: ", data.next_number);
+          });
 
         // Switch to the new tab
         switchTab(tabId);
       });
     });
 
-    function addTab(){
+    function addTab() {
       const tabId = ++tabCounter; // Increment tabCounter
 
       // Create a new tab
       const newTab = document.createElement('div');
       newTab.id = `tab-${tabId}`;
       newTab.className = 'tab';
-      newTab.textContent = `Plot ${tabId}`;
-      newTab.addEventListener('click', () => switchTab(tabId));
+
+      // Create a label for the tab
+      const tabLabel = document.createElement('span');
+      tabLabel.textContent = `Plot ${tabId}`;
+      tabLabel.addEventListener('click', () => switchTab(tabId));
+
+      // Create a close button
+      const closeButton = document.createElement('span');
+      closeButton.className = 'close-tab';
+      closeButton.innerHTML = '&times;'; // "×" symbol for closing
+      closeButton.addEventListener('click', (event) => {
+        event.stopPropagation(); // Prevents tab switch when clicking the close button
+        removeTab(tabId);
+      });
+
+      // Append label and close button to tab
+      newTab.appendChild(tabLabel);
+      newTab.appendChild(closeButton);
 
       // Add the new tab to the tabs container
       document.getElementById('tabs').appendChild(newTab);
@@ -110,15 +126,33 @@
 
     function switchTab(tabId) {
       // Remove active class from all tabs
-      document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.remove('active');
 
-      // Hide all tab content and remove previous content
-      document.querySelectorAll('.tab-pane').forEach(content => content.remove());
+        // Remove close button from all tabs
+        const closeButton = tab.querySelector('.close-tab');
+        if (closeButton) {
+          closeButton.remove();
+        }
+      });
 
       // Activate the selected tab
       const currentTab = document.getElementById(`tab-${tabId}`);
       if (currentTab) {
         currentTab.classList.add('active');
+
+        // Add close button only to the active tab
+        const closeButton = document.createElement('span');
+        closeButton.className = 'close-tab';
+        closeButton.innerHTML = '&times;';
+        closeButton.addEventListener('click', (event) => {
+          event.stopPropagation(); // Prevent switching tab on close click
+          removeTab(tabId);
+        });
+
+        // Ensure tab has relative positioning for absolute close button
+        currentTab.style.position = 'relative';
+        currentTab.appendChild(closeButton);
       } else {
         console.error(`Tab with id tab-${tabId} not found.`);
       }
@@ -135,22 +169,38 @@
         .then((data) => console.log(data))
         .catch((error) => console.error("Error:", error));
 
-      loadStuff()
-
-      // Reload with updated content
-      //fetchContentForTab(tabId);
+      loadStuff();
     }
+
+    // to close an currently active tab
+    function removeTab(tabId) {
+      const tabToRemove = document.getElementById(`tab-${tabId}`);
+      if (tabToRemove) {
+        tabToRemove.remove();
+
+        // If the removed tab was active, switch to the next available tab
+        if (tabToRemove.classList.contains('active')) {
+          const remainingTabs = document.querySelectorAll('.tab');
+          if (remainingTabs.length > 0) {
+            const nextTab = remainingTabs[remainingTabs.length - 1]; // Switch to last tab
+            const nextTabId = nextTab.id.split('-')[1];
+            switchTab(nextTabId);
+          }
+        }
+      }
+    }
+
     // LOL^^
     function fetchContentForTab(tabId) {
       const centerFullDiv = document.querySelector('center_full');
-    
+
       if (centerFullDiv) {
         // Store the original HTML structure of center_full
         const originalContent = centerFullDiv.outerHTML;
-    
+
         // Remove existing center_full
         centerFullDiv.remove();
-    
+
         // Reinsert the original structure inside its parent container
         document.getElementById('tabContent').insertAdjacentHTML('beforeend', originalContent);
       } else {

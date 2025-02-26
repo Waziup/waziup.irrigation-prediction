@@ -8,6 +8,8 @@ from timezonefinder import TimezoneFinder
 import urllib.parse
 
 class TimeUtils:
+    Timezone = ''
+
     @staticmethod
     def get_timezone_offset(timezone_str):
         """

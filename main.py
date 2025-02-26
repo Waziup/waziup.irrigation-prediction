@@ -34,63 +34,6 @@ from utils import NetworkUtils
 # Path to the root of the code
 PATH = os.path.dirname(os.path.abspath(__file__))
 
-# global list of device and sensor ids
-DeviceAndSensorIdsMoisture = []
-DeviceAndSensorIdsTemp = []
-DeviceAndSensorIdsFlow = []
-
-# GPS
-Gps_info = ""
-
-# Soil moisture sensor kind
-Sensor_kind = "tension"
-Sensor_unit = ""
-
-# Slope to evaluate irrgation has taken place
-Slope = 0
-
-# Threshold to irrigate plants
-Threshold = 0
-
-# Amount in liters to irrigate plants
-Irrigation_amount = 0
-
-# Time to look ahead in forecast how long soil tension threshold can be exceeded in hours
-Look_ahead_time = 0
-
-# Start date
-Start_date = ""
-
-# Time period to include into the model
-Period = 0
-
-# Frequencies train/predict
-Train_period_days = 1
-Predict_period_hours = 6 #6 DEBUG
-
-# Soil_type
-Soil_type = ""
-
-# Retention curve => not needed any more
-Soil_water_retention_curve = [
-    (0, 0.45),
-    (5, 0.40),
-    (10, 0.37),
-    (20, 0.30),
-    (50, 0.25),
-    (100, 0.20),
-    (200, 0.15),
-    (500, 0.10),
-    (1000, 0.05),
-]
-
-# Other soil related params
-PermanentWiltingPoint = 40
-FieldCapacityUpper = 30
-FieldCapacityLower = 10
-Saturation = 0
-
-
 # Array of active threads TODO: if training started kill other threads.
 Threads = []
 ThreadId = 0
@@ -309,54 +252,54 @@ def addPlot(url, body):
 
 usock.routerGET("/api/addPlot", addPlot)
 
+# Delete a plot during runtine TODO: ids adjust on remove, API call
+def removePlot(url, body):
+    # Call function in plot manager
+    removed_plot_id, newfilename = plot_manager.removePlot()
+
+    response = {
+        "plot_number": removed_plot_id,
+        "filename": newfilename,
+        "status_code": 200
+    }
+
+    return response["status_code"], bytes(json.dumps(response), "utf8"), []
+
+usock.routerGET("/api/addPlot", addPlot)
+
 # Get historical sensor values from WaziGates API
 def setConfig(url, body):
-    global DeviceAndSensorIdsMoisture
-    global DeviceAndSensorIdsTemp
-    global DeviceAndSensorIdsFlow
-    global Sensor_kind
-    global Gps_info
-    global Slope
-    global Threshold
-    global Irrigation_amount
-    global Look_ahead_time
-    global Start_date
-    global Period
-    global Soil_type
-    global PermanentWiltingPoint
-    global FieldCapacityUpper
-    global FieldCapacityLower
-    global Saturation
-    global Soil_water_retention_curve
+    # Get current plot
+    currentPlot = plot_manager.getCurrentPlot()
 
     # Parse the query parameters from Body
     parsed_data = parse_qs(body.decode('utf-8'))
 
     # Get choosen sensors
-    DeviceAndSensorIdsMoisture = parsed_data.get('selectedOptionsMoisture', [])
-    DeviceAndSensorIdsTemp = parsed_data.get('selectedOptionsTemp', [])
-    DeviceAndSensorIdsFlow = parsed_data.get('selectedOptionsFlow', [])
+    currentPlot.device_and_sensor_ids_moisture = parsed_data.get('selectedOptionsMoisture', [])
+    currentPlot.device_and_sensor_ids_temp = parsed_data.get('selectedOptionsTemp', [])
+    currentPlot.device_and_sensor_ids_flow = parsed_data.get('selectedOptionsFlow', [])
 
     # Get data from forms
-    Sensor_kind = parsed_data.get('sensor_kind', [])[0]
-    Gps_info = parsed_data.get('gps', [])[0]
-    Slope = parsed_data.get('slope', [])[0]
-    Threshold = float(parsed_data.get('thres', [])[0])
-    Irrigation_amount = float(parsed_data.get('amount', [])[0])
-    Look_ahead_time = float(parsed_data.get('lookahead', [])[0])
-    Start_date = parsed_data.get('start', [])[0]
-    Period = int(parsed_data.get('period', [])[0])
-    Soil_type = parsed_data.get('soil', [])[0]
-    PermanentWiltingPoint = int(parsed_data.get('pwp', [])[0])
-    FieldCapacityUpper = int(parsed_data.get('fcu', [])[0])
-    FieldCapacityLower = int(parsed_data.get('fcl', [])[0])
-    Saturation = int(parsed_data.get('sat', [])[0]) 
+    currentPlot.sensor_kind = parsed_data.get('sensor_kind', [])[0]
+    currentPlot.gps_info = parsed_data.get('gps', [])[0]
+    currentPlot.slope = parsed_data.get('slope', [])[0]
+    currentPlot.threshold = float(parsed_data.get('thres', [])[0])
+    currentPlot.irrigation_amount = float(parsed_data.get('amount', [])[0])
+    currentPlot.look_ahead_time = float(parsed_data.get('lookahead', [])[0])
+    currentPlot.start_date = parsed_data.get('start', [])[0]
+    currentPlot.period = int(parsed_data.get('period', [])[0])
+    currentPlot.soil_type = parsed_data.get('soil', [])[0]
+    currentPlot.permanent_wilting_point = int(parsed_data.get('pwp', [])[0])
+    currentPlot.field_capacity_upper = int(parsed_data.get('fcu', [])[0])
+    currentPlot.field_capacity_lower = int(parsed_data.get('fcl', [])[0])
+    currentPlot.saturation = int(parsed_data.get('sat', [])[0]) 
 
     # Get soil water retention curve
-    Soil_water_retention_curve = parsed_data.get('ret', [])[0]
+    currentPlot.soil_water_retention_curve = parsed_data.get('ret', [])[0]
 
     # Create a CSV file-like object from the CSV string
-    csv_file = StringIO(Soil_water_retention_curve)
+    csv_file = StringIO(currentPlot.soil_water_retention_curve)
 
     # Parse the CSV data into a list of dictionaries
     csv_data = []
@@ -366,23 +309,23 @@ def setConfig(url, body):
 
     # Organize the variables into a dictionary
     data = {
-        "DeviceAndSensorIdsMoisture": DeviceAndSensorIdsMoisture,
-        "DeviceAndSensorIdsTemp": DeviceAndSensorIdsTemp,
-        "DeviceAndSensorIdsFlow": DeviceAndSensorIdsFlow,
-        "Sensor_kind" : Sensor_kind,
-        "Gps_info": {"lattitude": Gps_info.split(',')[0].lstrip(), "longitude": Gps_info.split(',')[1].lstrip()},
-        "Slope": Slope,
-        "Threshold": Threshold,
-        "Irrigation_amount": Irrigation_amount,
-        "Look_ahead_time": Look_ahead_time,
-        "Start_date": Start_date,
-        "Period": Period,
-        "Soil_type": Soil_type,
+        "DeviceAndSensorIdsMoisture": currentPlot.device_and_sensor_ids_moistureread,
+        "DeviceAndSensorIdsTemp": currentPlot.device_and_sensor_ids_temp,
+        "DeviceAndSensorIdsFlow": currentPlot.device_and_sensor_ids_flow,
+        "Sensor_kind" : currentPlot.sensor_kind,
+        "Gps_info": {"lattitude": currentPlot.gps_info['lattitude'], "longitude": currentPlot.gps_info['longitude']},
+        "Slope": currentPlot.slope,
+        "Threshold": currentPlot.threshold,
+        "Irrigation_amount": currentPlot.irrigation_amount,
+        "Look_ahead_time": currentPlot.look_ahead_time,
+        "Start_date": currentPlot.start_date,
+        "Period": currentPlot.period,
+        "Soil_type": currentPlot.soil_type,
         "Soil_water_retention_curve": csv_data,  # Use the parsed CSV data
-        "PermanentWiltingPoint": PermanentWiltingPoint,
-        "FieldCapacityUpper": FieldCapacityUpper,
-        "FieldCapacityLower": FieldCapacityLower,
-        "Saturation": Saturation
+        "PermanentWiltingPoint": currentPlot.permanent_wilting_point,
+        "FieldCapacityUpper": currentPlot.field_capacity_upper,
+        "FieldCapacityLower": currentPlot.field_capacity_lower,
+        "Saturation": currentPlot.saturation
     }
 
     # Save the JSON data to the file
@@ -396,60 +339,44 @@ usock.routerPOST("/api/setConfig", setConfig)
 
 # Load config from file
 def getConfigFromFile():
-    global DeviceAndSensorIdsMoisture
-    global DeviceAndSensorIdsTemp
-    global DeviceAndSensorIdsFlow
-    global Sensor_kind
-    global Gps_info
-    global Slope
-    global Irrigation_amount
-    global Look_ahead_time
-    global Threshold
-    global Start_date
-    global Period
-    global Soil_type
-    global Soil_water_retention_curve
-    global PermanentWiltingPoint
-    global FieldCapacityUpper
-    global FieldCapacityLower
-    global Saturation
-    global Sensor_unit
-
+    # Get currentPlot and path
+    currentPlot = plot_manager.getCurrentPlot()
     currentConfigPath = plot_manager.getCurrentConfig()
+
     if os.path.exists(currentConfigPath):
         with open(currentConfigPath, 'r') as file:
             # Parse JSON from the file
             data = json.load(file)
 
         # Get choosen sensors
-        DeviceAndSensorIdsMoisture = data.get('DeviceAndSensorIdsMoisture', [])
-        DeviceAndSensorIdsTemp = data.get('DeviceAndSensorIdsTemp', [])
-        DeviceAndSensorIdsFlow = data.get('DeviceAndSensorIdsFlow', [])
+        currentPlot.device_and_sensor_ids_moisture = data.get('DeviceAndSensorIdsMoisture', [])
+        currentPlot.device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
+        currentPlot.device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
 
         # Get data from forms
-        Sensor_kind = data.get('Sensor_kind', [])
-        Gps_info = data.get('Gps_info', [])
-        Slope = float(data.get('Slope', []))
-        Threshold = float(data.get('Threshold', []))
-        Irrigation_amount = float(data.get('Irrigation_amount', []))
-        Look_ahead_time = float(data.get('Look_ahead_time', []))
-        Start_date = data.get('Start_date', [])
-        Period = int(data.get('Period', []))
-        Soil_type = data.get('Soil_type', [])
-        PermanentWiltingPoint = float(data.get('PermanentWiltingPoint', []))
-        FieldCapacityUpper = float(data.get('FieldCapacityUpper', []))
-        FieldCapacityLower = float(data.get('FieldCapacityLower', []))
-        Saturation = float(data.get('Saturation', []))
+        currentPlot.sensor_kind = data.get('Sensor_kind', [])
+        currentPlot.gps_info = data.get('Gps_info', [])
+        currentPlot.slope = float(data.get('Slope', []))
+        currentPlot.threshold = float(data.get('Threshold', []))
+        currentPlot.irrigation_amount = float(data.get('Irrigation_amount', []))
+        currentPlot.look_ahead_time = float(data.get('Look_ahead_time', []))
+        currentPlot.start_date = data.get('Start_date', [])
+        currentPlot.period = int(data.get('Period', []))
+        currentPlot.soil_type = data.get('Soil_type', [])
+        currentPlot.permanent_wilting_point = float(data.get('PermanentWiltingPoint', []))
+        currentPlot.field_capacity_upper = float(data.get('FieldCapacityUpper', []))
+        currentPlot.field_capacity_lower = float(data.get('FieldCapacityLower', []))
+        currentPlot.saturation = float(data.get('Saturation', []))
 
         # Get soil water retention curve -> currently not needed here
-        Soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
+        currentPlot.soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
 
-        if Sensor_kind == "tension":
-            Sensor_unit = "Moisture in cbar (Soil Tension)"
-        elif Sensor_kind == "capacitive":
-            Sensor_unit = "Moisture in % (Volumetric Water Content)"
+        if currentPlot.sensor_kind == "tension":
+            currentPlot.sensor_unit = "Moisture in cbar (Soil Tension)"
+        elif currentPlot.sensor_kind == "capacitive":
+            currentPlot.sensor_unit = "Moisture in % (Volumetric Water Content)"
         else :
-            Sensor_unit = "Unit is unknown"
+            currentPlot.sensor_unit = "Unit is unknown"
 
         return True
     else:
@@ -461,33 +388,48 @@ def returnConfig(url, body):
         # Call the getConfigFromFile function to load variables
         if getConfigFromFile():
 
+            # Get currentPlot
+            currentPlot = plot_manager.getCurrentPlot()
+
             # Check if all necessary global variables are properly defined
             if not all(isinstance(var, (int, float, str, list, dict)) for var in [
-                DeviceAndSensorIdsMoisture, DeviceAndSensorIdsTemp, DeviceAndSensorIdsFlow, 
-                Sensor_kind, Gps_info, Slope, Threshold, Irrigation_amount, Look_ahead_time, 
-                Start_date, Period, PermanentWiltingPoint, FieldCapacityUpper, 
-                FieldCapacityLower, Saturation]):
+                currentPlot.device_and_sensor_ids_moisture, 
+                currentPlot.device_and_sensor_ids_temp, 
+                currentPlot.device_and_sensor_ids_flow, 
+                currentPlot.sensor_kind, 
+                currentPlot.gps_info, 
+                currentPlot.slope, 
+                currentPlot.threshold, 
+                currentPlot.irrigation_amount, 
+                currentPlot.look_ahead_time, 
+                currentPlot.start_date, 
+                currentPlot.period, 
+                currentPlot.permanent_wilting_point, 
+                currentPlot.field_capacity_upper, 
+                currentPlot.field_capacity_lower, 
+                currentPlot.saturation]):
+
                 raise ValueError("Variables are still missing or of incorrect type after loading from config.")
         
             # Construct the response data
             response_data = {
-                "DeviceAndSensorIdsMoisture": DeviceAndSensorIdsMoisture,
-                "DeviceAndSensorIdsTemp": DeviceAndSensorIdsTemp,
-                "DeviceAndSensorIdsFlow": DeviceAndSensorIdsFlow,
-                "Sensor_kind": Sensor_kind,
-                "Gps_info": Gps_info,
-                "Slope": Slope,
-                "Threshold": Threshold,
-                "Irrigation_amount": Irrigation_amount,
-                "Look_ahead_time": Look_ahead_time,
-                "Start_date": Start_date,
-                "Period": Period,
-                "Soil_type": Soil_type,
-                "Soil_water_retention_curve": Soil_water_retention_curve,
-                "PermanentWiltingPoint": PermanentWiltingPoint,
-                "FieldCapacityUpper": FieldCapacityUpper,
-                "FieldCapacityLower": FieldCapacityLower,
-                "Saturation": Saturation
+                "DeviceAndSensorIdsMoisture": currentPlot.device_and_sensor_ids_moisture,
+                "DeviceAndSensorIdsTemp": currentPlot.device_and_sensor_ids_temp,
+                "DeviceAndSensorIdsFlow": currentPlot.device_and_sensor_ids_flow,
+                "Sensor_kind": currentPlot.sensor_kind,
+                "Gps_info": currentPlot.gps_info,
+                "Slope": currentPlot.slope,
+                "Threshold": currentPlot.threshold,
+                "Irrigation_amount": currentPlot.irrigation_amount,
+                "Look_ahead_time": currentPlot.look_ahead_time,
+                "Start_date": currentPlot.start_date,
+                "Period": currentPlot.period,
+                "Soil_type": currentPlot.soil_type,
+                "Soil_water_retention_curve": currentPlot.soil_water_retention_curve,
+                "PermanentWiltingPoint": currentPlot.permanent_wilting_point,
+                "FieldCapacityUpper": currentPlot.field_capacity_upper,
+                "FieldCapacityLower": currentPlot.field_capacity_lower,
+                "Saturation": currentPlot.saturation
             }
 
             # If all is good, return a 200 status code and the data
@@ -539,13 +481,14 @@ def checkConfigPresent(url, body):
 
 usock.routerGET("/api/checkConfigPresent", checkConfigPresent)
 
+# Called on page load->important for checkActiveIrrigation
 def checkActiveIrrigation(url, body):
-    # Called on page load->important for checkActiveIrrigation
+    currentPlot = plot_manager.getCurrentPlot()
     if not getConfigFromFile():
         response_data = {"activeIrrigation": False}
         status_code = 404
 
-    if len(DeviceAndSensorIdsFlow) != 0:
+    if len(currentPlot.device_and_sensor_ids_flow) != 0:
         response_data = {"activeIrrigation": True}
         status_code = 200
     else:
@@ -593,9 +536,9 @@ def getValuesForDashboard(url, body):
 
     currentPlot = plot_manager.getCurrentPlot()
 
-    for temp in DeviceAndSensorIdsTemp:
+    for temp in currentPlot.device_and_sensor_ids_temp:
         data_temp.append(currentPlot.load_latest_data_api(temp, "sensors"))
-    for moisture in DeviceAndSensorIdsMoisture:
+    for moisture in currentPlot.device_and_sensor_ids_moisture:
         data_moisture.append(currentPlot.load_latest_data_api(moisture, "sensors"))
 
     # Calculate the temp average
@@ -603,7 +546,7 @@ def getValuesForDashboard(url, body):
     # Calculate the moisture average
     moisture_average = sum(data_moisture) / len(data_moisture)
     # Calculate the VVO average if tension sensor is used
-    if Sensor_kind == "tension":
+    if currentPlot.sensor_kind == "tension":
         vwc_average = round(create_model.calc_volumetric_water_content_single_value(moisture_average, currentPlot)*100,2) 
 
         dashboard_data = {
@@ -631,12 +574,12 @@ def getHistoricalChartData(url, body):
 
     currentPlot = plot_manager.getCurrentPlot()
 
-    for moisture in DeviceAndSensorIdsMoisture:
-        data_moisture.append(currentPlot.load_data_api(moisture, "sensors", Start_date))
-    for temp in DeviceAndSensorIdsTemp:
-        data_temp.append(currentPlot.load_data_api(temp, "sensors", Start_date))
-    # for flow in DeviceAndSensorIdsFlow: # TODO: maybe display that also here (is displayed in datasets data)
-    #     data_flow.append(currentPlot.load_data_api(flow, "actuators", Start_date))
+    for moisture in currentPlot.device_and_sensor_ids_moisture:
+        data_moisture.append(currentPlot.load_data_api(moisture, "sensors", currentPlot.start_date))
+    for temp in currentPlot.device_and_sensor_ids_temp:
+        data_temp.append(currentPlot.load_data_api(temp, "sensors", currentPlot.start_date))
+    # for flow in currentPlot.device_and_sensor_ids_flow: # TODO: maybe display that also here (is displayed in datasets data)
+    #     data_flow.append(currentPlot.load_data_api(flow, "actuators", currentPlot.start_date))
     
     # extract series from key value pairs
     f_data_time = extract_and_format(data_moisture, "time", "str")
@@ -648,7 +591,7 @@ def getHistoricalChartData(url, body):
         "timestamps": f_data_time,
         "temperatureSeries": f_data_temp,
         "moistureSeries": f_data_moisture,
-        "unit": Sensor_unit
+        "unit": currentPlot.sensor_unit
     }
 
     return 200, bytes(json.dumps(chart_data), "utf8"), []
@@ -661,7 +604,7 @@ def getDatasetChartData(url, body):
     currentPlot = plot_manager.getCurrentPlot()
 
     # Get dataset data for chart of current plot
-    data_dataset = create_model.get_Data(currentPlot)
+    data_dataset = currentPlot.get_Data_for_display(create_model.To_be_dropped)
 
     if data_dataset is False:
         response_data = {"model": False}
@@ -705,7 +648,7 @@ def getPredictionChartData(url, body):
     currentPlot = plot_manager.getCurrentPlot()
 
     # Get prediction data for chart of current plot
-    data_pred = create_model.get_predictions(currentPlot)
+    data_pred = currentPlot.get_predictions()
 
     if data_pred is False:
         response_data = {"model": False}
@@ -722,14 +665,15 @@ def getPredictionChartData(url, body):
 
     # Quick and dirty adjusting predictions to match sensor values TODO: ??? right approach ???
     adjustment = 1
-    adjust_threshold = lambda Threshold, adjustment: Threshold - adjustment if Sensor_kind == "tension" else Threshold + adjustment
+    #adjust_threshold = lambda currentPlot.threshold, adjustment: currentPlot.threshold - adjustment if currentPlot.sensor_kind == "tension" else currentPlot.threshold + adjustment
+    adjust_threshold = lambda adjustment: currentPlot.threshold - adjustment if currentPlot.sensor_kind == "tension" else currentPlot.threshold + adjustment
 
-    # Add a horizontal line at Threshold
+    #  Add a horizontal line at Threshold
     annotations = {
         'yaxis': [
             {
-                'y': Threshold,
-                'y2': adjust_threshold(Threshold, adjustment),
+                'y': currentPlot.threshold,
+                'y2': adjust_threshold(adjustment),
                 'borderColor': '#FF4560',
                 'fillColor': '#FF4560',
                 'opacity': 0.25,
@@ -749,7 +693,7 @@ def getPredictionChartData(url, body):
             },
             {
                 # Line annotation at Threshold
-                'y': Threshold,
+                'y': currentPlot.threshold,
                 'borderColor': '#FF4560',
                 'strokeDashArray': 0,
                 'borderWidth': 2,
@@ -770,16 +714,16 @@ def getPredictionChartData(url, body):
         "timestamps": f_data_time,
         "moistureSeries": f_data_moisture,
         "annotations": annotations, # Could be also just the value instead of annotations object
-        "permanentWiltingPoint": PermanentWiltingPoint,
-        "fieldCapacityUpper": FieldCapacityUpper,
-        "fieldCapacityLower": FieldCapacityLower,
-        "saturation": Saturation,
-        "kind": Sensor_kind,
-        "unit": Sensor_unit
+        "permanentWiltingPoint": currentPlot.permanent_wilting_point,
+        "fieldCapacityUpper": currentPlot.field_capacity_upper,
+        "fieldCapacityLower": currentPlot.field_capacity_lower,
+        "saturation": currentPlot.saturation,
+        "kind": currentPlot.sensor_kind,
+        "unit": currentPlot.sensor_unit
     }
 
     # Conditionally add 'moistureSeriesVol' if available
-    if Sensor_kind == 'tension':# and 'f_data_moisture_vol' in locals() and f_data_moisture_vol is not None:
+    if currentPlot.sensor_kind == 'tension':# and 'f_data_moisture_vol' in locals() and f_data_moisture_vol is not None:
         f_data_moisture_vol = data_pred["smoothed_values_vol"].tolist()
         chart_data["moistureSeriesVol"] = f_data_moisture_vol
 
@@ -793,7 +737,7 @@ def getThreshold(url, body):
     currentPlot = plot_manager.getCurrentPlot()
 
     # Get prediction data for chart of current plot
-    threshold_timestamp = create_model.get_threshold_timestamp(currentPlot)
+    threshold_timestamp = currentPlot.get_threshold_timestamp()
 
     if threshold_timestamp is False:
         response_data = {"threshold": False}
@@ -812,27 +756,27 @@ usock.routerGET("/api/getThreshold", getThreshold)
 
 # Returns the senors kind: e.g. capacitive or tension
 def getSensorKind(url, body):
-    response_data = {"SensorKind": Sensor_kind}
+    response_data = {"SensorKind": plot_manager.getCurrentPlot().sensor_kind}
     
     return 200, bytes(json.dumps(response_data), "utf8"), []
 
 usock.routerGET("/api/getSensorKind", getSensorKind)
 
-# Frontend polls this to reload page when training is ready => only active for first round of training
+# Frontend polls this to reload page when training is ready => only active for first round of training TODO: different plots
 def isTrainingReady(url, body):
-    response_data = {"isTrainingFinished": plot_manager.getCurrentPlot().TrainingFinished}
+    response_data = {"isTrainingFinished": plot_manager.getCurrentPlot().training_finished}
 
     return 200, bytes(json.dumps(response_data), "utf8"), []
 
 usock.routerGET("/api/isTrainingReady", isTrainingReady)
 
-# surveillance, check threads are running
-def check_threads():
-    if not Training_thread or not Training_thread.is_alive():
+# surveillance, check threads are running TODO: different plots
+def check_threads(plot):
+    if not plot.training_thread or not plot.training_thread.is_alive():
         print("Training thread not alive, restarting...")
         startTraining(url=None, body=None)
 
-    if not Prediction_thread or not Prediction_thread.is_alive():
+    if not plot.prediction_thread or not plot.prediction_thread.is_alive():
         print("Prediction thread not alive, restarting...")
         startPrediction()
 
@@ -846,7 +790,7 @@ def workerToPredict(plot):
         return (predict_time - now).total_seconds()
     
     # Initial waiting, after model was trained, prediction was conducted and actuation was triggered 
-    time_to_sleep = time_until_n_hours(Predict_period_hours)
+    time_to_sleep = time_until_n_hours(plot.predict_period_hours)
     print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until conducting next prediction...")
     time.sleep(time_to_sleep)  # Sleep until threshold
     
@@ -883,14 +827,14 @@ def workerToPredict(plot):
             print("Prediction finished at: ", end_time, "The duration was: ", duration)
 
             # Call routine to irrigate
-            if len(DeviceAndSensorIdsFlow) > 0: 
-                actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount, Sensor_kind)
+            if len(plot.device_and_sensor_ids_flow) > 0: 
+                actuation.main(currentSoilTension, threshold_timestamp, predictions, plot)
 
             # After initial training and prediction, start surveillance
             threading.Timer(3600, check_threads(plot)).start()  # Check every hour if threads are alive
 
-            # Wait for Predict_period_hours periodically for next cycle
-            time_to_sleep = time_until_n_hours(Predict_period_hours)
+            # Wait for predict_period_hours periodically for next cycle
+            time_to_sleep = time_until_n_hours(plot.predict_period_hours)
             print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until conducting next prediction...")
             time.sleep(time_to_sleep)  # Sleep until threshold
         except Exception as e:
@@ -900,18 +844,17 @@ def workerToPredict(plot):
 # Starts a thread that runs prediction
 def startPrediction(plot):
     global ThreadId
-    global Prediction_thread
-
-    if not plot.CurrentlyTraining:
+    
+    if not plot.currently_training:
         # Create a new thread for training
-        Prediction_thread = threading.Thread(target=workerToPredict, args=(plot))
+        plot.prediction_thread = threading.Thread(target=workerToPredict, args=(plot))
         ThreadId += 1
 
         # Append thread to list
-        Threads.append(Prediction_thread)
+        Threads.append(plot.prediction_thread)
 
         # Start the thread
-        Prediction_thread.start()
+        plot.prediction_thread.start()
 
     
 # Thread that runs training
@@ -929,7 +872,7 @@ def workerToTrain(thread_id, currentPlot, url, startTrainingNow):
         try:
             if not startTrainingNow:
                 # Wait until the next noon
-                time_to_sleep = time_until_noon(Train_period_days)
+                time_to_sleep = time_until_noon(currentPlot.train_period_days)
                 print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until next training...")
                 time.sleep(time_to_sleep)  # Sleep until noon
 
@@ -959,8 +902,8 @@ def workerToTrain(thread_id, currentPlot, url, startTrainingNow):
                 threshold_timestamp = loaded_variables['threshold_timestamp']
                 predictions = loaded_variables['predictions']
 
-            currentPlot.TrainingFinished = True
-            currentPlot.CurrentlyTraining = False
+            currentPlot.training_finished = True
+            currentPlot.currently_training = False
             startTrainingNow = False
 
             end_time = datetime.now().replace(microsecond=0)
@@ -968,11 +911,11 @@ def workerToTrain(thread_id, currentPlot, url, startTrainingNow):
             print("Training finished at: ", end_time, "The duration was: ", duration)
 
             # Call routine to irrigate TODO:plots
-            if len(DeviceAndSensorIdsFlow) > 0: 
-                actuation.main(currentSoilTension, threshold_timestamp, predictions, Irrigation_amount, Sensor_kind)
+            if len(currentPlot.device_and_sensor_ids_flow) > 0: 
+                actuation.main(currentSoilTension, threshold_timestamp, predictions, currentPlot)
 
             # Start thread that creates predictions periodically
-            if currentPlot.Prediction_thread is None:
+            if currentPlot.prediction_thread is None:
                 startPrediction(currentPlot)
 
         except Exception as e:
@@ -985,24 +928,24 @@ def startTraining(url, body):
 
     currentPlot = plot_manager.getCurrentPlot()
 
-    if not currentPlot.CurrentlyTraining:
+    if not currentPlot.currently_training:
         # Stop/kill all other threads for training a model
-        if currentPlot.Training_thread is not None:
-            currentPlot.Training_thread.terminate()
+        if currentPlot.training_thread is not None:
+            currentPlot.training_thread.terminate()
 
         # Reset flags for a new round
-        currentPlot.TrainingFinished = False
-        currentPlot.CurrentlyTraining = True
+        currentPlot.training_finished = False
+        currentPlot.currently_training = True
 
         # Create a new thread for training
-        currentPlot.Training_thread = threading.Thread(target=workerToTrain, args=(ThreadId, currentPlot, url, True))
+        currentPlot.training_thread = threading.Thread(target=workerToTrain, args=(ThreadId, currentPlot, url, True))
         ThreadId += 1
 
         # Append thread to list
-        Threads.append(currentPlot.Training_thread)
+        Threads.append(currentPlot.training_thread)
 
         # Start the thread
-        currentPlot.Training_thread.start()
+        currentPlot.training_thread.start()
 
     return 200, b"", []
 
