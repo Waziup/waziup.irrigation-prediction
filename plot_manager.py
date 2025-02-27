@@ -1,33 +1,55 @@
 from plot import Plot
 import os
 import re
+import main # check whether 
 
 # Plot related vars
-Plots = []  # This stores all plots
-CurrentPlot = 1
-ConfigPath = 'config/current_config_plot1.json' #init with first plot
-Config_folder_path = "config/"
+Plots = {}                                      # This stores all plots
+CurrentPlot = 1                                 # init with first plot
+ConfigPath = 'config/current_config_plot1.json' # init with first plot
+Config_folder_path = "config/"                  # Folder with configfiles
 
-# Array of active threads TODO: if training started kill other threads.
+# Array of active threads TODO: if training started kill other threads.(formerly done in main.py)
 #Threads = []
 #ThreadId = 0
 #Restart_time = 1800 # DEBUG 1800 ~ 30 min in s
+
+# Just read directory and retrieve filenames in sorted manner
+def readFiles():
+    files = [f for f in os.listdir(Config_folder_path) if os.path.isfile(os.path.join(Config_folder_path, f))]
+    files.sort()
+
+    return files
+
+# Set the current ṕlot
+def setPlot(plot_nr_in_ui):
+    global CurrentPlot, ConfigPath
+
+    files = readFiles()
+
+    # Point to config file of current plot
+    Plots[plot_nr_in_ui].configPath = Config_folder_path + files[plot_nr_in_ui - 1]
+    
+    # Set also changes in manager_class, TODO: redundant
+    CurrentPlot = plot_nr_in_ui
+    ConfigPath = Plots[plot_nr_in_ui].configPath
+
+    # Get config from json and load data to vars TODO: check duplicate call of getConfigFromFile, also called via API by frontend!!!
+    return main.getConfigFromFile()
 
 
 # When App starts it looks through fromer plot configuration and reloads them, also creates object of a class that represents plots
 def loadPlots():
     global Plots
 
-    files = [f for f in os.listdir(Config_folder_path) if os.path.isfile(os.path.join(Config_folder_path, f))]
+    #Plots = {}
 
-    # sort them by index
-    files.sort()
-    #print(files)
+    files = readFiles()
 
     # Create class to manage tabs/plots
     for index, file in enumerate(files, start=1):  # Using enumerate to get index correctly
-        plot_obj = Plot(index, Config_folder_path + file)
-        Plots.append(plot_obj)
+        plot_obj = Plot(index, os.path.join(Config_folder_path, file))
+        Plots[index] = plot_obj
         plot_obj.printPlotNumber()  # Print for debugging
 
     return len(files)
@@ -36,10 +58,7 @@ def loadPlots():
 def addPlot():
     global Plots
 
-    files = [f for f in os.listdir(Config_folder_path) if os.path.isfile(os.path.join(Config_folder_path, f))]
-
-    # sort them by index
-    files.sort()
+    files = readFiles()
     
     # retrieve the last plot and increment filename
     newfilename = files[-1]
@@ -50,9 +69,10 @@ def addPlot():
         next_number = number + 1  # Increment number
         newfilename = re.sub(r'plot(\d+)(\.json)$', f'plot{next_number}.json', newfilename)   # Replace with new number
 
-
+    # Create new plot
     plot_obj = Plot(next_number, Config_folder_path + newfilename)
-    Plots.append(plot_obj)
+    Plots[next_number] = plot_obj
+
     plot_obj.printPlotNumber()  # Print for debugging
     plot_obj.setState(True)
 
@@ -84,15 +104,10 @@ def getPlots():
     return Plots  # Returns the list of Plot objects
 
 def getCurrentConfig():
-    return Plots[CurrentPlot-1].configPath
+    return Plots[CurrentPlot].configPath
 
 def getCurrentPlot():
-    return Plots[CurrentPlot-1]
+    return Plots[CurrentPlot]
 
 def setCurrentConfig(path):
-    Plots[CurrentPlot-1].configPath = path
-
-def setCurrentPlot(nr):
-    global CurrentPlot
-
-    CurrentPlot = nr
+    Plots[CurrentPlot].configPath = path

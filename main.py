@@ -211,15 +211,12 @@ def setPlot(url, body):
     parsed_data = parse_qs(body.decode('utf-8'))
 
     # Get currentPlot
-    plot_manager.setCurrentPlot(int(parsed_data.get('currentPlot', [])[0]))
+    currentTab = int(parsed_data.get('currentPlot', [])[0])
 
-    # Point to config file of current plot
-    plot_manager.Plots[plot_manager.CurrentPlot-1].configPath = re.sub(r'plot\d+\.json$', f'plot{plot_manager.CurrentPlot }.json', plot_manager.getCurrentConfig())
-
-    # Get config from json and load data to vars
-    getConfigFromFile()
-
-    return 200, b"", []
+    if(plot_manager.setPlot(currentTab)):
+        return 200, b"Plot has been set.", []
+    else:
+        return 200, b"Has been set but has no config yet.", []
 
 usock.routerPOST("/api/setPlot", setPlot)
 
@@ -887,13 +884,13 @@ def workerToTrain(thread_id, currentPlot, url, startTrainingNow):
 
             if Perform_training:
                 # Call create model function
-                currentSoilTension, threshold_timestamp, predictions = create_model.main(currentPlot)
+                currentSoilTension, threshold_timestamp, currentPlot.predictions = create_model.main(currentPlot)
 
                 # Create object to save
                 variables_to_save = {
                     'currentSoilTension': currentSoilTension,
                     'threshold_timestamp': threshold_timestamp,
-                    'predictions': predictions
+                    'predictions': currentPlot.predictions
                 }
                 # Save the variables to a file
                 with open(file_path, 'wb') as f:
@@ -903,8 +900,8 @@ def workerToTrain(thread_id, currentPlot, url, startTrainingNow):
                 with open(file_path, 'rb') as f:
                     loaded_variables = pickle.load(f)
                 currentSoilTension = loaded_variables['currentSoilTension']
-                threshold_timestamp = loaded_variables['threshold_timestamp']
-                predictions = loaded_variables['predictions']
+                currentPlot.threshold_timestamp = loaded_variables['threshold_timestamp']
+                currentPlot.predictions = loaded_variables['predictions']
 
             currentPlot.training_finished = True
             currentPlot.currently_training = False

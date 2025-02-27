@@ -2,6 +2,7 @@
 from datetime import timedelta
 import datetime
 import json
+import re
 import urllib
 import pandas as pd
 import requests
@@ -14,9 +15,10 @@ class Plot:
   # Class init, called when created in UI
   def __init__(self, plot_number, configPath):
     # Fundamental
-    self.plot_number = plot_number                # Int to enumerate plots
-    self.configPath = configPath                  # Path to current_config.json
-    self.user_given_name = "Plot " + str(plot_number)
+    self.plot_number = plot_number                                            # Int to enumerate plots
+    self.configPath = configPath                                              # Path to current_config.json
+    self.tab_num = int(re.search(r'(\d+)\.json$', self.configPath).group(1))  # Current number in tabs
+    self.user_given_name = "Plot " + str(plot_number)                         # User given name is preset, but can be changed later
 
     # Variables that were global before, now plot-specific TODO: implement everywhere
     # Device
@@ -93,6 +95,7 @@ class Plot:
 
   # Obtain current config from file
   def load_latest_data_api(self, sensor_name, type):  # , token)
+    print("load_latest_data_api: will load data for plot: " + self.user_given_name)
     apiUrl = NetworkUtils.ApiUrl
 
     if apiUrl.startswith('http://wazigate/'):
@@ -129,6 +132,13 @@ class Plot:
         # Send a GET request to the API
         response = requests.get(encoded_url, headers=headers)
 
+        # Handle token expiration (HTTP 401)
+        if response.status_code == 401:
+            print("Token expired, refreshing token...")
+            NetworkUtils.get_token()  # Refresh token
+            headers['Authorization'] = f'Bearer {NetworkUtils.Token}'
+            response = requests.get(request_url, headers=headers)  # Retry request
+
         # Check if the request was successful (status code 200)
         if response.status_code == 200:
             # The response content contains the data from the API
@@ -144,7 +154,7 @@ class Plot:
 
     return response_ok
 
-  # Load from CSV file -> obsolete
+  # Load from CSV file -> obsoleteload_latest_data_api
   def load_data(path):
     # creating a data frame
     data = pd.read_csv("binned_removed.csv", header=0)
@@ -188,6 +198,7 @@ class Plot:
 
   # Load from wazigate API
   def load_data_api(self, sensor_name, type, from_timestamp):  # , token)
+    print("load_data_api: will load data for plot: " + self.user_given_name)
     # Load config to obtain GPS coordinates
     self.config = self.read_config()
 
@@ -240,6 +251,13 @@ class Plot:
         # Send a GET request to the API
         response = requests.get(encoded_url, headers=headers)
 
+        # Handle token expiration (HTTP 401)
+        if response.status_code == 401:
+            print("Token expired, refreshing token...")
+            NetworkUtils.get_token()  # Refresh token
+            headers['Authorization'] = f'Bearer {NetworkUtils.Token}'
+            response = requests.get(encoded_url, headers=headers)  # Retry request
+
         # Check if the request was successful (status code 200)
         if response.status_code == 200:
             # The response content contains the data from the API
@@ -255,13 +273,12 @@ class Plot:
   
 
   # Redundant set active state
-  def setState(state):
-    global Currently_active
-    Currently_active = state
+  def setState(self, state):
+    self.currently_active = state
 
   # Redundant get active state
-  def getState():
-    return Currently_active
+  def getState(self):
+    return self.currently_active
   
   # Threads
 

@@ -41,7 +41,7 @@
         })
         .catch(error => console.error('Error loading tooltip text:', error));
 
-      // Get plots formerly saved
+      // Get plots formerly saved TODO: backend only has 
       fetch(`../api/loadPlots`)
         .then((response) => response.json())
         .then((data) => {
