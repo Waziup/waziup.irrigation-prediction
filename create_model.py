@@ -1975,7 +1975,7 @@ def calc_threshold(predictions, col, plot):
 
 def predict_with_updated_data(plot):
     # Run data pipeline to obtain latest data
-    train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = data_pipeline()
+    train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = data_pipeline(plot)
     # Create future value set to feed new data to model
     future_features = create_future_values(plot.data, plot)
     # Compare dataframes cols to be sure that they match, otherwise drop

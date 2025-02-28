@@ -41,11 +41,11 @@
         })
         .catch(error => console.error('Error loading tooltip text:', error));
 
-      // Get plots formerly saved TODO: backend only has 
-      fetch(`../api/loadPlots`)
+      // Get plots formerly saved TODO: call different function from here, this creates plots
+      fetch(`../api/getPlots`)
         .then((response) => response.json())
         .then((data) => {
-          if (data.length == 0) {
+          if (data.tabnames.length == 0) {
             // First Plot, added manually
             document.getElementById('tab-1').addEventListener('click', () => {
               switchTab(1);
@@ -60,8 +60,7 @@
             // just create tabs amount
             //let lastTab = 1
             for (let i = 2; i <= data.length; i++) {
-              addTab();
-              //lastTab = i
+              addTab(tabnames[i]);
             }
             switchTab(1)
           }
@@ -172,7 +171,7 @@
       loadStuff();
     }
 
-    // to close an currently active tab
+    // To close an currently active tab
     function removeTab(tabId) {
       const tabToRemove = document.getElementById(`tab-${tabId}`);
       if (tabToRemove) {
@@ -199,24 +198,6 @@
         .then((data) => console.log(data))
         .catch((error) => console.error("Error:", error));
 
-      }
-    }
-
-    // LOL^^
-    function fetchContentForTab(tabId) {
-      const centerFullDiv = document.querySelector('center_full');
-
-      if (centerFullDiv) {
-        // Store the original HTML structure of center_full
-        const originalContent = centerFullDiv.outerHTML;
-
-        // Remove existing center_full
-        centerFullDiv.remove();
-
-        // Reinsert the original structure inside its parent container
-        document.getElementById('tabContent').insertAdjacentHTML('beforeend', originalContent);
-      } else {
-        console.error(`center_full div not found.`);
       }
     }
 

@@ -275,6 +275,9 @@
             // Assignment for Sensor_kind
             document.getElementById(response_data.Sensor_kind).checked = true;
 
+            // Assignment for a user given plot name
+            document.getElementById("name").value = response_data.Name;
+
             // Assignment for Gps_info
             document.getElementById("gps_form").value = String(response_data.Gps_info.lattitude) + ", " + String(response_data.Gps_info.longitude)
 
@@ -419,6 +422,9 @@
 
     // Parse data from forms after "Save"
     function parseForms() {
+      var name = document.getElementById(
+        "name_form"
+      ).value;
       var selectedSensorKind = document.querySelector(
         'input[name="sensor_kind_radio"]:checked'
       ).value;
@@ -463,6 +469,8 @@
       var isoTimestamp = new Date(starting_date).toISOString();
 
       const Params =
+        "&name=" +
+        encodeURIComponent(name) +
         "&sensor_kind=" +
         encodeURIComponent(selectedSensorKind) +
         "&gps=" +

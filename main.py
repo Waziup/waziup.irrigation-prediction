@@ -127,31 +127,19 @@ class LogCleanerThread(threading.Thread):
     def stop(self):
         self.stop_thread.set()
 
-# setup function for log cleaner
+# setup function for log cleaner => TODO: changed function WITHOUT TESTING IT!!!!!!!!!!!!!!!!!
 def schedule_log_cleanup():
-    # Paths to the log files you want to monitor and clean
     logs_to_clean = [
         ("logs.log", 90),       # Python log file
         ("python_logs.log", 90) # Docker log file
     ]
 
     # Start a thread for each log file
-    cleaner_threads = []
     for log_path, age_limit in logs_to_clean:
         cleaner = LogCleanerThread(file_path=log_path, age_limit_days=age_limit)
+        cleaner.daemon = True  # Run thread in the background
         cleaner.start()
-        cleaner_threads.append(cleaner)
 
-    try:
-        # Keep the main thread alive while the cleaner threads run
-        for cleaner in cleaner_threads:
-            cleaner.join()
-    except KeyboardInterrupt:
-        print("Stopping log cleaners...")
-        for cleaner in cleaner_threads:
-            cleaner.stop()
-        for cleaner in cleaner_threads:
-            cleaner.join()
 
 # Deletes files older than the threshold from the specified folder and its subfolders.
 def delete_old_files(folder_path):
@@ -214,25 +202,30 @@ def setPlot(url, body):
     currentTab = int(parsed_data.get('currentPlot', [])[0])
 
     if(plot_manager.setPlot(currentTab)):
-        return 200, b"Plot has been set.", []
+            return 200, b"Plot has been set.", []
     else:
         return 200, b"Has been set but has no config yet.", []
 
 usock.routerPOST("/api/setPlot", setPlot)
 
-# When App starts it looks through fromer plot configuration and reloads them, also creates object of a class that represents plots
-def loadPlots(url, body):
+# When Page is reloaded it will return formerly loaded plots
+def getPlots(url, body):
     # Call function in plot manager
-    amount = plot_manager.loadPlots()
+    plots = plot_manager.getPlots()
+
+    # Create array with names of tabs to return to frontend
+    tab_name_array = []
+    for plot in plots:
+        tab_name_array.append(plot.user_given_name)
 
     response = {
-        "length": amount,
+        "tabnames": tab_name_array,
         "status_code": 200
     }
 
     return response["status_code"], bytes(json.dumps(response), "utf8"), []
 
-usock.routerGET("/api/loadPlots", loadPlots)
+usock.routerGET("/api/getPlots", getPlots)
 
 # Add a plot during runtine TODO: finish
 def addPlot(url, body):
@@ -282,6 +275,8 @@ def setConfig(url, body):
     currentPlot.device_and_sensor_ids_flow = parsed_data.get('selectedOptionsFlow', [])
 
     # Get data from forms
+    name_list = parsed_data.get('name', [])
+    currentPlot.user_given_name = name_list[0] if name_list else ""
     currentPlot.sensor_kind = parsed_data.get('sensor_kind', [])[0]
     currentPlot.gps_info = parsed_data.get('gps', [])[0]
     currentPlot.slope = parsed_data.get('slope', [])[0]
@@ -310,11 +305,17 @@ def setConfig(url, body):
 
     # Organize the variables into a dictionary
     data = {
-        "DeviceAndSensorIdsMoisture": currentPlot.device_and_sensor_ids_moistureread,
+        "DeviceAndSensorIdsMoisture": currentPlot.device_and_sensor_ids_moisture,
         "DeviceAndSensorIdsTemp": currentPlot.device_and_sensor_ids_temp,
         "DeviceAndSensorIdsFlow": currentPlot.device_and_sensor_ids_flow,
         "Sensor_kind" : currentPlot.sensor_kind,
-        "Gps_info": {"lattitude": currentPlot.gps_info['lattitude'], "longitude": currentPlot.gps_info['longitude']},
+        "Name": currentPlot.user_given_name,
+        #"Gps_info": {"lattitude": currentPlot.gps_info['lattitude'], "longitude": currentPlot.gps_info['longitude']},
+        #"Gps_info": currentPlot.gps_info,
+        "Gps_info": {
+            "lattitude": currentPlot.gps_info.split(", ")[0], 
+            "longitude": currentPlot.gps_info.split(", ")[1]
+        },
         "Slope": currentPlot.slope,
         "Threshold": currentPlot.threshold,
         "Irrigation_amount": currentPlot.irrigation_amount,
@@ -355,6 +356,7 @@ def getConfigFromFile():
         currentPlot.device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
 
         # Get data from forms
+        currentPlot.user_given_name = data.get('Name', [])
         currentPlot.sensor_kind = data.get('Sensor_kind', [])
         currentPlot.gps_info = data.get('Gps_info', [])
         currentPlot.slope = float(data.get('Slope', []))
@@ -398,6 +400,7 @@ def returnConfig(url, body):
                 currentPlot.device_and_sensor_ids_temp, 
                 currentPlot.device_and_sensor_ids_flow, 
                 currentPlot.sensor_kind, 
+                currentPlot.name,
                 currentPlot.gps_info, 
                 currentPlot.slope, 
                 currentPlot.threshold, 
@@ -418,6 +421,7 @@ def returnConfig(url, body):
                 "DeviceAndSensorIdsTemp": currentPlot.device_and_sensor_ids_temp,
                 "DeviceAndSensorIdsFlow": currentPlot.device_and_sensor_ids_flow,
                 "Sensor_kind": currentPlot.sensor_kind,
+                "Name": currentPlot.name,
                 "Gps_info": currentPlot.gps_info,
                 "Slope": currentPlot.slope,
                 "Threshold": currentPlot.threshold,
@@ -804,13 +808,13 @@ def workerToPredict(plot):
 
             if Perform_training: #same var is used here to preserve functionality
                 # Call predict_with_updated_data function
-                currentSoilTension, threshold_timestamp, predictions = create_model.predict_with_updated_data(plot)
+                currentSoilTension, plot.threshold_timestamp, plot.predictions = create_model.predict_with_updated_data(plot)
 
                 # Create object to save
                 variables_to_save = {
                     'currentSoilTension': currentSoilTension,
-                    'threshold_timestamp': threshold_timestamp,
-                    'predictions': predictions
+                    'threshold_timestamp': plot.threshold_timestamp,
+                    'predictions': plot.predictions
                 }
                 # Save the variables to a file
                 with open(file_path, 'wb') as f:
@@ -821,7 +825,7 @@ def workerToPredict(plot):
                     loaded_variables = pickle.load(f)
                 currentSoilTension = loaded_variables['currentSoilTension']
                 threshold_timestamp = loaded_variables['threshold_timestamp']
-                predictions = loaded_variables['predictions']
+                plot.predictions = loaded_variables['predictions']
 
             end_time = datetime.now().replace(microsecond=0)
             duration = end_time - start_time
@@ -829,7 +833,7 @@ def workerToPredict(plot):
 
             # Call routine to irrigate
             if len(plot.device_and_sensor_ids_flow) > 0: 
-                actuation.main(currentSoilTension, threshold_timestamp, predictions, plot)
+                actuation.main(currentSoilTension, threshold_timestamp, plot.predictions, plot)
 
             # After initial training and prediction, start surveillance
             threading.Timer(3600, check_threads(plot)).start()  # Check every hour if threads are alive
@@ -913,7 +917,7 @@ def workerToTrain(thread_id, currentPlot, url, startTrainingNow):
 
             # Call routine to irrigate TODO:plots
             if len(currentPlot.device_and_sensor_ids_flow) > 0: 
-                actuation.main(currentSoilTension, threshold_timestamp, predictions, currentPlot)
+                actuation.main(currentSoilTension, currentPlot.threshold_timestamp, currentPlot.predictions, currentPlot)
 
             # Start thread that creates predictions periodically
             if currentPlot.prediction_thread is None:
@@ -959,9 +963,8 @@ if __name__ == "__main__":
     # Load environment variables
     NetworkUtils.get_env()
 
-    # Start serving
-    usock.sockAddr = NetworkUtils.Proxy
-    usock.start()
+    # Load all plots once on startup
+    plot_manager.loadPlots()
 
     # Start thread that deletes old models
     folder_to_check = "models"
@@ -969,3 +972,7 @@ if __name__ == "__main__":
 
     # Clean logs
     schedule_log_cleanup()
+
+    # Start serving
+    usock.sockAddr = NetworkUtils.Proxy
+    usock.start() # will be "stuck" in here, code afterwards is not executed

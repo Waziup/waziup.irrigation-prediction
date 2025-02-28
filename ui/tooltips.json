@@ -1,4 +1,5 @@
 {
+    "nameTooltip":                  "Assign a custom name to the plot.",
     "moistureTooltip":              "Select one or more sensor devices that observe Soil tension and is connected to your WaziGate. To select/deselect multiple sensors hold down [CTRL]-key.",
     "moistureKindTooltip":          "Select the kind of soil moisture sensor you are using to messure the humidity of the soil. There are capacitive sensors which messure the volumetric water content in percent (0-100%) or as ratio/proportion (0-1). Soil tension sensors messure the tension of the soil in (kPa, cBar).",
     "tempTooltip":                  "Select one or more sensor devices that observe Soil temperature and is connected to your WaziGate. To select/deselect multiple sensors hold down [CTRL]-key.",

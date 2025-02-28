@@ -15,9 +15,9 @@ class Plot:
   # Class init, called when created in UI
   def __init__(self, plot_number, configPath):
     # Fundamental
-    self.plot_number = plot_number                                            # Int to enumerate plots
+    self.plot_number = plot_number                                            # Int to enumerate plots/tabs
     self.configPath = configPath                                              # Path to current_config.json
-    self.tab_num = int(re.search(r'(\d+)\.json$', self.configPath).group(1))  # Current number in tabs
+    self.id = int(re.search(r'(\d+)\.json$', self.configPath).group(1))       # Current unique number, always increme
     self.user_given_name = "Plot " + str(plot_number)                         # User given name is preset, but can be changed later
 
     # Variables that were global before, now plot-specific TODO: implement everywhere
@@ -68,6 +68,8 @@ class Plot:
     self.data_w = pd.DataFrame
     self.predictions = pd.DataFrame
     self.threshold_timestamp = ""
+
+    # Model
     self.use_pycaret = True
     self.tuned_best = None
     self.best_exp = None
@@ -90,8 +92,8 @@ class Plot:
 
   # Just print some class properies
   def printPlotNumber(self):
-    print("Current object is plot number: " + str(self.plot_number),
-          ", with the path: " + self.configPath)
+    print("Current object is plot/tab number: " + str(self.plot_number),
+          ", with the path: " + self.configPath + ", it has the internal id: ", self.id)
 
   # Obtain current config from file
   def load_latest_data_api(self, sensor_name, type):  # , token)
