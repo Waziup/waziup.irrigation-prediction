@@ -21,7 +21,7 @@
     var MaxValuesToBeDisplayed = 1000;
     let chart;
     var TrainingReadyCheck = 10000;
-    let tabCounter = 1;
+    let tabCounter = 0;
 
 
     // Event listeners
@@ -47,20 +47,19 @@
         .then((data) => {
           if (data.tabnames.length == 0) {
             // First Plot, added manually
-            document.getElementById('tab-1').addEventListener('click', () => {
-              switchTab(1);
+            addTab("Plot 1")
+            // Add plot to backend
+            fetch(`../api/addPlot`)
+              .then((response) => response.json())
+              .then((data) => {
+                console.log("Next Plot was added with nr: ", data.next_number);
             });
+            // Switch to first tab
+            switchTab(1);
           } else {
-            newTab = document.getElementById('tab-1')
-            newTab.addEventListener('click', () => {
-              switchTab(1);
-            });
-            // Add the new tab to the tabs container
-            document.getElementById('tabs').appendChild(newTab);
-            // just create tabs amount
-            //let lastTab = 1
-            for (let i = 2; i <= data.length; i++) {
-              addTab(tabnames[i]);
+            // Add saved plots, fetched from backend
+            for (let i = 0; i < data.tabnames.length; i++) {
+              addTab(data.tabnames[i]);
             }
             switchTab(1)
           }
@@ -93,7 +92,8 @@
       });
     });
 
-    function addTab() {
+    // Add plot without informing backend (called for loading plots from file)
+    function addTab(name) {
       const tabId = ++tabCounter; // Increment tabCounter
 
       // Create a new tab
@@ -103,7 +103,7 @@
 
       // Create a label for the tab
       const tabLabel = document.createElement('span');
-      tabLabel.textContent = `Plot ${tabId}`;
+      tabLabel.textContent = name;// `Plot ${tabId}`;
       tabLabel.addEventListener('click', () => switchTab(tabId));
 
       // Create a close button
@@ -901,7 +901,7 @@
 <body>
   <div class="tab-container">
     <div id="tabs" class="tabs">
-      <button id="tab-1" class="tab">Plot 1</button>
+      <!-- <button id="tab-1" class="tab">Plot 1</button> -->
     </div>
     <div>
       <button id="addTabButton" class="add-tab-button">+ Add Plot</button>

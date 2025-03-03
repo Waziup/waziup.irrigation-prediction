@@ -16,20 +16,30 @@ Config_folder_path = "config/"                  # Folder with configfiles
 
 # Just read directory and retrieve filenames in sorted manner
 def readFiles():
-    files = [f for f in os.listdir(Config_folder_path) if os.path.isfile(os.path.join(Config_folder_path, f))]
-    files.sort()
+    try:
+        files = [f for f in os.listdir(Config_folder_path) if os.path.isfile(os.path.join(Config_folder_path, f))]
+        files.sort()
+    except Exception as e:
+        files = []
 
     return files
 
 # Set the current ṕlot
 def setPlot(plot_nr_in_ui):
-    global CurrentPlot, ConfigPath
+    global CurrentPlot, ConfigPath, Plots
 
     files = readFiles()
 
     # Point to config file of current plot
-    Plots[plot_nr_in_ui].configPath = Config_folder_path + files[plot_nr_in_ui - 1]
-    
+    try:
+        Plots[plot_nr_in_ui].configPath = Config_folder_path + files[plot_nr_in_ui - 1]
+    # There is no file, iterate the highest plot number present in /config folder
+    except Exception as e:
+        match = re.search(r'plot(\d+)\.json$', Plots[len(Plots)].configPath)
+        if match:
+            number = int(match.group(1))
+            Plots[plot_nr_in_ui].configPath  = re.sub(r'plot(\d+)(\.json)$', f'plot{number}.json', Plots[len(Plots)].configPath) 
+
     # Set also changes in manager_class, TODO: redundant
     CurrentPlot = plot_nr_in_ui
     ConfigPath = Plots[plot_nr_in_ui].configPath
@@ -61,7 +71,11 @@ def addPlot():
     files = readFiles()
     
     # retrieve the last plot and increment filename
-    newfilename = files[-1]
+    try:
+        newfilename = files[-1]
+    except Exception as e: # in case setup has never been run
+        newfilename = 'config/current_config_plot0.json' # LOL
+
     next_number = 0
     match = re.search(r'plot(\d+)\.json$', newfilename)
     if match:

@@ -215,8 +215,9 @@ def getPlots(url, body):
 
     # Create array with names of tabs to return to frontend
     tab_name_array = []
-    for plot in plots:
-        tab_name_array.append(plot.user_given_name)
+    #for plot in plots:
+    for i in range(1, len(plots)+1, 1):
+        tab_name_array.append(plots[i].user_given_name)
 
     response = {
         "tabnames": tab_name_array,
@@ -384,6 +385,49 @@ def getConfigFromFile():
         return True
     else:
         return False
+    
+# Load config from all file
+def getConfigsFromAllFiles():
+    # Get plots
+    plots = plot_manager.getPlots()
+
+    for i in range(1,len(plots)+1,1):
+        config = plots[i].configPath
+        if os.path.exists(config):
+            with open(config, 'r') as file:
+                # Parse JSON from the file
+                data = json.load(file)
+
+            # Get choosen sensors
+            plots[i].device_and_sensor_ids_moisture = data.get('DeviceAndSensorIdsMoisture', [])
+            plots[i].device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
+            plots[i].device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
+
+            # Get data from forms
+            plots[i].user_given_name = data.get('Name', [])
+            plots[i].sensor_kind = data.get('Sensor_kind', [])
+            plots[i].gps_info = data.get('Gps_info', [])
+            plots[i].slope = float(data.get('Slope', []))
+            plots[i].threshold = float(data.get('Threshold', []))
+            plots[i].irrigation_amount = float(data.get('Irrigation_amount', []))
+            plots[i].look_ahead_time = float(data.get('Look_ahead_time', []))
+            plots[i].start_date = data.get('Start_date', [])
+            plots[i].period = int(data.get('Period', []))
+            plots[i].soil_type = data.get('Soil_type', [])
+            plots[i].permanent_wilting_point = float(data.get('PermanentWiltingPoint', []))
+            plots[i].field_capacity_upper = float(data.get('FieldCapacityUpper', []))
+            plots[i].field_capacity_lower = float(data.get('FieldCapacityLower', []))
+            plots[i].saturation = float(data.get('Saturation', []))
+
+            # Get soil water retention curve -> currently not needed here
+            plots[i].soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
+
+            if plots[i].sensor_kind == "tension":
+                plots[i].sensor_unit = "Moisture in cbar (Soil Tension)"
+            elif plots[i].sensor_kind == "capacitive":
+                plots[i].sensor_unit = "Moisture in % (Volumetric Water Content)"
+            else :
+                plots[i].sensor_unit = "Unit is unknown"
 
 # Get the config from backend to disply it in frontend settings.html
 def returnConfig(url, body):
@@ -469,7 +513,7 @@ def returnConfig(url, body):
 usock.routerGET("/api/returnConfig", returnConfig)
 
 def checkConfigPresent(url, body):
-    if os.path.exists(plot_manager.getCurrentConfig()):
+    if os.path.exists(plot_manager.getCurrentConfig()): # solve multiple calls with dirty bit
         response_data = {"config_present": True}
         status_code = 200
         getConfigFromFile()
@@ -965,6 +1009,9 @@ if __name__ == "__main__":
 
     # Load all plots once on startup
     plot_manager.loadPlots()
+
+    # Get saved config from all plots and save it in objects
+    getConfigsFromAllFiles()
 
     # Start thread that deletes old models
     folder_to_check = "models"
