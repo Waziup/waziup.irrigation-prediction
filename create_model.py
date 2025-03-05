@@ -1036,7 +1036,7 @@ def create_and_compare_model_reg(train):
     return re_exp, best_re
 
 # Save the best models
-def save_models(exp, best, path_to_save):
+def save_models(plot_name, exp, best, path_to_save):
     # save pipeline
     model_names = []
 
@@ -1045,7 +1045,7 @@ def save_models(exp, best, path_to_save):
         best = [best]
 
     for i in range(len(best)):
-        full_path = path_to_save + str(i) + "_" + best[i].__module__
+        full_path = path_to_save + str(i) + "_" + best[i].__module__ + "_" + plot_name
         exp.save_model(best[i], full_path)
         model_names.append(full_path)
         
@@ -1554,6 +1554,7 @@ Model_functions = {
     "lstm_model" : create_lstm_model
 }
 
+# Builds model for keras tuner
 def model_builder_with_shape(model_func, shape):
     def build_model(hp):
         return model_func(hp, shape)
@@ -1561,19 +1562,13 @@ def model_builder_with_shape(model_func, shape):
 
 
 # Perform evaluation, create predictions on testset (X_test) and save models
-def save_models_nn(nn_models, path_to_save):
+def save_models_nn(plot_name, nn_models, path_to_save):
     for i in range(len(nn_models)):     
-        # # Make predictions, it is only a test, not saved -> change it
-        # try:
-        #     predictions = nn_models[i].predict(X_test_scaled[..., np.newaxis])
-        # except Exception as e:
-        #     print(f"Predict is not available for the model.")
-            
-        # Optionally, you can save the trained model for future use
+        # Save the trained model for future use
         try:
-            nn_models[i].save(path_to_save + str(i) + '_' + nn_models[i].model_name + '.h5')
+            nn_models[i].save(path_to_save + str(i) + '_' + nn_models[i].model_name + '_' + plot_name + '.h5')
         except Exception as e:
-            print(f"Save is not available for the model. {nn_models[i].model_name} : {e}")
+            print(f"Save is not available for the model: {nn_models[i].model_name} Situated on plot: {plot_name} Error: {e}")
 
 # Perform a evaluation of the models against the testset(X_test), slit before 
 def evaluate_against_testset_nn(nn_models, X_test_scaled, y_test):
@@ -2039,9 +2034,9 @@ def main(plot) -> int:
     
     # Save the best models for further evaluation
     # Classical regression:
-    model_names = save_models(exp, best, 'models/intermediate_models/pycaret/soil_tension_prediction_pycaret_model_')
+    model_names = save_models(plot.user_given_name, exp, best, 'models/intermediate_models/pycaret/soil_tension_prediction_pycaret_model_')
     # NN: (print eval(on X_test) and save to disk)
-    save_models_nn(nn_models, 'models/intermediate_models/nn/soil_tension_prediction_nn_model_')
+    save_models_nn(plot.user_given_name, nn_models, 'models/intermediate_models/nn/soil_tension_prediction_nn_model_')
     
     # Load regression model from disk, if there was a magical error => TODO: useless, because it would stop before, surround more with try except
     try:
@@ -2110,7 +2105,7 @@ def main(plot) -> int:
         # Ensemble, Stacking & ... not implemented yet, see notebook
 
         # Save best pycaret model
-        model_names = save_models(exp, [plot.tuned_best], 'models/best_models/pycaret/best_soil_tension_prediction_pycaret_model_')
+        model_names = save_models(plot.user_given_name, exp, [plot.tuned_best], 'models/best_models/pycaret/best_soil_tension_prediction_pycaret_model_')
 
         # Create predictions to forecast values
         # Classical regression
@@ -2120,7 +2115,7 @@ def main(plot) -> int:
         plot.tuned_best = tune_model_nn(X_train_scaled, y_train, best_model_nn)
 
         # Save best model
-        save_models_nn([best_model_nn], 'models/best_models/nn/best_soil_tension_prediction_nn_model_')
+        save_models_nn(plot.user_given_name, [plot.tuned_best], 'models/best_models/nn/best_soil_tension_prediction_nn_model_')
 
         # Generate predictions with NN model
         plot.predictions = generate_predictions_nn(plot.tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])

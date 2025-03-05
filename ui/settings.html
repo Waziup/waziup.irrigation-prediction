@@ -276,7 +276,7 @@
             document.getElementById(response_data.Sensor_kind).checked = true;
 
             // Assignment for a user given plot name
-            document.getElementById("name").value = response_data.Name;
+            document.getElementById("name_form").value = response_data.Name;
 
             // Assignment for Gps_info
             document.getElementById("gps_form").value = String(response_data.Gps_info.lattitude) + ", " + String(response_data.Gps_info.longitude)

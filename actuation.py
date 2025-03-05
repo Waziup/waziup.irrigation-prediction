@@ -8,15 +8,12 @@ from dotenv import load_dotenv
 import pandas as pd
 import requests
 
-import create_model
+#import create_model
 from utils import NetworkUtils, TimeUtils
 
 
 # Globals
-# Timespan of hours 
-TimeSpanOverThreshold = 12
-OverThresholdAllowed = 1.2 # 20% allowed
-Last_irrigation = ''
+OverThresholdAllowed = 1.2              # 20% allowed          
 
 # Find global max and min => not used any more
 def get_max_min(df, target_col='smoothed_values'):
@@ -37,7 +34,7 @@ def get_max_min(df, target_col='smoothed_values'):
 
 
 # Function to find next lower and higher value occurrence
-def find_next_occurrences(df, column, threshold):
+def find_next_occurrences(df, column, threshold, timeSpanOverThreshold):
     timezone = TimeUtils.Timezone
 
     # Start @current time
@@ -46,7 +43,7 @@ def find_next_occurrences(df, column, threshold):
 
     # Filter the DataFrame to include only rows with indices greater than or equal to 'idx'
     filtered_df = df[df.index >= idx]
-    filtered_df = df[df.index <= idx + timedelta(hours=TimeSpanOverThreshold)]
+    filtered_df = df[df.index <= idx + timedelta(hours=timeSpanOverThreshold)]
 
     # Further filter the DataFrame to include only rows where the specified column's value is less than the 'threshold'
     filtered_lower = filtered_df[filtered_df[column] < threshold]
@@ -144,14 +141,16 @@ def save_irrigation_time(amount):
     return 0
 
 # Load from wazigate API
-def irrigate_amount(amount):
+def irrigate_amount(plot):
     # Example API call: 
     # curl -X POST "http://192.168.189.2/devices/6645c4d468f31971148f2ab1/actuators/6673fcb568f31971148ff5f7/value"
     # -H "accept: */*" -H "Content-Type: application/json" -d "7.2"
-    global Last_irrigation
 
-    # Name of flow meter sensor to initiate irrigation TODO: plots
-    flow_meter_name = create_model.DeviceAndSensorIdsFlow[0]
+    # amount
+    amount = plot.irrigation_amount
+
+    # Name of flow meter sensor to initiate irrigation 
+    flow_meter_name = plot.device_and_sensor_ids_flow[0]
 
     # API URL
     apiUrl = NetworkUtils.ApiUrl
@@ -174,10 +173,11 @@ def irrigate_amount(amount):
 
         # Check if the request was successful (status code 200)
         if response.status_code == 200:
-            # Save times on when there was an irrigation TODO: wait for confirmation from microcontroller, irrigation could be skipped!!
+            # Save times on when there was an irrigation TODO: wait for confirmation from microcontroller, irrigation could be skipped, needs to be implemented!!
             save_irrigation_time(amount)
             response_ok = True
         else:
+            print("Irrigation failed for plot")
             print("Request failed with status code:", response.status_code)
             print("Response content:", response.text)
             response_ok = None
@@ -189,14 +189,13 @@ def irrigate_amount(amount):
     return response_ok
 
 # Mighty main function TODO: capsulate
-def main_old(currentSoilTension, threshold_timestamp, predictions, irrigation_amount) -> int:
-    global TimeSpanOverThreshold    
-                                     
-    # Get threshold from config                                      
-    threshold = create_model.Current_config['Threshold']
-    # set timestamp for debug reasons
-    TimeSpanOverThreshold = create_model.Current_config['Look_ahead_time']
-    future_time = datetime.now() + timedelta(hours=TimeSpanOverThreshold)
+def main_old(currentSoilTension, threshold_timestamp, predictions, plot) -> int:
+    # Get configuration
+    threshold = plot.threshold
+    timeSpanOverThreshold = plot.look_ahead_time
+
+
+    future_time = datetime.now() + timedelta(hours=timeSpanOverThreshold)
     threshold_timestamp = future_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     now = datetime.now().replace(microsecond=0)
 
@@ -208,16 +207,16 @@ def main_old(currentSoilTension, threshold_timestamp, predictions, irrigation_am
         # If current soil tension exceeds threshold by more than allowed margin, irrigate immediately
         if currentSoilTension > threshold * OverThresholdAllowed:
             print(f"Threshold: {threshold} was exceeded by 20%, irrigate immediately!")
-            e = irrigate_amount(irrigation_amount)
+            e = irrigate_amount(plot)
             return e
         
         # Check predictions
-        next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'smoothed_values', threshold)
+        next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'smoothed_values', threshold, timeSpanOverThreshold)
 
         # If no lower value is predicted within the forecast horizon, trigger irrigation
         if not next_lower_idx:
-            print(f"No lower value predicted within {TimeSpanOverThreshold} hours, irrigate now!")
-            e = irrigate_amount(irrigation_amount)
+            print(f"No lower value predicted within {timeSpanOverThreshold} hours, irrigate now!")
+            e = irrigate_amount(plot)
             return e
         
         # Otherwise, no immediate irrigation is needed
@@ -247,11 +246,10 @@ def main(
     :param plot: holds amount and strategy or kind: either "tension" or "humidity".
     :return: 1 if irrigation is triggered, otherwise 0.
     """
-    global TimeSpanOverThreshold
 
     # Get configuration
     threshold = plot.threshold
-    TimeSpanOverThreshold = plot.look_ahead_time
+    timeSpanOverThreshold = plot.look_ahead_time
 
     # Define comparison logic based on sensor_kind
     comparison_fn = (lambda value, threshold: value > threshold) if plot.sensor_kind == "tension" else (
@@ -267,30 +265,30 @@ def main(
 
     # "Weak" irrigation strategy
     if comparison_fn(current_value, threshold):
-        print(f"Threshold: {threshold} was reached with a value of {current_value}.")
+        print(f"Threshold: {threshold} was reached with a value of {current_value} on {plot.user_given_name}.")
 
         # Immediate irrigation if over-threshold logic is satisfied
         if over_threshold_fn(current_value, threshold):
-            print(f"Immediate irrigation triggered for sensor_kind '{plot.sensor_kind}'!")
-            return irrigate_amount(plot.irrigation_amount)
+            print(f"Immediate irrigation triggered for sensor_kind '{plot.sensor_kind} on {plot.user_given_name}'!")
+            return irrigate_amount(plot)
 
         # Check predictions for next occurrence below/above threshold
-        next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'smoothed_values', threshold)
+        next_lower_idx, next_higher_idx = find_next_occurrences(predictions, 'smoothed_values', threshold, timeSpanOverThreshold)
 
         # No recovery predicted within forecast horizon
         if (plot.sensor_kind == "tension" and not next_lower_idx) or (plot.sensor_kind == "humidity" and not next_higher_idx):
-            print(f"No recovery predicted within {TimeSpanOverThreshold} hours, irrigate now!")
-            return irrigate_amount(plot.irrigation_amount)
+            print(f"No recovery predicted within {timeSpanOverThreshold} hours on {plot.user_given_name}, irrigate now!")
+            return irrigate_amount(plot)
 
         # Otherwise, delay irrigation
         else:
             target_time = next_lower_idx if plot.sensor_kind == "tension" else next_higher_idx
-            print(f"Irrigation can wait. Recovery expected at: {target_time}")
+            print(f"Irrigation can wait. Recovery expected at: {target_time} on {plot.user_given_name}")
             return 0
 
     # Threshold was not met, so do not irrigate
     else:
-        print(f"Threshold: {threshold} is not reached, current value is: {current_value}. Do not irrigate.")
+        print(f"Threshold: {threshold} is not reached on {plot.user_given_name}, current value is: {current_value}. Do not irrigate.")
         return 0
 
 

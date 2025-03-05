@@ -52,8 +52,6 @@ def setPlot(plot_nr_in_ui):
 def loadPlots():
     global Plots
 
-    #Plots = {}
-
     files = readFiles()
 
     # Create class to manage tabs/plots

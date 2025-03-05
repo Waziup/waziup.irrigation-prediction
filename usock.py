@@ -20,28 +20,28 @@ routing["POST"] = {}
 routing["PUT"] = {}
 routing["DELETE"] = {}
 
-#-------------------#
+# -------------------#
 
 
 def routerGET(path, func):
     global routing
     routing["GET"][path] = func
 
-#---------#
+# ---------#
 
 
 def routerPOST(path, func):
     global routing
     routing["POST"][path] = func
 
-#---------#
+# ---------#
 
 
 def routerPUT(path, func):
     global routing
     routing["PUT"][path] = func
 
-#---------#
+# ---------#
 
 
 def routerDELETE(path, func):
@@ -49,13 +49,13 @@ def routerDELETE(path, func):
     routing["DELETE"][path] = func
 
 
-#---------#
+# ---------#
 
-#-------------------#
+# -------------------#
 
 class HTTPHandler(BaseHTTPRequestHandler):
     # protocol_version = "HTTP/1.1"
-    #---------------#
+    # ---------------#
     def callAPI(self, method="GET", body=""):
         # # Check if the request is for a static file
         # if self.path.startswith("/ui/"):
@@ -79,33 +79,34 @@ class HTTPHandler(BaseHTTPRequestHandler):
 
         self.send(resCode, resBody, resHeaders)
 
-    # def serve_static_file(self):
-    #     # Map the file path based on the request URL
-    #     file_path = Path("." + self.path)  # Maps URL to local file path
+    # ---------------#
 
-    #     # Check if file exists
-    #     if not file_path.is_file():
-    #         self.send(404, b"File not found", [])
-    #         return
+    def serve_static_file(self):
+        file_path = Path("." + self.path)  # Convert URL path to file path
+        if file_path.is_file():
+            mime_type, _ = mimetypes.guess_type(file_path)
+            mime_type = mime_type or 'application/octet-stream'
 
-    #     # Guess the content type based on file extension
-    #     mime_type, _ = mimetypes.guess_type(file_path)
-    #     mime_type = mime_type or 'application/octet-stream'
+            self.send_response(200)
+            self.send_header("Content-Type", mime_type)
+            self.end_headers()
 
-    #     # Serve the file content
-    #     self.send_response(200)
-    #     self.send_header("Content-type", mime_type)
-    #     self.end_headers()
+            with file_path.open("rb") as file:
+                self.wfile.write(file.read())
+        else:
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"File not found")
 
-    #     with file_path.open("rb") as file:
-    #         self.wfile.write(file.read())
-
-    #---------------#
+    # ----------------------#
 
     def do_GET(self):
-        self.callAPI()
+        if self.path.startswith("/dist/"):  # Adjust the folder as needed
+            self.serve_static_file()
+        else:
+            self.callAPI()
 
-    #---------------#
+    # ---------------#
 
     def do_POST(self):
         size = int(self.headers.get('Content-length', 0))
@@ -114,7 +115,7 @@ class HTTPHandler(BaseHTTPRequestHandler):
 
         self.callAPI("POST", body)
 
-    #---------------#
+    # ---------------#
 
     def do_PUT(self):
         size = int(self.headers.get('Content-length', 0))
@@ -123,7 +124,7 @@ class HTTPHandler(BaseHTTPRequestHandler):
 
         self.callAPI("PUT", body)
 
-    #---------------#
+    # ---------------#
 
     def do_DELETE(self):
         size = int(self.headers.get('Content-length', 0))
@@ -131,7 +132,7 @@ class HTTPHandler(BaseHTTPRequestHandler):
 
         self.callAPI("DELETE", body)
 
-    #---------------#
+    # ---------------#
 
     def send(self, code, reply, resHeaders):
         self.client_address = (
@@ -148,7 +149,7 @@ class HTTPHandler(BaseHTTPRequestHandler):
         self.wfile.write(reply)
 
 
-#----------------------#
+# ----------------------#
 
 
 def start():

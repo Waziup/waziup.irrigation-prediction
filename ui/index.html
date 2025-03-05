@@ -18,9 +18,9 @@
     var waitForTraining = true;
     var timestamp = "";
     // Apex charts is rather slow in handeling many datapoints => needs to be restricted
-    var MaxValuesToBeDisplayed = 1000;
+    var MaxValuesToBeDisplayed = 1000;  // TODO: restrict also API call to wg-edge
     let chart;
-    var TrainingReadyCheck = 10000;
+    var TrainingReadyCheck = 10000;     // 10s
     let tabCounter = 0;
 
 
@@ -53,7 +53,7 @@
               .then((response) => response.json())
               .then((data) => {
                 console.log("Next Plot was added with nr: ", data.next_number);
-            });
+              });
             // Switch to first tab
             switchTab(1);
           } else {
@@ -169,6 +169,7 @@
         .catch((error) => console.error("Error:", error));
 
       loadStuff();
+      reloadTabContent()
     }
 
     // To close an currently active tab
@@ -186,19 +187,31 @@
             switchTab(nextTabId);
           }
         }
-      // API Call to set plot
-      fetch(`../api/removePlot`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: `currentPlot=${tabId}`
-      })
-        .then((response) => response.text())
-        .then((data) => console.log(data))
-        .catch((error) => console.error("Error:", error));
+        // API Call to set plot
+        fetch(`../api/removePlot`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: `currentPlot=${tabId}`
+        })
+          .then((response) => response.text())
+          .then((data) => console.log(data))
+          .catch((error) => console.error("Error:", error));
 
       }
+    }
+
+    // Reload div on tab change and add tab
+    function reloadTabContent() {
+      const tabContent = document.querySelector('.tabContent');
+
+      tabContent.style.display = 'none';  // Hide the div
+      setTimeout(() => {
+        tabContent.style.display = 'block';  // Show it again after a small delay
+      }, 10);  // Short delay to trigger reflow
+
+      console.log("Tab content reloaded visually!");
     }
 
     // Nav
@@ -351,64 +364,72 @@
       fetch("../api/getHistoricalChartData")
         .then((response) => response.json())
         .then((chartData) => {
-          // Limit the number of values to display
-          const totalValues = chartData.timestamps.length;
+          const chartContainer = document.getElementById('chart_hist');
+          if (chartData.available == false) {
+            chartContainer.innerHTML = "";            // Clears the chart div
+            chartContainer.style.display = "none";    // Hide the div
+          } else {
+            chartContainer.style.display = "block";   // Show it when there’s data
 
-          if (totalValues > MaxValuesToBeDisplayed) {
-            const step = Math.ceil(totalValues / MaxValuesToBeDisplayed);
+            // Limit the number of values to display
+            const totalValues = chartData.timestamps.length;
 
-            chartData.timestamps = chartData.timestamps.filter((timestamp, index) => index % step === 0);
-            chartData.temperatureSeries = chartData.temperatureSeries.filter((value, index) => index % step === 0);
-            chartData.moistureSeries = chartData.moistureSeries.filter((value, index) => index % step === 0);
+            if (totalValues > MaxValuesToBeDisplayed) {
+              const step = Math.ceil(totalValues / MaxValuesToBeDisplayed);
+
+              chartData.timestamps = chartData.timestamps.filter((timestamp, index) => index % step === 0);
+              chartData.temperatureSeries = chartData.temperatureSeries.filter((value, index) => index % step === 0);
+              chartData.moistureSeries = chartData.moistureSeries.filter((value, index) => index % step === 0);
+            }
+            // Format the data
+            var temperatureSeriesRounded = chartData.temperatureSeries.map(
+              (value) => parseFloat(value.toFixed(1))
+            );
+            var moistureSeriesRounded = chartData.moistureSeries.map((value) =>
+              parseFloat(value.toFixed(2))
+            );
+            var formattedTimestamps = chartData.timestamps.map((timestamp) =>
+              formatTimestamp(timestamp)
+            );
+            //var sensorKind = fetchSensorKind(); // 
+
+            var options = {
+              chart: {
+                type: "line",
+                title: "Temperature and Soil Moisture", // Set the title here
+              },
+              series: [
+                {
+                  name: "Temperature in °C",
+                  data: temperatureSeriesRounded,
+                },
+                {
+                  name: chartData.unit,
+                  data: moistureSeriesRounded,
+                },
+              ],
+              xaxis: {
+                categories: formattedTimestamps, //chartData.timestamps,//formattedTimestamps,
+                labels: {
+                  rotate: -45, // Rotate labels by -45 degrees to avoid overlapping
+                  minHeight: 40, // Set a minimum height for labels to prevent overlapping
+                  // datetimeFormatter: {
+                  //     year: 'yyyy',
+                  //     month: 'MMM \'yy',
+                  //     day: 'dd MMM',
+                  //     hour: 'HH:mm',
+                  //     minute: 'HH:mm'
+                  // }
+                },
+              },
+            };
+
+            var chart = new ApexCharts(
+              document.querySelector("#chart_hist"),
+              options
+            );
+            chart.render();
           }
-          // Format the data
-          var temperatureSeriesRounded = chartData.temperatureSeries.map(
-            (value) => parseFloat(value.toFixed(1))
-          );
-          var moistureSeriesRounded = chartData.moistureSeries.map((value) =>
-            parseFloat(value.toFixed(2))
-          );
-          var formattedTimestamps = chartData.timestamps.map((timestamp) =>
-            formatTimestamp(timestamp)
-          );
-          //var sensorKind = fetchSensorKind(); // 
-
-          var options = {
-            chart: {
-              type: "line",
-              title: "Temperature and Soil Moisture", // Set the title here
-            },
-            series: [
-              {
-                name: "Temperature in °C",
-                data: temperatureSeriesRounded,
-              },
-              {
-                name: chartData.unit,
-                data: moistureSeriesRounded,
-              },
-            ],
-            xaxis: {
-              categories: formattedTimestamps, //chartData.timestamps,//formattedTimestamps,
-              labels: {
-                rotate: -45, // Rotate labels by -45 degrees to avoid overlapping
-                minHeight: 40, // Set a minimum height for labels to prevent overlapping
-                // datetimeFormatter: {
-                //     year: 'yyyy',
-                //     month: 'MMM \'yy',
-                //     day: 'dd MMM',
-                //     hour: 'HH:mm',
-                //     minute: 'HH:mm'
-                // }
-              },
-            },
-          };
-
-          var chart = new ApexCharts(
-            document.querySelector("#chart_hist"),
-            options
-          );
-          chart.render();
         })
         .catch((error) => console.error("Error fetching data:", error));
     }
@@ -418,11 +439,12 @@
       fetch("../api/getDatasetChartData")
         .then((response) => response.json())
         .then((chartData) => {
+          const chartContainer = document.getElementById('chart_train_data');
           if (chartData.model == false) {
-            // alert(
-            //   'Please start the training procedure by pressing the "Start Training" button after you ran the setup. Models are retrained automatically with the latest data from sensor values and the API.'
-            // );
+            chartContainer.innerHTML = "";            // Clears the chart div
+            chartContainer.style.display = "none";    // Hide the div
           } else {
+            chartContainer.style.display = "block";   // Show it when there’s data
             // Initialize variables outside the loop
             var elementsToDisplay = [];
             var formattedTimestamps;
@@ -496,11 +518,18 @@
       fetch("../api/getPredictionChartData")
         .then((response) => response.json())
         .then((chartData) => {
+
+          const chartContainer = document.getElementById('chart_pred');
+
           if (chartData.model === false) {
-            alert('Please start training by pressing the "Start Training" button.'); //TODO: this needs to be capsulated and also checked for training in progress REFINE!!!
+            chartContainer.innerHTML = "";            // Clears the chart div
+            chartContainer.style.display = "none";    // Hide the div
+            // highlight train
             const trainButton = document.getElementById("train_btn");
             trainButton.classList.add("highlight");
+            alert('Please start training by pressing the "Start Training" button.'); //TODO: this needs to be capsulated and also checked for training in progress REFINE!!!
           } else {
+            chartContainer.style.display = "block";   // Show it when there’s data
             // Format the data
             const moistureSeriesRounded = chartData.moistureSeries.map((value) =>
               parseFloat(value.toFixed(2))

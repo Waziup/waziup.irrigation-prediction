@@ -438,13 +438,13 @@ def returnConfig(url, body):
             # Get currentPlot
             currentPlot = plot_manager.getCurrentPlot()
 
-            # Check if all necessary global variables are properly defined
+            # Check if all necessary plot variables are properly defined
             if not all(isinstance(var, (int, float, str, list, dict)) for var in [
                 currentPlot.device_and_sensor_ids_moisture, 
                 currentPlot.device_and_sensor_ids_temp, 
                 currentPlot.device_and_sensor_ids_flow, 
                 currentPlot.sensor_kind, 
-                currentPlot.name,
+                currentPlot.user_given_name,
                 currentPlot.gps_info, 
                 currentPlot.slope, 
                 currentPlot.threshold, 
@@ -465,7 +465,7 @@ def returnConfig(url, body):
                 "DeviceAndSensorIdsTemp": currentPlot.device_and_sensor_ids_temp,
                 "DeviceAndSensorIdsFlow": currentPlot.device_and_sensor_ids_flow,
                 "Sensor_kind": currentPlot.sensor_kind,
-                "Name": currentPlot.name,
+                "Name": currentPlot.user_given_name,
                 "Gps_info": currentPlot.gps_info,
                 "Slope": currentPlot.slope,
                 "Threshold": currentPlot.threshold,
@@ -573,7 +573,7 @@ def irrigateManually(url, body):
     amount = int(query_params.get('amount', [0])[0])
 
     # Call the actuation function with the extracted amount
-    response = actuation.irrigate_amount(amount)
+    response = actuation.irrigate_amount(plot_manager.getCurrentPlot())
 
     return 200, bytes(json.dumps({"status": "success", "amount": amount, "response": response}), "utf8"), []
     
@@ -630,6 +630,12 @@ def getHistoricalChartData(url, body):
     # for flow in currentPlot.device_and_sensor_ids_flow: # TODO: maybe display that also here (is displayed in datasets data)
     #     data_flow.append(currentPlot.load_data_api(flow, "actuators", currentPlot.start_date))
     
+    if not data_moisture and not data_temp:
+        response_data = {"available": False}
+        status_code = 404
+
+        return status_code, bytes(json.dumps(response_data), "utf8"), []
+
     # extract series from key value pairs
     f_data_time = extract_and_format(data_moisture, "time", "str")
     f_data_moisture = extract_and_format(data_moisture, "value", "float")
@@ -637,6 +643,7 @@ def getHistoricalChartData(url, body):
 
     # Create the chart_data dictionary
     chart_data = {
+        "available": True,
         "timestamps": f_data_time,
         "temperatureSeries": f_data_temp,
         "moistureSeries": f_data_moisture,
@@ -980,7 +987,7 @@ def startTraining(url, body):
     if not currentPlot.currently_training:
         # Stop/kill all other threads for training a model
         if currentPlot.training_thread is not None:
-            currentPlot.training_thread.terminate()
+            currentPlot.training_thread.terminate() # Does not work!!!
 
         # Reset flags for a new round
         currentPlot.training_finished = False
