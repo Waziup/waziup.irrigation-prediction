@@ -1,5 +1,5 @@
 FROM python:3.8-slim
-#later alpine to save even more, but is it worth it?
+#later alpine to save even more, but is it worth it? (Alpine uses musl instead of glibc)
 
 # Set environment variables to ensure non-interactive apt-get and prevent cache busting
 ENV DEBIAN_FRONTEND=noninteractive
@@ -32,6 +32,8 @@ RUN  pip install requests \
      keras-tuner
 # keras tuner check usage!
 COPY . /root/src/
+
+RUN mkdir -p /root/src/data
 
 RUN rm -rf /var/lib/apt/lists/* \
     && cd /root/src/ \

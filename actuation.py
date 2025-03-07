@@ -117,9 +117,9 @@ def round_to_nearest_10_minutes(dt):
     return dt
 
 # to json file -> not needed because can just ask api, more consistant state
-def save_irrigation_time(amount):
+def save_irrigation_time(amount, plotid):
     # Load from file
-    filename = 'data/irrigations.json'
+    filename = 'data/irrigations_plot_' + str(plotid)  + '.json'
     data = read_data_from_file(filename)
 
     # obtain timezone
@@ -141,7 +141,7 @@ def save_irrigation_time(amount):
     return 0
 
 # Load from wazigate API
-def irrigate_amount(plot):
+def irrigate_amount(plot): #TODO: renew the token, make function in NetworkUtils that does a arbitrary API request
     # Example API call: 
     # curl -X POST "http://192.168.189.2/devices/6645c4d468f31971148f2ab1/actuators/6673fcb568f31971148ff5f7/value"
     # -H "accept: */*" -H "Content-Type: application/json" -d "7.2"
@@ -149,7 +149,7 @@ def irrigate_amount(plot):
     # amount
     amount = plot.irrigation_amount
 
-    # Name of flow meter sensor to initiate irrigation 
+    # Name of flow meter sensor to initiate irrigation => TODO: decide on using single or multiple
     flow_meter_name = plot.device_and_sensor_ids_flow[0]
 
     # API URL
@@ -174,7 +174,7 @@ def irrigate_amount(plot):
         # Check if the request was successful (status code 200)
         if response.status_code == 200:
             # Save times on when there was an irrigation TODO: wait for confirmation from microcontroller, irrigation could be skipped, needs to be implemented!!
-            save_irrigation_time(amount)
+            save_irrigation_time(amount, plot.id)
             response_ok = True
         else:
             print("Irrigation failed for plot")

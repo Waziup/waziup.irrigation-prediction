@@ -9,6 +9,8 @@ import requests
 
 # local:
 from utils import NetworkUtils, TimeUtils
+import training_thread
+import prediction_thread
 
 # Class plot members represent individual plots in the application
 class Plot:
@@ -83,7 +85,7 @@ class Plot:
         self.data_from_csv = "binned_removed_new_for_app_ww.csv"
         # Load former irrigations from file "data/irrigations.json" DEBUG
         self.load_irrigations_from_file = False
-        self.irrigations_from_json = "data/irrigations.json"
+        self.irrigations_from_json = 'data/irrigations_plot_' + str(id)  + '.json'
 
         def __repr__(self):
             return (
@@ -292,25 +294,35 @@ class Plot:
 
     # Threads
 
-    # Set the current thread that runs prediction
-    def setPredictionhread(thread):
-        global prediction_thread
-        prediction_thread.append(thread)
+  # Set the training thread
+    def setTrainingThread(self, thread):
+        self.training_thread = thread
 
-    # Get prediction thread
-    def getPredictionThread(thread):
-        global Prediction_thread
-        return Prediction_thread
+    # Get the training thread
+    def getTrainingThread(self):
+        return self.training_thread
 
-    # Set the current thread that runs training
-    def setTrainingThread(thread):
-        global training_thread
-        training_thread.append(thread)
+    # Set the prediction thread
+    def setPredictionThread(self, thread):
+        self.prediction_thread = thread
 
-    # Get training thread
-    def getTrainingThread(thread):
-        global Training_thread
-        return Training_thread
+    # Get the prediction thread
+    def getPredictionThread(self):
+        return self.prediction_thread
+    
+    # Check if a training thread is already running
+    def isTrainingRunning(self):
+        return self.training_thread is not None and self.training_thread.is_alive()
+    
+    # surveillance, check threads are running TODO: different plots
+    def check_threads(self):
+        if not self.training_thread or not self.training_thread.is_alive():
+            print("Training thread not alive, restarting...")
+            self.training_thread.start(self)
+
+        if not self.prediction_thread or not self.prediction_thread.is_alive():
+            print("Prediction thread not alive, restarting...")
+            self.prediction_thread.start(self)
 
     # Data
 

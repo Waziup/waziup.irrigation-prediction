@@ -6,14 +6,10 @@ import csv
 from datetime import datetime, timedelta
 from io import StringIO
 import json
-import pickle
-import re
 import threading
 import time
 from urllib.parse import urlparse, parse_qs
 from dotenv import load_dotenv
-import requests
-import urllib
 import usock
 import os
 import pathlib
@@ -24,27 +20,15 @@ import actuation
 from plot import Plot 
 import plot_manager
 from utils import NetworkUtils
-
+import training_thread
 
 
 #---------------------#
-# Path for proxy.sock, set by .env
-#usock.sockAddr = ""
-
 # Path to the root of the code
 PATH = os.path.dirname(os.path.abspath(__file__))
 
-# Array of active threads TODO: if training started kill other threads.
-Threads = []
-ThreadId = 0
-Restart_time = 1800 # DEBUG 1800 ~ 30 min in s
-
-# Load variables of training from file, to debug actuation part
-Perform_training = True
-
 # Set the threshold to cleanup models to 3 months (approximately 90 days)
 THRESHOLD_DAYS_CLEANUP = 90
-
 #---------------------#
 
 
@@ -375,11 +359,12 @@ def getConfigFromFile():
         # Get soil water retention curve -> currently not needed here
         currentPlot.soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
 
+        # Sensor kind
         if currentPlot.sensor_kind == "tension":
             currentPlot.sensor_unit = "Moisture in cbar (Soil Tension)"
         elif currentPlot.sensor_kind == "capacitive":
             currentPlot.sensor_unit = "Moisture in % (Volumetric Water Content)"
-        else :
+        else:
             currentPlot.sensor_unit = "Unit is unknown"
 
         return True
@@ -422,11 +407,12 @@ def getConfigsFromAllFiles():
             # Get soil water retention curve -> currently not needed here
             plots[i].soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
 
+            # Sensor kind
             if plots[i].sensor_kind == "tension":
                 plots[i].sensor_unit = "Moisture in cbar (Soil Tension)"
             elif plots[i].sensor_kind == "capacitive":
                 plots[i].sensor_unit = "Moisture in % (Volumetric Water Content)"
-            else :
+            else:
                 plots[i].sensor_unit = "Unit is unknown"
 
 # Get the config from backend to disply it in frontend settings.html
@@ -508,6 +494,7 @@ def returnConfig(url, body):
             "error": "An unexpected error occurred: " + str(e),
             "status_code": 500
         }
+
         return 500, bytes(json.dumps(error_response), "utf8"), []
     
 usock.routerGET("/api/returnConfig", returnConfig)
@@ -719,7 +706,7 @@ def getPredictionChartData(url, body):
         f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S%z'))
     f_data_moisture = data_pred["smoothed_values"].tolist()
 
-    # Quick and dirty adjusting predictions to match sensor values TODO: ??? right approach ???
+    # Quick and dirty adjusting predictions to match sensor values TODO: ??? right approach ??? -> NO, THE THRESHOLD WILL BE WRONG!!!!
     adjustment = 1
     #adjust_threshold = lambda currentPlot.threshold, adjustment: currentPlot.threshold - adjustment if currentPlot.sensor_kind == "tension" else currentPlot.threshold + adjustment
     adjust_threshold = lambda adjustment: currentPlot.threshold - adjustment if currentPlot.sensor_kind == "tension" else currentPlot.threshold + adjustment
@@ -826,182 +813,9 @@ def isTrainingReady(url, body):
 
 usock.routerGET("/api/isTrainingReady", isTrainingReady)
 
-# surveillance, check threads are running TODO: different plots
-def check_threads(plot):
-    if not plot.training_thread or not plot.training_thread.is_alive():
-        print("Training thread not alive, restarting...")
-        startTraining(url=None, body=None)
-
-    if not plot.prediction_thread or not plot.prediction_thread.is_alive():
-        print("Prediction thread not alive, restarting...")
-        startPrediction()
-
-# Thread that runs prediction
-def workerToPredict(plot):
-    def time_until_n_hours(hours):
-        """Calculate the time difference from now until the next noon."""
-        now = datetime.now()
-        predict_time = now + timedelta(hours=hours, minutes=0, seconds=0, microseconds=0) #TODO: change to hours DEBUG
-
-        return (predict_time - now).total_seconds()
-    
-    # Initial waiting, after model was trained, prediction was conducted and actuation was triggered 
-    time_to_sleep = time_until_n_hours(plot.predict_period_hours)
-    print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until conducting next prediction...")
-    time.sleep(time_to_sleep)  # Sleep until threshold
-    
-    while True:
-        try:
-            start_time = datetime.now().replace(microsecond=0)
-            print("Prediction started at:", start_time)
-
-            file_path = pathlib.Path('saved_variables.pkl')
-
-            if Perform_training: #same var is used here to preserve functionality
-                # Call predict_with_updated_data function
-                currentSoilTension, plot.threshold_timestamp, plot.predictions = create_model.predict_with_updated_data(plot)
-
-                # Create object to save
-                variables_to_save = {
-                    'currentSoilTension': currentSoilTension,
-                    'threshold_timestamp': plot.threshold_timestamp,
-                    'predictions': plot.predictions
-                }
-                # Save the variables to a file
-                with open(file_path, 'wb') as f:
-                    pickle.dump(variables_to_save, f)
-            else:
-                # Load the saved variables from the file
-                with open(file_path, 'rb') as f:
-                    loaded_variables = pickle.load(f)
-                currentSoilTension = loaded_variables['currentSoilTension']
-                threshold_timestamp = loaded_variables['threshold_timestamp']
-                plot.predictions = loaded_variables['predictions']
-
-            end_time = datetime.now().replace(microsecond=0)
-            duration = end_time - start_time
-            print("Prediction finished at: ", end_time, "The duration was: ", duration)
-
-            # Call routine to irrigate
-            if len(plot.device_and_sensor_ids_flow) > 0: 
-                actuation.main(currentSoilTension, threshold_timestamp, plot.predictions, plot)
-
-            # After initial training and prediction, start surveillance
-            threading.Timer(3600, check_threads(plot)).start()  # Check every hour if threads are alive
-
-            # Wait for predict_period_hours periodically for next cycle
-            time_to_sleep = time_until_n_hours(plot.predict_period_hours)
-            print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until conducting next prediction...")
-            time.sleep(time_to_sleep)  # Sleep until threshold
-        except Exception as e:
-            print(f"Prediction thread error: {e}. Retrying after 30 minute.")
-            time.sleep(Restart_time)  # Retry after 30 minute if there is an error
-
-# Starts a thread that runs prediction
-def startPrediction(plot):
-    global ThreadId
-
-    if not plot.currently_training:
-        # Create a new thread for training
-        plot.prediction_thread = threading.Thread(target=workerToPredict, args=(plot,))
-        ThreadId += 1
-
-        # Append thread to list
-        Threads.append(plot.prediction_thread)
-
-        # Start the thread
-        plot.prediction_thread.start()
-
-    
-# Thread that runs training
-def workerToTrain(thread_id, currentPlot, url, startTrainingNow):
-    def time_until_noon(train_period_days):
-        """Calculate the time difference from now until the next noon."""
-        now = datetime.now()
-        noon_today = now.replace(hour=12, minute=0, second=0, microsecond=0) # TODO: adjust time so that 
-        if now >= noon_today:
-            # If it's already past noon, calculate for the next day
-            noon_today += timedelta(days=train_period_days)
-        return (noon_today - now).total_seconds()
-
-    while True:
-        try:
-            if not startTrainingNow:
-                # Wait until the next noon
-                time_to_sleep = time_until_noon(currentPlot.train_period_days)
-                print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until next training...")
-                time.sleep(time_to_sleep)  # Sleep until noon
-
-            start_time = datetime.now().replace(microsecond=0)
-            print("Training for Plot with the name ", str(currentPlot.user_given_name)," started at:", start_time)
-
-            file_path = pathlib.Path('saved_variables.pkl')
-
-            if Perform_training:
-                # Call create model function
-                currentSoilTension, threshold_timestamp, currentPlot.predictions = create_model.main(currentPlot)
-
-                # Create object to save
-                variables_to_save = {
-                    'currentSoilTension': currentSoilTension,
-                    'threshold_timestamp': threshold_timestamp,
-                    'predictions': currentPlot.predictions
-                }
-                # Save the variables to a file
-                with open(file_path, 'wb') as f:
-                    pickle.dump(variables_to_save, f)
-            else:
-                # Load the saved variables from the file
-                with open(file_path, 'rb') as f:
-                    loaded_variables = pickle.load(f)
-                currentSoilTension = loaded_variables['currentSoilTension']
-                currentPlot.threshold_timestamp = loaded_variables['threshold_timestamp']
-                currentPlot.predictions = loaded_variables['predictions']
-
-            currentPlot.training_finished = True
-            currentPlot.currently_training = False
-            startTrainingNow = False
-
-            end_time = datetime.now().replace(microsecond=0)
-            duration = end_time - start_time
-            print("Training finished at: ", end_time, "The duration was: ", duration)
-
-            # Call routine to irrigate TODO:plots
-            if len(currentPlot.device_and_sensor_ids_flow) > 0: 
-                actuation.main(currentSoilTension, currentPlot.threshold_timestamp, currentPlot.predictions, currentPlot)
-
-            # Start thread that creates predictions periodically
-            if currentPlot.prediction_thread is None:
-                startPrediction(currentPlot)
-
-        except Exception as e:
-            print(f"Training error: {e}. Retrying after 30 minute.")
-            time.sleep(Restart_time)  # Retry after 30 minute if there is an error
-
-# Starts a thread that runs training
+# Starts a thread that runs training, this thread will also start prediction afterwards
 def startTraining(url, body):
-    global ThreadId
-
-    currentPlot = plot_manager.getCurrentPlot()
-
-    if not currentPlot.currently_training:
-        # Stop/kill all other threads for training a model
-        if currentPlot.training_thread is not None:
-            currentPlot.training_thread.terminate() # Does not work!!!
-
-        # Reset flags for a new round
-        currentPlot.training_finished = False
-        currentPlot.currently_training = True
-
-        # Create a new thread for training
-        currentPlot.training_thread = threading.Thread(target=workerToTrain, args=(ThreadId, currentPlot, url, True))
-        ThreadId += 1
-
-        # Append thread to list
-        Threads.append(currentPlot.training_thread)
-
-        # Start the thread
-        currentPlot.training_thread.start()
+    training_thread.start(plot_manager.getCurrentPlot())
 
     return 200, b"", []
 

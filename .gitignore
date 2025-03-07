@@ -165,7 +165,7 @@ catboost_info/
 hyperband_dir/
 
 # irrigation records
-data/irrigations.json
+data/*
 
 # notes
 notes.txt

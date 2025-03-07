@@ -7,7 +7,7 @@
 *.csv
 *.tar
 config/current_config.json
-data/irrigations.json
+data/*
 /catboost_info
 /.vscode
 /hyperband_dir
