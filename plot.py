@@ -2,6 +2,7 @@
 from datetime import timedelta
 import datetime
 import json
+import os
 import re
 import urllib
 import pandas as pd
@@ -15,16 +16,16 @@ import prediction_thread
 # Class plot members represent individual plots in the application
 class Plot:
     # Class init, called when created in UI
-    def __init__(self, plot_number, configPath):
+    def __init__(self, tab_number, configPath):
         # Fundamental
         # Int to enumerate plots/tabs
-        self.plot_number = plot_number
+        self.tab_number = tab_number
         # Path to current_config.json
         self.configPath = configPath
         # Current unique number, always increme
         self.id = int(re.search(r'(\d+)\.json$', self.configPath).group(1))
         # User given name is preset, but can be changed later
-        self.user_given_name = "Plot " + str(plot_number)
+        self.user_given_name = "Plot " + str(self.id)
 
         # Variables that were global before, now plot-specific
         # Device
@@ -89,7 +90,7 @@ class Plot:
 
         def __repr__(self):
             return (
-                f"Plot(plot_number={self.plot_number}, "
+                f"plotTabNumber(tab_number={self.tab_number}, "
                 f"name='{self.user_given_name}', "
                 f"configPath='{self.configPath}', "
                 f"training_active={self.currently_training}, "
@@ -99,8 +100,56 @@ class Plot:
     # Just print some class properies
 
     def printPlotNumber(self):
-        print("Current object is plot/tab number: " + str(self.plot_number),
+        print("Current object is plot/tab number: " + str(self.tab_number),
               ", with the path: " + self.configPath + ", it has the internal id: ", self.id)
+        
+
+    # Load config from file TODO: move the rest
+    def getConfigFromFile(self):
+        # Get path
+        currentConfigPath = self.configPath
+
+        if os.path.exists(currentConfigPath):
+            with open(currentConfigPath, 'r') as file:
+                # Parse JSON from the file
+                data = json.load(file)
+
+            # Get choosen sensors
+            self.device_and_sensor_ids_moisture = data.get('DeviceAndSensorIdsMoisture', [])
+            self.device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
+            self.device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
+
+            # Get data from forms
+            self.user_given_name = data.get('Name', [])
+            self.sensor_kind = data.get('Sensor_kind', [])
+            self.gps_info = data.get('Gps_info', [])
+            self.slope = float(data.get('Slope', []))
+            self.threshold = float(data.get('Threshold', []))
+            self.irrigation_amount = float(data.get('Irrigation_amount', []))
+            self.look_ahead_time = float(data.get('Look_ahead_time', []))
+            self.start_date = data.get('Start_date', [])
+            self.period = int(data.get('Period', []))
+            self.soil_type = data.get('Soil_type', [])
+            self.permanent_wilting_point = float(data.get('PermanentWiltingPoint', []))
+            self.field_capacity_upper = float(data.get('FieldCapacityUpper', []))
+            self.field_capacity_lower = float(data.get('FieldCapacityLower', []))
+            self.saturation = float(data.get('Saturation', []))
+
+            # Get soil water retention curve -> currently not needed here
+            self.soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
+
+            # Sensor kind
+            if self.sensor_kind == "tension":
+                self.sensor_unit = "Moisture in cbar (Soil Tension)"
+            elif self.sensor_kind == "capacitive":
+                self.sensor_unit = "Moisture in % (Volumetric Water Content)"
+            else:
+                self.sensor_unit = "Unit is unknown"
+
+            return True
+        else:
+            return False
+
 
     # Obtain current config from file
     def load_latest_data_api(self, sensor_name, type):  # , token)

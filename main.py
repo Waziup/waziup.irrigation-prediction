@@ -185,10 +185,14 @@ def setPlot(url, body):
     # Get currentPlot
     currentTab = int(parsed_data.get('currentPlot', [])[0])
 
-    if(plot_manager.setPlot(currentTab)):
-            return 200, b"Plot has been set.", []
-    else:
-        return 200, b"Has been set but has no config yet.", []
+    # if(plot_manager.setPlot(currentTab)):
+    #         return 200, b"Plot has been set.", []
+    # else:
+    #     return 200, b"Has been set but has no config yet.", []
+
+    plot_manager.setPlot(currentTab)
+
+    return 200, b"Plot has been set.", []
 
 usock.routerPOST("/api/setPlot", setPlot)
 
@@ -201,7 +205,10 @@ def getPlots(url, body):
     tab_name_array = []
     #for plot in plots:
     for i in range(1, len(plots)+1, 1):
-        tab_name_array.append(plots[i].user_given_name)
+        try:
+            tab_name_array.append(plots[i].user_given_name)
+        except KeyError:
+            continue
 
     response = {
         "tabnames": tab_name_array,
@@ -214,8 +221,14 @@ usock.routerGET("/api/getPlots", getPlots)
 
 # Add a plot during runtine TODO: finish
 def addPlot(url, body):
+    # Parse the query parameters from Body
+    parsed_data = parse_qs(body.decode('utf-8'))
+
+    # ID of tab in UI
+    amount_tabs = int(parsed_data.get('tab_nr', [])[0])
+
     # Call function in plot manager
-    next_number, newfilename = plot_manager.addPlot()
+    next_number, newfilename = plot_manager.addPlot(amount_tabs)
 
     response = {
         "plot_number": next_number,
@@ -225,7 +238,7 @@ def addPlot(url, body):
 
     return response["status_code"], bytes(json.dumps(response), "utf8"), []
 
-usock.routerGET("/api/addPlot", addPlot)
+usock.routerPOST("/api/addPlot", addPlot)
 
 # Delete a plot during runtine TODO: ids adjust on remove, API call
 def removePlot(url, body):
@@ -244,7 +257,7 @@ def removePlot(url, body):
 
     return response["status_code"], bytes(json.dumps(response), "utf8"), []
 
-usock.routerGET("/api/addPlot", addPlot)
+usock.routerPOST("/api/removePlot", removePlot)
 
 # Get historical sensor values from WaziGates API
 def setConfig(url, body):
@@ -323,53 +336,6 @@ def setConfig(url, body):
     return 200, b"Configuration has been successfully saved!", []
 
 usock.routerPOST("/api/setConfig", setConfig)
-
-# Load config from file
-def getConfigFromFile():
-    # Get currentPlot and path
-    currentPlot = plot_manager.getCurrentPlot()
-    currentConfigPath = plot_manager.getCurrentConfig()
-
-    if os.path.exists(currentConfigPath):
-        with open(currentConfigPath, 'r') as file:
-            # Parse JSON from the file
-            data = json.load(file)
-
-        # Get choosen sensors
-        currentPlot.device_and_sensor_ids_moisture = data.get('DeviceAndSensorIdsMoisture', [])
-        currentPlot.device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
-        currentPlot.device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
-
-        # Get data from forms
-        currentPlot.user_given_name = data.get('Name', [])
-        currentPlot.sensor_kind = data.get('Sensor_kind', [])
-        currentPlot.gps_info = data.get('Gps_info', [])
-        currentPlot.slope = float(data.get('Slope', []))
-        currentPlot.threshold = float(data.get('Threshold', []))
-        currentPlot.irrigation_amount = float(data.get('Irrigation_amount', []))
-        currentPlot.look_ahead_time = float(data.get('Look_ahead_time', []))
-        currentPlot.start_date = data.get('Start_date', [])
-        currentPlot.period = int(data.get('Period', []))
-        currentPlot.soil_type = data.get('Soil_type', [])
-        currentPlot.permanent_wilting_point = float(data.get('PermanentWiltingPoint', []))
-        currentPlot.field_capacity_upper = float(data.get('FieldCapacityUpper', []))
-        currentPlot.field_capacity_lower = float(data.get('FieldCapacityLower', []))
-        currentPlot.saturation = float(data.get('Saturation', []))
-
-        # Get soil water retention curve -> currently not needed here
-        currentPlot.soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
-
-        # Sensor kind
-        if currentPlot.sensor_kind == "tension":
-            currentPlot.sensor_unit = "Moisture in cbar (Soil Tension)"
-        elif currentPlot.sensor_kind == "capacitive":
-            currentPlot.sensor_unit = "Moisture in % (Volumetric Water Content)"
-        else:
-            currentPlot.sensor_unit = "Unit is unknown"
-
-        return True
-    else:
-        return False
     
 # Load config from all file
 def getConfigsFromAllFiles():
@@ -418,11 +384,9 @@ def getConfigsFromAllFiles():
 # Get the config from backend to disply it in frontend settings.html
 def returnConfig(url, body):
     try:
+        currentPlot = plot_manager.getCurrentPlot()
         # Call the getConfigFromFile function to load variables
-        if getConfigFromFile():
-
-            # Get currentPlot
-            currentPlot = plot_manager.getCurrentPlot()
+        if currentPlot.getConfigFromFile():
 
             # Check if all necessary plot variables are properly defined
             if not all(isinstance(var, (int, float, str, list, dict)) for var in [
@@ -483,7 +447,7 @@ def returnConfig(url, body):
     except ValueError as ve:
         # Return a 400 error for missing or invalid data
         error_response = {
-            "error": str(ve),
+            "error": "An Value error occured: " + str(ve),
             "status_code": 400
         }
         return 400, bytes(json.dumps(error_response), "utf8"), []
@@ -500,10 +464,11 @@ def returnConfig(url, body):
 usock.routerGET("/api/returnConfig", returnConfig)
 
 def checkConfigPresent(url, body):
-    if os.path.exists(plot_manager.getCurrentConfig()): # solve multiple calls with dirty bit
+    if os.path.exists(plot_manager.ConfigPath): # solve multiple calls with dirty bit
+        currentPlot = plot_manager.getCurrentPlot()
+        currentPlot.getConfigFromFile()
         response_data = {"config_present": True}
         status_code = 200
-        getConfigFromFile()
     else:
         response_data = {"config_present": False}
         status_code = 404
@@ -520,7 +485,7 @@ usock.routerGET("/api/checkConfigPresent", checkConfigPresent)
 # Called on page load->important for checkActiveIrrigation
 def checkActiveIrrigation(url, body):
     currentPlot = plot_manager.getCurrentPlot()
-    if not getConfigFromFile():
+    if not currentPlot.getConfigFromFile():
         response_data = {"activeIrrigation": False}
         status_code = 404
 

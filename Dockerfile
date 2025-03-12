@@ -30,6 +30,7 @@ RUN  pip install requests \
      scikit-learn \
      joblib==1.3 \
      keras-tuner
+     
 # keras tuner check usage!
 COPY . /root/src/
 

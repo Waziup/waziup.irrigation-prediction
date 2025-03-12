@@ -18,8 +18,9 @@
     var waitForTraining = true;
     var timestamp = "";
     // Apex charts is rather slow in handeling many datapoints => needs to be restricted
-    var MaxValuesToBeDisplayed = 1000;  // TODO: restrict also API call to wg-edge
-    let chart;
+    var MaxValuesToBeDisplayed = 1000;  // TODO: better: restrict API call to wg-edge
+    let chartHist, chartDataSet, chartPred;
+    let chartHistLoaded = false, chartDataSetLoaded = false, chartPredLoaded = false; // TODO: use!!!
     var TrainingReadyCheck = 10000;     // 10s
     let tabCounter = 0;
 
@@ -81,11 +82,21 @@
         document.getElementById('tabs').appendChild(newTab);
 
         // Add plot to backend
-        fetch(`../api/addPlot`)
+        fetch(`../api/addPlot`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: `tab_nr=${tabId}`
+        })
           .then((response) => response.json())
           .then((data) => {
             console.log("Next Plot was added with nr: ", data.next_number);
+          })
+          .catch((error) => {
+            console.error("Error, could not add plot_nr: ", error);
           });
+          
 
         // Switch to the new tab
         switchTab(tabId);
@@ -121,9 +132,32 @@
 
       // Add the new tab to the tabs container
       document.getElementById('tabs').appendChild(newTab);
+
+      return newTab.id
+    }
+
+    // Clear data on tab change
+    function clearTabContent() {
+      // Clear chart containers
+      document.getElementById('chart_hist').innerHTML = '';
+      document.getElementById('chart_train_data').innerHTML = '';
+      document.getElementById('chart_pred').innerHTML = '';
+
+      // Clear sensor values
+      document.getElementById('temp-value').textContent = '-- °C';
+      document.getElementById('tension-value').textContent = '-- cb';
+      document.getElementById('humidity-value').textContent = '-- %';
+
+      // Clear threshold text
+      document.getElementById('timestamp_txt').textContent = '';
     }
 
     function switchTab(tabId) {
+      // Hide content and show loading indicator
+      clearTabContent();
+      document.querySelector('.center_full').classList.remove('loaded');
+      document.getElementById('loading-indicator').style.display = 'block';
+
       // Remove active class from all tabs
       document.querySelectorAll('.tab').forEach(tab => {
         tab.classList.remove('active');
@@ -165,11 +199,20 @@
         body: `currentPlot=${tabId}`
       })
         .then((response) => response.text())
-        .then((data) => console.log(data))
-        .catch((error) => console.error("Error:", error));
-
-      loadStuff();
-      reloadTabContent()
+        .then((data) => {
+          console.log(data);
+          // Load data for the new tab
+          loadStuff();
+          //reloadTabContent();
+        })
+        .catch((error) => {
+          console.error("Error, could not set plot_nr: ", error);
+        })
+        .finally(() => {
+          // Hide the loading indicator after the data is loaded TODO: show after threshold
+          //document.getElementById('loading-indicator').style.display = 'none';
+          //document.querySelector('.center_full').classList.add('loaded');
+        });
     }
 
     // To close an currently active tab
@@ -197,7 +240,7 @@
         })
           .then((response) => response.text())
           .then((data) => console.log(data))
-          .catch((error) => console.error("Error:", error));
+          .catch((error) => console.error("Error in removeTab():", error));
 
       }
     }
@@ -272,28 +315,41 @@
       return sensorList;
     }
 
+    // States
+
+    function stateConfigPresent() {
+      set_button = document.getElementById('settings_btn');
+      set_button.classList.remove('highlight');
+      train_button = document.getElementById('train_btn');
+      train_button.className = 'button-cancel';
+      train_button.disabled = false;
+    }
+
+    function stateConfigNotPresent(){
+      // Hide the loading indicator, there is no cnfig
+      document.getElementById('loading-indicator').style.display = 'none';
+      document.querySelector('.center_full').classList.add('loaded');
+      alert(
+        "Please press the 'Settings' button and set up the needed parameters."
+      );
+      set_button = document.getElementById('settings_btn');
+      set_button.classList.add('highlight');
+      train_button = document.getElementById('train_btn');
+      train_button.className = 'button-cancel';
+      train_button.disabled = true;
+    }
+
     // To confirm that user had run the config
     function checkConfigPresent() {
       return fetch(`../api/checkConfigPresent`)
         .then((response) => response.json())
         .then((data) => {
           if (data.data.config_present == true) {
-            set_button = document.getElementById('settings_btn');
-            set_button.classList.remove('highlight');
-            train_button = document.getElementById('train_btn');
-            train_button.className = 'button-cancel';
-            train_button.disabled = false;
+            stateConfigPresent();
             return true;
           } else {
             // TODO: do not display chart or do display without values
-            alert(
-              "Please press the 'Settings' button and set up the needed parameters."
-            );
-            set_button = document.getElementById('settings_btn');
-            set_button.classList.add('highlight');
-            train_button = document.getElementById('train_btn');
-            train_button.className = 'button-cancel';
-            train_button.disabled = true;
+            stateConfigNotPresent();
           }
           console.log(data);
           return false;
@@ -315,6 +371,7 @@
             text.innerText = 'Inactive - No present';
             button.className = 'button-cancel';
             button.disabled = true;
+            return false;
           }
           console.log(data);
         });
@@ -361,6 +418,11 @@
 
     // Get data from to display inside chart from backend
     function fetchHistoricalChartData() {
+      // Destroy existing chart instance
+      if (chartHist) {
+        chartHist.destroy();
+      }
+
       fetch("../api/getHistoricalChartData")
         .then((response) => response.json())
         .then((chartData) => {
@@ -424,11 +486,15 @@
               },
             };
 
-            var chart = new ApexCharts(
+            // Hide the loading indicator after the data is loaded
+            document.getElementById('loading-indicator').style.display = 'none';
+            document.querySelector('.center_full').classList.add('loaded');
+
+            chartHist = new ApexCharts(
               document.querySelector("#chart_hist"),
               options
             );
-            chart.render();
+            chartHist.render();
           }
         })
         .catch((error) => console.error("Error fetching data:", error));
@@ -436,6 +502,11 @@
 
     // TODO: keys are wrong, data missing
     function fetchDatasetChartData() {
+      // Destroy existing chart instance
+      if (chartDataSet) {
+        chartDataSet.destroy();
+      }
+
       fetch("../api/getDatasetChartData")
         .then((response) => response.json())
         .then((chartData) => {
@@ -496,25 +567,30 @@
               },
             };
 
-            var chart = new ApexCharts(
+            chartDataSet = new ApexCharts(
               document.querySelector("#chart_train_data"),
               options
             );
-            chart.render();
+            chartDataSet.render();
 
             // Hide some series after rendering
-            chart.hideSeries("hour");
-            chart.hideSeries("Cloudcover");
-            chart.hideSeries("Shortwave_Radiation");
-            chart.hideSeries("Soil_temperature_7-28");
-            chart.hideSeries("Soil_moisture_0-7");
-            chart.hideSeries("Et0_evapotranspiration");
+            chartDataSet.hideSeries("hour");
+            chartDataSet.hideSeries("Cloudcover");
+            chartDataSet.hideSeries("Shortwave_Radiation");
+            chartDataSet.hideSeries("Soil_temperature_7-28");
+            chartDataSet.hideSeries("Soil_moisture_0-7");
+            chartDataSet.hideSeries("Et0_evapotranspiration");
           }
         })
         .catch((error) => console.error("Error fetching data:", error));
     }
 
     function fetchPredictionChartData() {
+      // Destroy existing chart instance
+      if (chartPred) {
+        chartPred.destroy();
+      }
+
       fetch("../api/getPredictionChartData")
         .then((response) => response.json())
         .then((chartData) => {
@@ -658,11 +734,11 @@
             };
 
             // Create or update the chart
-            if (!chart) {
-              chart = new ApexCharts(document.querySelector("#chart_pred"), options);
-              chart.render();
+            if (!chartPred) {
+              chartPred = new ApexCharts(document.querySelector("#chart_pred"), options);
+              chartPred.render();
             } else {
-              chart.updateOptions(options);
+              chartPred.updateOptions(options);
             }
 
             // Optionally hide "Volumetric Water Content" series
@@ -895,17 +971,24 @@
     function loadStuff() {
       $.get("/devices", function (data) {
         checkConfigPresent()
-        checkActiveIrrigation()
           .then((ret) => {
             if (ret) {
               // Config is present
               console.log("Config is already present...");
+              return Promise.all([
+                checkActiveIrrigation(),
+                fetchHistoricalChartData(),
+                fetchCurrentValues(),
+                fetchDatasetChartData(),
+                fetchPredictionChartData(),
+                fetchThreshold()
+              ]);
               //checkActiveIrrigation()
-              fetchHistoricalChartData();
-              fetchCurrentValues();
-              fetchDatasetChartData();
-              fetchPredictionChartData();
-              fetchThreshold();
+              //fetchHistoricalChartData();
+              //fetchCurrentValues();
+              //fetchDatasetChartData();
+              //fetchPredictionChartData();
+              //fetchThreshold();
             }
           })
           .catch((e) => {
@@ -937,6 +1020,11 @@
     </div>
   </div>
   <div class="tabContent" class="tab-content">
+    <!-- Loading Indicator -->
+    <div id="loading-indicator" class="loading-indicator">
+      <img src="load-35_256.gif" alt="Loading..." /> <!-- Replace with your spinner GIF -->
+      <p>Loading the current plot: Getting data from APIs, datasets, predictions and models...</p>
+    </div>
     <div class="action-buttons">
       <button id="settings_btn" class="settings" type="button" onclick="goToSettings()">
         Settings
