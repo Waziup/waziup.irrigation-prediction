@@ -151,10 +151,10 @@ class Plot:
             return False
 
 
-    # Obtain current config from file
+    # Obtain current sensor value from API
     def load_latest_data_api(self, sensor_name, type):  # , token)
         print("load_latest_data_api: will load data for plot: " +
-              self.user_given_name)
+              self.user_given_name + " For the sensor: " + sensor_name)
         apiUrl = NetworkUtils.ApiUrl
 
         if apiUrl.startswith('http://wazigate/'):
@@ -258,7 +258,8 @@ class Plot:
 
     # Load from wazigate API
     def load_data_api(self, sensor_name, type, from_timestamp):  # , token)
-        print("load_data_api: will load data for plot: " + self.user_given_name)
+        print("load_data_api: will load data for plot: " + self.user_given_name
+               + " For the sensor: " + sensor_name)
         # Load config to obtain GPS coordinates
         self.config = self.read_config()
 
@@ -365,6 +366,7 @@ class Plot:
     
     # surveillance, check threads are running TODO: different plots
     def check_threads(self):
+        print("Checking threads of plot: " + self.user_given_name)
         if not self.training_thread or not self.training_thread.is_alive():
             print("Training thread not alive, restarting...")
             self.training_thread.start(self)

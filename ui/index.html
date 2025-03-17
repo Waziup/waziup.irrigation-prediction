@@ -143,6 +143,17 @@
       document.getElementById('chart_train_data').innerHTML = '';
       document.getElementById('chart_pred').innerHTML = '';
 
+      // Destory the charts
+      //if (chartHist) {
+      //  chartHist.destroy();
+      //}
+      //if (chartDataSet) {
+      //  chartDataSet.destroy();
+      //}
+      //if (chartPred) {
+      //  chartPred.destroy();
+      //}
+
       // Clear sensor values
       document.getElementById('temp-value').textContent = '-- °C';
       document.getElementById('tension-value').textContent = '-- cb';
@@ -743,7 +754,7 @@
 
             // Optionally hide "Volumetric Water Content" series
             if (chartData.kind === "tension" && moistureSeriesVolRounded) {
-              chart.hideSeries("Volumetric Water Content");
+              chartPred.hideSeries("Volumetric Water Content");
             }
           }
         })
@@ -959,7 +970,9 @@
           .then((response_data) => {
             if (response_data.isTrainingFinished == true) {
               waitForTraining = false;
-              location.reload();
+              //location.reload(); // need to reload div
+              loadStuff();
+              //reloadTabContent();
               alert("Training process is finished!");
             }
           });
@@ -971,6 +984,7 @@
     function loadStuff() {
       $.get("/devices", function (data) {
         checkConfigPresent()
+        //TODO: put checkActiveIrrigation() here to have it displayed
           .then((ret) => {
             if (ret) {
               // Config is present

@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 #import missingno as msno 
 import sys
 import pytz
+import threading
 
 # new imports nn
 import tensorflow
@@ -51,6 +52,9 @@ from tensorflow.keras.callbacks import EarlyStopping
 import main
 import plot_manager
 from utils import NetworkUtils, TimeUtils
+
+# Create a global lock
+Create_model_lock = threading.Lock()
 
 # Rolling mean window
 RollingMeanWindowData = 15

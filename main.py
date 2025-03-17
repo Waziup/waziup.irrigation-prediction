@@ -671,7 +671,7 @@ def getPredictionChartData(url, body):
         f_data_time.append(item.to_pydatetime().strftime('%Y-%m-%dT%H:%M:%S%z'))
     f_data_moisture = data_pred["smoothed_values"].tolist()
 
-    # Quick and dirty adjusting predictions to match sensor values TODO: ??? right approach ??? -> NO, THE THRESHOLD WILL BE WRONG!!!!
+    # Quick and dirty adjusting predictions to match sensor values TODO: ??? right approach ??? -> NO, THE THRESHOLD WILL BE WRONG!!!! -> OMG
     adjustment = 1
     #adjust_threshold = lambda currentPlot.threshold, adjustment: currentPlot.threshold - adjustment if currentPlot.sensor_kind == "tension" else currentPlot.threshold + adjustment
     adjust_threshold = lambda adjustment: currentPlot.threshold - adjustment if currentPlot.sensor_kind == "tension" else currentPlot.threshold + adjustment

@@ -120,7 +120,7 @@ def removePlot(plot_nr_to_be_removed):
     #os.remove(plot_to_remove.configPath)
 
     # Finally remove the plot from the list TODO: not array not suitable
-    del Plots[CurrentPlotTab-1]
+    del Plots[CurrentPlotTab]
 
     return plot_to_remove.CurrentPlotTab, plot_to_remove.configPath
 
