@@ -5,7 +5,7 @@ import re
 #import main # check whether 
 
 # Plot related vars
-Plots = {}                                          # This stores all plots
+Plots = {}                                          # This stores all plots in a dict
 CurrentPlotId = 1                                   # CurrentPlotId to retrieve from Dict init with first plot   
 CurrentPlotTab = 1                                  # init with first tab 
 ConfigPath = 'config/current_config_plot1.json'     # init with first plot

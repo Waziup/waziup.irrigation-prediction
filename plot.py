@@ -10,8 +10,6 @@ import requests
 
 # local:
 from utils import NetworkUtils, TimeUtils
-import training_thread
-import prediction_thread
 
 # Class plot members represent individual plots in the application
 class Plot:
@@ -64,7 +62,7 @@ class Plot:
         self.config = {}
 
         # Threading
-        self.training_thread = None                     # Training thread of object
+        self.training_process = None                    # Training thread of object
         self.prediction_thread = None                   # Prediction thread of object
         self.training_finished = False                  # Flag training process finished
         self.currently_training = False                 # Flag currently training this plot
@@ -389,7 +387,7 @@ class Plot:
     # Predictions Getter
     def get_predictions(self):
         if self.predictions.empty:
-            return False
+            return False    
         else:
             return self.predictions
 

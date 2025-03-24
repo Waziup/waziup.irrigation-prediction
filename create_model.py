@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import sys
 import pytz
 import threading
+import multiprocessing
 
 # new imports nn
 import tensorflow
@@ -50,11 +51,10 @@ from tensorflow.keras.callbacks import EarlyStopping
 
 # local
 import main
-import plot_manager
 from utils import NetworkUtils, TimeUtils
 
 # Create a global lock
-Create_model_lock = threading.Lock()
+#Create_model_lock = multiprocessing.Lock()
 
 # Rolling mean window
 RollingMeanWindowData = 15
@@ -1024,11 +1024,12 @@ def create_and_compare_model_reg(train):
               session_id = 123,
               verbose = True,
               ignore_features = To_be_dropped, 
-              train_size = 0.8
+              train_size = 0.8,
+              n_jobs = None 
     )
     
     # Print available models
-    re_exp.models()
+    print("Available models: ", re_exp.models())
     
     # Run compare_models function TODO: configure setup accordingly
     best_re = re_exp.compare_models(
@@ -1225,7 +1226,8 @@ def train_best(best_model, data):
               session_id = 123,
               verbose = True,
               ignore_features = To_be_dropped, 
-              train_size = 0.8
+              train_size = 0.8,
+              n_jobs = None
               )
  
     # Create model 
@@ -1819,7 +1821,7 @@ def tune_model(exp, best):
         print(f"There was an error tuning the model. {e}")
         return best
     
-# Tune hyperparameters of several models
+# Tune hyperparameters of several models -> used for ensemble learning, not implemented yet
 def tune_models(exp, best):
     # tune hyperparameters of dt
     tuned_best_models = []
