@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 # local
 import create_model
 import actuation
-import prediction_thread
+#import prediction_thread
 import plot_manager
 
 Restart_time = 1800  # DEBUG 1800 ~ 30 min in s
@@ -30,16 +30,15 @@ class TrainingProcess(multiprocessing.Process):
     # Since with multiprocessing we can't pass objects, we need to write the plot back to the manager
     def write_plot_to_manager(self):
         try:
-            if self.currentPlot.tab_number == plot_manager.Plots[self.currentPlot.tab_number].tab_number:
-                plot_manager.Plots[self.currentPlot.tab_number].predictions = self.currentPlot.predictions
-                plot_manager.Plots[self.currentPlot.tab_number].threshold_timestamp= self.currentPlot.threshold_timestamp
-                plot_manager.Plots[self.currentPlot.tab_number].training_finished = self.currentPlot.training_finished
-                plot_manager.Plots[self.currentPlot.tab_number].currently_training = self.currentPlot.currently_training
-            else:
-                for plot in plot_manager.Plots: #TODO: not ready yet
-                    if plot.id == self.currentPlot.id:
-                        plot_manager.Plots[plot.tab_number] = self.currentPlot
-                        break
+            """Write updated plot back to the multiprocessing manager."""
+            with plot_manager.plot_lock: # Ensure thread safety
+                if self.currentPlot.tab_number in plot_manager.Plots:
+                    plot_manager.Plots[self.currentPlot.tab_number] = self.currentPlot
+                else:
+                    for key, plot in plot_manager.Plots.items():
+                        if plot.id == self.currentPlot.id:
+                            plot_manager.Plots[key] = self.currentPlot
+                            break
         except Exception as e:
             print(f"Error updating plot in manager: {e}")
 
@@ -65,8 +64,16 @@ class TrainingProcess(multiprocessing.Process):
 
                 if create_model.Perform_training:
                     # Call create model function
-                    currentSoilTension, self.currentPlot.threshold_timestamp, self.currentPlot.predictions = create_model.main(self.currentPlot)
-
+                    with plot_manager.plot_lock:
+                        currentSoilTension, self.currentPlot.threshold_timestamp, self.currentPlot.predictions = create_model.main(self.currentPlot)
+                    
+                    # DEBUG:
+                    if self.currentPlot is not None:
+                        print("Current Plot Name:", self.currentPlot.user_given_name)
+                        print("Predictions before training:", self.currentPlot.predictions)
+                    else:
+                        print("Error: self.currentPlot is not defined!")
+                    
                     # Save variables to a file
                     variables_to_save = {
                         'currentSoilTension': currentSoilTension,

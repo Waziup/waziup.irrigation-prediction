@@ -1,11 +1,13 @@
-import json
 from plot import Plot
 import os
-import re
-#import main # check whether 
+import multiprocessing
+from multiprocessing import Lock, Manager
 
-# Plot related vars
-Plots = {}                                          # This stores all plots in a dict
+# Global variables
+# Initialize a Manager to share the dictionary across processes
+manager = Manager()
+plot_lock = manager.Lock()
+Plots = {}                                          # This stores all plots in a shared dictionary      
 CurrentPlotId = 1                                   # CurrentPlotId to retrieve from Dict init with first plot   
 CurrentPlotTab = 1                                  # init with first tab 
 ConfigPath = 'config/current_config_plot1.json'     # init with first plot
@@ -133,6 +135,15 @@ def getCurrentConfig():
 
 def getCurrentPlot():
     return Plots[CurrentPlotTab]
+
+# def getCurrentPlot():
+#     print(f"Into get cueernt plot with id: {CurrentPlotTab}")
+#     print(f"[{multiprocessing.current_process().name}] Trying to acquire plot_lock...")
+#     with plot_lock:
+#         print(f"[{multiprocessing.current_process().name}] Lock acquired.")
+#         plot = Plots[CurrentPlotTab]
+#     print(f"[{multiprocessing.current_process().name}] Lock released.")
+#     return plot
 
 def getCurrentPlotWithId(passed_id):
     for plot in Plots:
