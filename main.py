@@ -350,39 +350,38 @@ def getConfigsFromAllFiles():
                 # Parse JSON from the file
                 data = json.load(file)
 
-            with plot_manager.plot_lock:
-                # Get choosen sensors
-                #print("Before assignment:",  plot_manager.Plots[i].device_and_sensor_ids_moisture)
-                plots[i].device_and_sensor_ids_moisture = data.get('DeviceAndSensorIdsMoisture', [])
-                #print("After assignment:",  plot_manager.Plots[i].device_and_sensor_ids_moisture)
-                plots[i].device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
-                plots[i].device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
+            # Get choosen sensors
+            #print("Before assignment:",  plot_manager.Plots[i].device_and_sensor_ids_moisture)
+            plots[i].device_and_sensor_ids_moisture = data.get('DeviceAndSensorIdsMoisture', [])
+            #print("After assignment:",  plot_manager.Plots[i].device_and_sensor_ids_moisture)
+            plots[i].device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
+            plots[i].device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
 
-                # Get data from forms
-                plots[i].user_given_name = data.get('Name', [])
-                plots[i].sensor_kind = data.get('Sensor_kind', [])
-                plots[i].gps_info = data.get('Gps_info', [])
-                plots[i].slope = float(data.get('Slope', []))
-                plots[i].threshold = float(data.get('Threshold', []))
-                plots[i].irrigation_amount = float(data.get('Irrigation_amount', []))
-                plots[i].look_ahead_time = float(data.get('Look_ahead_time', []))
-                plots[i].start_date = data.get('Start_date', [])
-                plots[i].period = int(data.get('Period', []))
-                plots[i].soil_type = data.get('Soil_type', [])
-                plots[i].permanent_wilting_point = float(data.get('PermanentWiltingPoint', []))
-                plots[i].field_capacity_upper = float(data.get('FieldCapacityUpper', []))
-                plots[i].field_capacity_lower = float(data.get('FieldCapacityLower', []))
-                plots[i].saturation = float(data.get('Saturation', []))
+            # Get data from forms
+            plots[i].user_given_name = data.get('Name', [])
+            plots[i].sensor_kind = data.get('Sensor_kind', [])
+            plots[i].gps_info = data.get('Gps_info', [])
+            plots[i].slope = float(data.get('Slope', []))
+            plots[i].threshold = float(data.get('Threshold', []))
+            plots[i].irrigation_amount = float(data.get('Irrigation_amount', []))
+            plots[i].look_ahead_time = float(data.get('Look_ahead_time', []))
+            plots[i].start_date = data.get('Start_date', [])
+            plots[i].period = int(data.get('Period', []))
+            plots[i].soil_type = data.get('Soil_type', [])
+            plots[i].permanent_wilting_point = float(data.get('PermanentWiltingPoint', []))
+            plots[i].field_capacity_upper = float(data.get('FieldCapacityUpper', []))
+            plots[i].field_capacity_lower = float(data.get('FieldCapacityLower', []))
+            plots[i].saturation = float(data.get('Saturation', []))
 
-                # Get soil water retention curve -> currently not needed here
-                plots[i].soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
+            # Get soil water retention curve -> currently not needed here
+            plots[i].soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
 
-                # Sensor kind
-                if plots[i].sensor_kind == "tension":
-                    plots[i].sensor_unit = "Moisture in cbar (Soil Tension)"
-                elif plots[i].sensor_kind == "capacitive":
-                    plots[i].sensor_unit = "Moisture in % (Volumetric Water Content)"
-                else:
+            # Sensor kind
+            if plots[i].sensor_kind == "tension":
+                plots[i].sensor_unit = "Moisture in cbar (Soil Tension)"
+            elif plots[i].sensor_kind == "capacitive":
+                plots[i].sensor_unit = "Moisture in % (Volumetric Water Content)"
+            else:
                     plots[i].sensor_unit = "Unit is unknown"
 
 # Get the config from backend to disply it in frontend settings.html
@@ -656,12 +655,11 @@ usock.routerGET("/api/getDatasetChartData", getDatasetChartData)
 
 # get values from create_model.py if models had been trained
 def getPredictionChartData(url, body):
-    with plot_manager.plot_lock:
-        # Get current plot (selected in UI)
-        currentPlot = plot_manager.getCurrentPlot()
+    # Get current plot (selected in UI)
+    currentPlot = plot_manager.getCurrentPlot()
 
-        # Get prediction data for chart of current plot
-        data_pred = currentPlot.get_predictions()
+    # Get prediction data for chart of current plot
+    data_pred = currentPlot.get_predictions()
 
     if data_pred is False:
         response_data = {"model": False}

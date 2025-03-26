@@ -1,12 +1,8 @@
 from plot import Plot
 import os
-import multiprocessing
-from multiprocessing import Lock, Manager
+import threading
 
 # Global variables
-# Initialize a Manager to share the dictionary across processes
-manager = Manager()
-plot_lock = manager.Lock()
 Plots = {}                                          # This stores all plots in a shared dictionary      
 CurrentPlotId = 1                                   # CurrentPlotId to retrieve from Dict init with first plot   
 CurrentPlotTab = 1                                  # init with first tab 
@@ -14,8 +10,8 @@ ConfigPath = 'config/current_config_plot1.json'     # init with first plot
 Config_folder_path = "config/"                      # Folder with configfiles
 
 # Array of active threads TODO: if training started kill other threads.(formerly done in main.py)
-#Threads = []
-#ThreadId = 0
+Threads = []
+ThreadId = 0
 #Restart_time = 1800 # DEBUG 1800 ~ 30 min in s
 
 # Just read directory and retrieve filenames in sorted manner

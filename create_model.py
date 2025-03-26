@@ -105,6 +105,7 @@ Model_mapping = {
     'CatBoostRegressor': 'catboost',
     'DummyRegressor': 'dummy'
 }
+Debug = True
 
 # Restrict time to training
 class TimeLimitCallback(Callback):
@@ -2034,6 +2035,15 @@ def main(plot) -> int:
     # Data preparation: get config, fetch, align, clean, sample....
     train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = data_pipeline(plot)
 
+    # Debug mode -> skips training and uses debug.csv
+    if Debug:
+        debug_df = pd.read_csv('debug.csv').set_index('Timestamp')
+        #Error
+        #debug_df.index = pd.to_datetime(debug_df.index)
+        debug_df.index = pd.to_datetime(debug_df.index, utc=True).tz_convert(TimeUtils.Timezone)
+
+        return 12, pd.Timestamp(datetime.datetime.now().replace(microsecond=0, second=0, minute=0)), debug_df
+    
     # Start training pipeline: setup, train models the best ones to best-array
     # Classical regression
     #exp, best = create_and_compare_model_ts(cut_sub_dfs)
@@ -2118,7 +2128,12 @@ def main(plot) -> int:
 
         # Create predictions to forecast values
         # Classical regression
-        plot.predictions = generate_predictions(plot.tuned_best, plot.best_exp, future_features)
+        future_features_without_index = future_features.reset_index(drop=True, inplace=False)
+        future_features_without_index = future_features_without_index.rename(columns={'index': 'Timestamp'}, inplace=False)
+        plot.predictions = generate_predictions(plot.tuned_best, plot.best_exp, future_features_without_index)
+        plot.predictions['Timestamp'] = future_features.index  # Copy index to column
+        plot.predictions = plot.predictions.set_index("Timestamp")  # Set Timestamp as index
+        #plot.predictions = generate_predictions(plot.tuned_best, plot.best_exp, future_features)
     else:
         # Tune best model
         plot.tuned_best = tune_model_nn(X_train_scaled, y_train, best_model_nn)
@@ -2130,7 +2145,16 @@ def main(plot) -> int:
         plot.predictions = generate_predictions_nn(plot.tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])
 
     # Cut passed time from predictions
-    plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]    
+    # Ensure the index of plot.predictions is datetime with the same timezone
+    if plot.predictions.index.tz is None:
+        plot.predictions.index = pd.to_datetime(plot.predictions.index).tz_localize('UTC').tz_convert(TimeUtils.Timezone)
+
+    # Create a Timestamp from the current date and time (without microseconds, seconds, and minutes)
+    current_time = pd.Timestamp(datetime.datetime.now().replace(microsecond=0, second=0, minute=0))
+
+    # Now, slice the predictions DataFrame based on the timestamp
+    plot.predictions = plot.predictions.loc[current_time:]
+    #plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]    
     
     # Align predictions with historical data
     align_with_latest_sensor_values(plot)

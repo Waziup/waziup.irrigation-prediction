@@ -1,4 +1,4 @@
-import multiprocessing
+import threading
 import time
 import pathlib
 import pickle
@@ -12,12 +12,12 @@ import plot_manager
 
 Restart_time = 1800  # DEBUG 1800 ~ 30 min in s
 
-class TrainingProcess(multiprocessing.Process):
+class TrainingThread(threading.Thread):
     def __init__(self, plot, startTrainingNow):
         super().__init__()
         self.currentPlot = plot  # Attach process to a specific plot
         self.startTrainingNow = startTrainingNow
-        self.stop_event = multiprocessing.Event()  # Stop flag
+        self.stop_event = threading.Event()  # Stop flag
 
     def time_until_noon(self, train_period_days):
         """Calculate the time difference from now until the next noon."""
@@ -27,20 +27,20 @@ class TrainingProcess(multiprocessing.Process):
             noon_today += timedelta(days=train_period_days)
         return (noon_today - now).total_seconds()
     
-    # Since with multiprocessing we can't pass objects, we need to write the plot back to the manager
-    def write_plot_to_manager(self):
-        try:
-            """Write updated plot back to the multiprocessing manager."""
-            with plot_manager.plot_lock: # Ensure thread safety
-                if self.currentPlot.tab_number in plot_manager.Plots:
-                    plot_manager.Plots[self.currentPlot.tab_number] = self.currentPlot
-                else:
-                    for key, plot in plot_manager.Plots.items():
-                        if plot.id == self.currentPlot.id:
-                            plot_manager.Plots[key] = self.currentPlot
-                            break
-        except Exception as e:
-            print(f"Error updating plot in manager: {e}")
+    # # Since with multiprocessing we can't pass objects, we need to write the plot back to the manager
+    # def write_plot_to_manager(self):
+    #     try:
+    #         """Write updated plot back to the multiprocessing manager."""
+    #         with plot_manager.plot_lock: # Ensure thread safety
+    #             if self.currentPlot.tab_number in plot_manager.Plots:
+    #                 plot_manager.Plots[self.currentPlot.tab_number] = self.currentPlot
+    #             else:
+    #                 for key, plot in plot_manager.Plots.items():
+    #                     if plot.id == self.currentPlot.id:
+    #                         plot_manager.Plots[key] = self.currentPlot
+    #                         break
+    #     except Exception as e:
+    #         print(f"Error updating plot in manager: {e}")
 
     def run(self):
         # To stop via event
@@ -64,15 +64,15 @@ class TrainingProcess(multiprocessing.Process):
 
                 if create_model.Perform_training:
                     # Call create model function
-                    with plot_manager.plot_lock:
-                        currentSoilTension, self.currentPlot.threshold_timestamp, self.currentPlot.predictions = create_model.main(self.currentPlot)
+                    #with plot_manager.plot_lock:
+                    currentSoilTension, self.currentPlot.threshold_timestamp, self.currentPlot.predictions = create_model.main(self.currentPlot)
                     
-                    # DEBUG:
-                    if self.currentPlot is not None:
-                        print("Current Plot Name:", self.currentPlot.user_given_name)
-                        print("Predictions before training:", self.currentPlot.predictions)
-                    else:
-                        print("Error: self.currentPlot is not defined!")
+                    # # DEBUG:
+                    # if self.currentPlot is not None:
+                    #     print("Current Plot Name:", self.currentPlot.user_given_name)
+                    #     print("Predictions before training:", self.currentPlot.predictions)
+                    # else:
+                    #     print("Error: self.currentPlot is not defined!")
                     
                     # Save variables to a file
                     variables_to_save = {
@@ -84,7 +84,7 @@ class TrainingProcess(multiprocessing.Process):
                         pickle.dump(variables_to_save, f)
 
                     # Write back the plot to the plot manager
-                    self.write_plot_to_manager()
+                    #self.write_plot_to_manager()
                 else:
                     # Load saved variables
                     with open(file_path, 'rb') as f:
@@ -128,5 +128,5 @@ def start(currentPlot):
     currentPlot.currently_training = True
 
     # Create and start a new training process
-    currentPlot.training_process = TrainingProcess(currentPlot, True)
+    currentPlot.training_process = TrainingThread(currentPlot, True)
     currentPlot.training_process.start()

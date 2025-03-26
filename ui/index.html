@@ -19,7 +19,9 @@
     var timestamp = "";
     // Apex charts is rather slow in handeling many datapoints => needs to be restricted
     var MaxValuesToBeDisplayed = 1000;  // TODO: better: restrict API call to wg-edge
-    let chartHist, chartDataSet, chartPred;
+    let chartHist = null;
+    let chartDataSet = null;
+    let chartPred = null;
     let chartHistLoaded = false, chartDataSetLoaded = false, chartPredLoaded = false; // TODO: use!!!
     var TrainingReadyCheck = 10000;     // 10s
     let tabCounter = 0;
@@ -144,15 +146,18 @@
       document.getElementById('chart_pred').innerHTML = '';
 
       // Destory the charts
-      //if (chartHist) {
-      //  chartHist.destroy();
-      //}
-      //if (chartDataSet) {
-      //  chartDataSet.destroy();
-      //}
-      //if (chartPred) {
-      //  chartPred.destroy();
-      //}
+      if (chartHist) {
+        chartHist.destroy();
+        chartHist = null;
+      }
+      if (chartDataSet) {
+        chartDataSet.destroy();
+        chartDataSet = null;
+      }
+      if (chartPred) {
+        chartPred.destroy();
+        chartPred = null;
+      }
 
       // Clear sensor values
       document.getElementById('temp-value').textContent = '-- °C';
@@ -164,6 +169,11 @@
     }
 
     function switchTab(tabId) {
+      const currentTab = document.getElementById(`tab-${tabId}`);
+      // Check if the clicked tab is already active to prevent reloading
+      if (currentTab && currentTab.classList.contains('active')) {
+        return;
+      }
       // Hide content and show loading indicator
       clearTabContent();
       document.querySelector('.center_full').classList.remove('loaded');
@@ -181,7 +191,6 @@
       });
 
       // Activate the selected tab
-      const currentTab = document.getElementById(`tab-${tabId}`);
       if (currentTab) {
         currentTab.classList.add('active');
 
@@ -600,16 +609,15 @@
       // Destroy existing chart instance
       if (chartPred) {
         chartPred.destroy();
+        chartPred = null;
       }
 
       fetch("../api/getPredictionChartData")
         .then((response) => response.json())
         .then((chartData) => {
-
           const chartContainer = document.getElementById('chart_pred');
-
+          chartContainer.innerHTML = "";            // Clears the chart div
           if (chartData.model === false) {
-            chartContainer.innerHTML = "";            // Clears the chart div
             chartContainer.style.display = "none";    // Hide the div
             // highlight train
             const trainButton = document.getElementById("train_btn");
@@ -642,6 +650,12 @@
               chart: {
                 type: "line",
                 events: {
+                  render: function (chartContext, config) {
+                    // Make sure the series exists before calling hideSeries
+                    if (chartData.kind === "tension" && moistureSeriesVolRounded) {
+                      chartPred.hideSeries("Volumetric Water Content");
+                    }
+                  },
                   legendClick: function (chartContext, seriesIndex) {
                     const seriesName = chartContext.w.globals.seriesNames[seriesIndex];
                     // Toggle visibility state for the clicked series
@@ -744,18 +758,11 @@
               }
             };
 
-            // Create or update the chart
-            if (!chartPred) {
-              chartPred = new ApexCharts(document.querySelector("#chart_pred"), options);
-              chartPred.render();
-            } else {
-              chartPred.updateOptions(options);
-            }
-
-            // Optionally hide "Volumetric Water Content" series
-            if (chartData.kind === "tension" && moistureSeriesVolRounded) {
-              chartPred.hideSeries("Volumetric Water Content");
-            }
+            chartPred = new ApexCharts(
+              document.querySelector("#chart_pred"),
+              options
+            );
+            chartPred.render();
           }
         })
         .catch((error) => console.error("Error fetching data:", error));
