@@ -6,7 +6,6 @@ import csv
 from datetime import datetime, timedelta
 from io import StringIO
 import json
-import multiprocessing
 import threading
 import time
 from urllib.parse import urlparse, parse_qs
@@ -22,7 +21,6 @@ from plot import Plot
 import plot_manager
 from utils import NetworkUtils
 import training_thread
-from multiprocessing import Lock
 
 #---------------------#
 # Path to the root of the code
@@ -788,6 +786,14 @@ def startTraining(url, body):
     return 200, b"", []
 
 usock.routerGET("/api/startTraining", startTraining)
+
+# Returns tabId of current plot
+def getCurrentPlot(url, body):
+    response_data = {"currentPlot": plot_manager.getCurrentPlot().tab_number}
+
+    return 200, bytes(json.dumps(response_data), "utf8"), []
+
+usock.routerGET("/api/getCurrentPlot", getCurrentPlot)
 
 #------------------#
 

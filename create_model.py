@@ -23,8 +23,6 @@ import matplotlib.pyplot as plt
 #import missingno as msno 
 import sys
 import pytz
-import threading
-import multiprocessing
 
 # new imports nn
 import tensorflow
@@ -53,9 +51,6 @@ from tensorflow.keras.callbacks import EarlyStopping
 import main
 from utils import NetworkUtils, TimeUtils
 
-# Create a global lock
-#Create_model_lock = multiprocessing.Lock()
-
 # Rolling mean window
 RollingMeanWindowData = 15
 RollingMeanWindowGrouped = 5
@@ -65,9 +60,6 @@ Sample_rate = 60
 
 # Forecast horizon TODO: add config or adjust automa !!!!
 Forcast_horizon = 5 #days
-
-# Load variables of training from file, to debug actuation part
-Perform_training = True
 
 # Created features that are dropped later -> TODO: evaluate this!!!
 To_be_dropped = ['minute', 'Timestamp', 'gradient', 
@@ -105,7 +97,13 @@ Model_mapping = {
     'CatBoostRegressor': 'catboost',
     'DummyRegressor': 'dummy'
 }
-Debug = True
+
+## DEBUG -> TODO: move to .env?
+# to skip data preprocessing and training, load data from file
+SkipDataPreprocessing = True
+SkipTraning = True # if true, load model from static file
+# Load variables of training from file, that had been saved from former training/predictions to debug actuation part: DEBUG
+Perform_training = True # kind of redundant, but automatically saves and loads former results of predictions
 
 # Restrict time to training
 class TimeLimitCallback(Callback):
@@ -2032,14 +2030,19 @@ def main(plot) -> int:
     # Check version of pycaret, should be >= 3.0
     print("Check version of pycaret:", pycaret.__version__, "should be >= 3.0")
     
-    # Data preparation: get config, fetch, align, clean, sample....
-    train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = data_pipeline(plot)
+    if SkipDataPreprocessing:
+        # Load data from disk
+        plot.data = pd.read_csv('data/debug/debug_data.csv').set_index('Timestamp')
+        plot.data.index = pd.to_datetime(plot.data.index, utc=True).tz_convert(TimeUtils.Timezone)
+        train, test = split_by_ratio(plot.data, 20)
+        X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = prepare_data_for_cnn(plot.data, 'rolling_mean_grouped_soil')
+    else:
+        # Data preparation pipeline: get config, fetch, align, clean, sample....
+        train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = data_pipeline(plot)
 
     # Debug mode -> skips training and uses debug.csv
-    if Debug:
-        debug_df = pd.read_csv('debug.csv').set_index('Timestamp')
-        #Error
-        #debug_df.index = pd.to_datetime(debug_df.index)
+    if SkipTraning:
+        debug_df = pd.read_csv('data/debug/debug_predictions.csv').set_index('Timestamp')
         debug_df.index = pd.to_datetime(debug_df.index, utc=True).tz_convert(TimeUtils.Timezone)
 
         return 12, pd.Timestamp(datetime.datetime.now().replace(microsecond=0, second=0, minute=0)), debug_df

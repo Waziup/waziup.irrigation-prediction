@@ -60,13 +60,36 @@
             // Switch to first tab
             switchTab(1);
           } else {
-            // Add saved plots, fetched from backend
-            for (let i = 0; i < data.tabnames.length; i++) {
-              addTab(data.tabnames[i]);
-            }
-            switchTab(1)
+            // Add all existing tabs first
+            const tabPromises = data.tabnames.map((name) => {
+              return new Promise((resolve) => {
+                addTab(name);
+                resolve();
+              });
+            });
+            return Promise.all(tabPromises);
           }
-          console.log("LoadPlots: ", data);
+        })
+        .then(() => {
+          // Now fetch current plot after tabs exist
+          return fetch(`../api/getCurrentPlot`);
+        })
+        .then((response) => response.json())
+        .then((currentPlotData) => {
+          const currentTabId = currentPlotData['currentPlot'];
+          // Validate tab exists before switching
+          const tabExists = document.getElementById(`tab-${currentTabId}`);
+          
+          if (tabExists) {
+            switchTab(currentTabId);
+          } else {
+            console.warn(`Tab ${currentTabId} not found, defaulting to first`);
+            switchTab(1);
+          }
+        })
+        .catch((error) => {
+          console.error('Error in tab initialization:', error);
+          switchTab(1); // Fallback to first tab
         });
 
       // Add plot when add button is clicked
@@ -98,7 +121,7 @@
           .catch((error) => {
             console.error("Error, could not add plot_nr: ", error);
           });
-          
+
 
         // Switch to the new tab
         switchTab(tabId);
@@ -345,7 +368,7 @@
       train_button.disabled = false;
     }
 
-    function stateConfigNotPresent(){
+    function stateConfigNotPresent() {
       // Hide the loading indicator, there is no cnfig
       document.getElementById('loading-indicator').style.display = 'none';
       document.querySelector('.center_full').classList.add('loaded');
@@ -991,7 +1014,7 @@
     function loadStuff() {
       $.get("/devices", function (data) {
         checkConfigPresent()
-        //TODO: put checkActiveIrrigation() here to have it displayed
+          //TODO: put checkActiveIrrigation() here to have it displayed
           .then((ret) => {
             if (ret) {
               // Config is present

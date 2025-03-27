@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 # local
 import create_model
 import actuation
-#import prediction_thread
+import prediction_thread
 import plot_manager
 
 Restart_time = 1800  # DEBUG 1800 ~ 30 min in s
@@ -26,21 +26,6 @@ class TrainingThread(threading.Thread):
         if now >= noon_today:
             noon_today += timedelta(days=train_period_days)
         return (noon_today - now).total_seconds()
-    
-    # # Since with multiprocessing we can't pass objects, we need to write the plot back to the manager
-    # def write_plot_to_manager(self):
-    #     try:
-    #         """Write updated plot back to the multiprocessing manager."""
-    #         with plot_manager.plot_lock: # Ensure thread safety
-    #             if self.currentPlot.tab_number in plot_manager.Plots:
-    #                 plot_manager.Plots[self.currentPlot.tab_number] = self.currentPlot
-    #             else:
-    #                 for key, plot in plot_manager.Plots.items():
-    #                     if plot.id == self.currentPlot.id:
-    #                         plot_manager.Plots[key] = self.currentPlot
-    #                         break
-    #     except Exception as e:
-    #         print(f"Error updating plot in manager: {e}")
 
     def run(self):
         # To stop via event
@@ -60,19 +45,11 @@ class TrainingThread(threading.Thread):
                 start_time = datetime.now().replace(microsecond=0)
                 print("Training for Plot:", self.currentPlot.user_given_name, "started at:", start_time)
 
-                file_path = pathlib.Path('saved_variables_plot_' + str(self.currentPlot.id) + '.pkl')
+                file_path = pathlib.Path('data/debug/saved_variables_plot_' + str(self.currentPlot.id) + '.pkl')
 
                 if create_model.Perform_training:
                     # Call create model function
-                    #with plot_manager.plot_lock:
                     currentSoilTension, self.currentPlot.threshold_timestamp, self.currentPlot.predictions = create_model.main(self.currentPlot)
-                    
-                    # # DEBUG:
-                    # if self.currentPlot is not None:
-                    #     print("Current Plot Name:", self.currentPlot.user_given_name)
-                    #     print("Predictions before training:", self.currentPlot.predictions)
-                    # else:
-                    #     print("Error: self.currentPlot is not defined!")
                     
                     # Save variables to a file
                     variables_to_save = {
@@ -82,9 +59,6 @@ class TrainingThread(threading.Thread):
                     }
                     with open(file_path, 'wb') as f:
                         pickle.dump(variables_to_save, f)
-
-                    # Write back the plot to the plot manager
-                    #self.write_plot_to_manager()
                 else:
                     # Load saved variables
                     with open(file_path, 'rb') as f:
@@ -105,9 +79,15 @@ class TrainingThread(threading.Thread):
                 if len(self.currentPlot.device_and_sensor_ids_flow) > 0:
                     actuation.main(currentSoilTension, self.currentPlot.threshold_timestamp, self.currentPlot.predictions, self.currentPlot)
 
-                # # Start prediction process if not running
-                # if self.currentPlot.prediction_thread is None:
-                #     prediction_thread.start(self.currentPlot)
+                # Start prediction process if not running
+                if (
+                    self.currentPlot.prediction_thread is None 
+                    and not create_model.SkipDataPreprocessing
+                    and not create_model.SkipModelTraining
+                ):
+                    prediction_thread.start(self.currentPlot)
+                else:
+                    print("Prediction thread is already running. Or skipping data preprocessing and model training was set in create_model.")
 
             except Exception as e:
                 print(f"Training error: {e}. Retrying after 30 minutes.")

@@ -164,8 +164,8 @@ catboost_info/
 # tuning records
 hyperband_dir/
 
-# irrigation records
-data/*
+# saved data, irrigation, data and prediction records
+#data/*
 
 # notes
 notes.txt
