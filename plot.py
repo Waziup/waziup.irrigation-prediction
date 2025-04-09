@@ -80,8 +80,8 @@ class Plot:
 
         # Debug
         self.use_pycaret = True                         # Flag can be switched to decide on model usage
-        self.load_data_from_csv = False
-        self.data_from_csv = "binned_removed_new_for_app_ww.csv"
+        self.load_data_from_csv = False                 # Flag can be switched to decide on data source
+        self.data_from_csv = "data/debug/binned_removed_new_for_app.csv"
         # Load former irrigations from file "data/irrigations.json" DEBUG
         self.load_irrigations_from_file = False
         self.irrigations_from_json = 'data/irrigations_plot_' + str(id)  + '.json'
@@ -112,10 +112,11 @@ class Plot:
                 # Parse JSON from the file
                 data = json.load(file)
 
-            # Get choosen sensors
-            self.device_and_sensor_ids_moisture = data.get('DeviceAndSensorIdsMoisture', [])
-            self.device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
-            self.device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
+            if not self.load_data_from_csv:
+                # Get choosen sensors
+                self.device_and_sensor_ids_moisture = data.get('DeviceAndSensorIdsMoisture', [])
+                self.device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
+                self.device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
 
             # Get data from forms
             self.user_given_name = data.get('Name', [])
@@ -211,8 +212,26 @@ class Plot:
             return "Error in 'load_latest_data_api()'! ", e  # TODO: intruduce error handling!
 
         return response_ok
+    
+    # Load data from CSV file
+    def load_latest_data_csv(self, sensor_name, type):
+        print("load_latest_data_csv: will load data for plot: " +
+              self.user_given_name + " For the sensor: " + sensor_name)
 
-    # Load from CSV file -> obsoleteload_latest_data_api
+        # Load data from CSV file
+        try:
+            with open(self.data_from_csv, "r") as file:
+                # Specify the column(s) you want to load
+                data = pd.read_csv(file, header=0, usecols=[sensor_name])
+            return data.iloc[-1, 0] # last element first col
+        except FileNotFoundError:
+            print("File not found:", self.data_from_csv)
+            return None
+        except Exception as e: 
+            print("An error occurred, loading latest data from csv file:", e)
+            return None
+
+    # Load from CSV file -> obsolete
     def load_data(path):
         # creating a data frame
         data = pd.read_csv("binned_removed.csv", header=0)
@@ -223,10 +242,17 @@ class Plot:
         # Specify the path to the JSON file you want to read
         json_file_path = self.configPath
 
+        # Read the JSON data from the file
+        with open(json_file_path, 'r') as json_file:
+            config = json.load(json_file)
+
+        # Check if the CSV file exists
         try:
-            with open(self.data_from_csv, "r") as file:
-                # Perform operations on the file
-                data = pd.read_csv(file, header=0)
+            if self.load_data_from_csv is True:
+                with open(self.data_from_csv, "r") as file:
+                    # Perform operations on the file
+                    data = pd.read_csv(file, header=0)
+
                 self.device_and_sensor_ids_moisture = []
                 self.device_and_sensor_ids_temp = []
                 self.device_and_sensor_ids_flow = []
@@ -237,20 +263,20 @@ class Plot:
                         self.device_and_sensor_ids_moisture.append(col)
                     elif col.startswith("soil_temp"):
                         self.device_and_sensor_ids_temp.append(col)
-                self.load_data_from_csv = True
-                # This is not implemented: self.device_and_sensor_ids_flow = config["DeviceAndSensorIdsFlow"]
+                    # This is not implemented
+                    elif col.startswith("flow"):
+                        self.device_and_sensor_ids_flow.append(col)
+            else:
+                self.device_and_sensor_ids_moisture = config["DeviceAndSensorIdsMoisture"]
+                self.device_and_sensor_ids_temp = config["DeviceAndSensorIdsTemp"]
+                if "DeviceAndSensorIdsFlow" in config:
+                    self.device_and_sensor_ids_flow = config["DeviceAndSensorIdsFlow"]
+        # If the CSV file does not exist, use data from API
         except FileNotFoundError:
-            # Read the JSON data from the file
-            with open(json_file_path, 'r') as json_file:
-                config = json.load(json_file)
-
-            self.device_and_sensor_ids_moisture = config["DeviceAndSensorIdsMoisture"]
-            self.device_and_sensor_ids_temp = config["DeviceAndSensorIdsTemp"]
-            if "DeviceAndSensorIdsFlow" in config:
-                self.device_and_sensor_ids_flow = config["DeviceAndSensorIdsFlow"]
+             print(f"Debug mode was set in .env, but no file with was found in {self.data_from_csv}. Received the following error: {e}")
         except Exception as e:
             print(
-                "An error occurred: No devices are set in settings, there is also no local config file.", e)
+                "An error occurred in read config: No devices are set in settings, there is also no local config file.", e)
 
         return config
 
@@ -258,8 +284,6 @@ class Plot:
     def load_data_api(self, sensor_name, type, from_timestamp):  # , token)
         print("load_data_api: will load data for plot: " + self.user_given_name
                + " For the sensor: " + sensor_name)
-        # Load config to obtain GPS coordinates
-        self.config = self.read_config()
 
         # Obtain ApiUrl
         apiUrl = NetworkUtils.ApiUrl
@@ -296,10 +320,10 @@ class Plot:
 
         # Reconstruct the URL with the encoded query
         encoded_url = urllib.parse.urlunsplit((parsed_url.scheme,
-                                               parsed_url.netloc,
-                                               parsed_url.path,
-                                               encoded_query,
-                                               parsed_url.fragment))
+                                            parsed_url.netloc,
+                                            parsed_url.path,
+                                            encoded_query,
+                                            parsed_url.fragment))
 
         # Define headers for the GET request
         headers = {
@@ -330,6 +354,23 @@ class Plot:
             return "", e  # TODO: intruduce error handling!
 
         return response_ok
+        
+    def load_data_csv(self):
+        print("load_data_csv: will load data from CSV for plot: " + self.user_given_name)
+
+        # Load data from CSV file
+        try:
+            with open(self.data_from_csv, "r") as file:
+                # Specify the column(s) you want to load
+                data = pd.read_csv(file, header=0)#, usecols=[sensor_name])
+            return data
+        except FileNotFoundError:
+            print("File not found:", self.data_from_csv)
+            return None
+        except Exception as e: 
+            print("An error occurred, loading data from csv file:", e)
+            return None
+
 
     # Redundant set active state
 

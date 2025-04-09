@@ -14,6 +14,7 @@ Restart_time = 1800 # DEBUG 1800 ~ 30 min in s
 class PredictionThread(threading.Thread):
     def __init__(self, plot):
         super().__init__()
+        self.daemon = True
         self.currentPlot = plot  # Attach thread to a specific plot
         self.stop_event = threading.Event()  # Stop flag
 

@@ -10,6 +10,7 @@ import threading
 import time
 from urllib.parse import urlparse, parse_qs
 from dotenv import load_dotenv
+import pandas as pd
 import usock
 import os
 import pathlib
@@ -347,13 +348,31 @@ def getConfigsFromAllFiles():
             with open(config, 'r') as file:
                 # Parse JSON from the file
                 data = json.load(file)
+            if plots[i].load_data_from_csv:
+                with open(plots[i].data_from_csv, "r") as file:
+                    # Perform operations on the file
+                    debug_csv = pd.read_csv(file, header=0)
 
-            # Get choosen sensors
-            #print("Before assignment:",  plot_manager.Plots[i].device_and_sensor_ids_moisture)
-            plots[i].device_and_sensor_ids_moisture = data.get('DeviceAndSensorIdsMoisture', [])
-            #print("After assignment:",  plot_manager.Plots[i].device_and_sensor_ids_moisture)
-            plots[i].device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
-            plots[i].device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
+                plots[i].device_and_sensor_ids_moisture = []
+                plots[i].device_and_sensor_ids_temp = []
+                plots[i].device_and_sensor_ids_flow = []
+
+                # create array with sensors strings
+                for col in debug_csv.columns:
+                    if col.startswith("tension"):
+                        plots[i].device_and_sensor_ids_moisture.append(col)
+                    elif col.startswith("soil_temp"):
+                        plots[i].device_and_sensor_ids_temp.append(col)
+                    # This is not implemented
+                    elif col.startswith("flow"):
+                        plots[i].device_and_sensor_ids_flow.append(col)
+            else:
+                # Get choosen sensors
+                #print("Before assignment:",  plot_manager.Plots[i].device_and_sensor_ids_moisture)
+                plots[i].device_and_sensor_ids_moisture = data.get('DeviceAndSensorIdsMoisture', [])
+                #print("After assignment:",  plot_manager.Plots[i].device_and_sensor_ids_moisture)
+                plots[i].device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
+                plots[i].device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
 
             # Get data from forms
             plots[i].user_given_name = data.get('Name', [])
@@ -518,6 +537,109 @@ def extract_and_format(data, key, datatype):
     
     return values
 
+# def interpolate_list(data_list):
+#     data = np.array(data_list, dtype=float)
+
+#     # Find indices where values are not NaN
+#     not_nan = np.where(~np.isnan(data))[0]
+#     nan = np.where(np.isnan(data))[0]
+
+#     if len(nan) == 0 or len(not_nan) < 2:
+#         return data.tolist()
+
+#     # Interpolate
+#     data[nan] = np.interp(nan, not_nan, data[not_nan])
+#     return data.tolist()
+
+def interpolate_list_with_limit(data_list, max_gap=10):
+    data = np.array(data_list, dtype=float)
+    n = len(data)
+
+    isnan = np.isnan(data)
+    result = data.copy()
+
+    start = None
+
+    for i in range(n):
+        if isnan[i]:
+            if start is None:
+                start = i
+        else:
+            if start is not None:
+                end = i
+                gap_len = end - start
+                if gap_len <= max_gap and start > 0:
+                    # Interpolate between data[start - 1] and data[end]
+                    x = [start - 1, end]
+                    y = [data[start - 1], data[end]]
+                    interp_vals = np.interp(range(start, end), x, y)
+                    result[start:end] = interp_vals
+                # else leave as NaN
+                start = None
+
+    return result.tolist()
+
+
+def smooth_outliers(data_list, window=2, threshold=0.5):
+    data = data_list.copy()
+
+    for i in range(len(data)):
+        # Define window bounds
+        start = max(0, i - window)
+        end = min(len(data), i + window + 1)
+
+        # Get neighboring values excluding current
+        neighbors = [data[j] for j in range(start, end) if j != i]
+
+        if len(neighbors) < 2:
+            continue  # Not enough context
+
+        local_avg = sum(neighbors) / len(neighbors)
+
+        # If current value deviates significantly, replace it
+        if abs(data[i] - local_avg) > threshold:
+            data[i] = local_avg
+
+    return data
+
+# From key-value to series for CSV
+def extract_and_format_csv(data, key):
+    values = []
+
+    # Collect all columns that start with the given key
+    for col in data:
+        if col.startswith(key):
+            values.append(data[col].tolist())
+
+    amount_series = len(values)
+    reduced_values = []
+
+    # Iterate row-wise
+    for i in range(len(values[0])):
+        sum_vals = 0
+        count = 0
+
+        for j in range(amount_series):
+            val = values[j][i]
+            if not np.isnan(val):
+                sum_vals += val
+                count += 1
+
+        # Append average if we have valid values, else np.nan
+        reduced_values.append(sum_vals / count if count > 0 else np.nan)
+
+    # Fill missing values first
+    filled_series = interpolate_list_with_limit(reduced_values)
+
+    # Then smooth suspicious values
+    smoothed = smooth_outliers(filled_series)
+
+    final = [smoothed[0]]  # initialize
+    for i in range(1, len(smoothed)):
+        final.append(smoothed[i] if not np.isnan(smoothed[i]) else final[-1])
+
+    return final
+
 def irrigateManually(url, body):
     # Parse the query parameters from the URL
     query_params = parse_qs(urlparse(url).query)
@@ -537,11 +659,19 @@ def getValuesForDashboard(url, body):
     data_temp = []
 
     currentPlot = plot_manager.getCurrentPlot()
+    # Load config, to get latest changes
+    currentPlot.config = plot.read_config()
 
-    for temp in currentPlot.device_and_sensor_ids_temp:
-        data_temp.append(currentPlot.load_latest_data_api(temp, "sensors"))
-    for moisture in currentPlot.device_and_sensor_ids_moisture:
-        data_moisture.append(currentPlot.load_latest_data_api(moisture, "sensors"))
+    if not currentPlot.load_data_from_csv:
+        for temp in currentPlot.device_and_sensor_ids_temp:
+            data_temp.append(currentPlot.load_latest_data_api(temp, "sensors"))
+        for moisture in currentPlot.device_and_sensor_ids_moisture:
+            data_moisture.append(currentPlot.load_latest_data_api(moisture, "sensors"))
+    else:
+        for temp in currentPlot.device_and_sensor_ids_temp:
+            data_temp.append(currentPlot.load_latest_data_csv(temp, "sensors"))
+        for moisture in currentPlot.device_and_sensor_ids_moisture:
+            data_moisture.append(currentPlot.load_latest_data_csv(moisture, "sensors"))
 
     # Calculate the temp average
     temp_average = sum(data_temp) / len(data_temp)
@@ -575,24 +705,53 @@ def getHistoricalChartData(url, body):
     #data_flow = [] # TODO:later also show flow in vis
 
     currentPlot = plot_manager.getCurrentPlot()
+    # Load config, to get latest changes
+    currentPlot.config = plot.read_config()
 
-    for moisture in currentPlot.device_and_sensor_ids_moisture:
-        data_moisture.append(currentPlot.load_data_api(moisture, "sensors", currentPlot.start_date))
-    for temp in currentPlot.device_and_sensor_ids_temp:
-        data_temp.append(currentPlot.load_data_api(temp, "sensors", currentPlot.start_date))
-    # for flow in currentPlot.device_and_sensor_ids_flow: # TODO: maybe display that also here (is displayed in datasets data)
-    #     data_flow.append(currentPlot.load_data_api(flow, "actuators", currentPlot.start_date))
-    
-    if not data_moisture and not data_temp:
-        response_data = {"available": False}
-        status_code = 404
+    if currentPlot.load_data_from_csv:
+        data = currentPlot.load_data_csv()
 
-        return status_code, bytes(json.dumps(response_data), "utf8"), []
+        # Merge lists  
 
-    # extract series from key value pairs
-    f_data_time = extract_and_format(data_moisture, "time", "str")
-    f_data_moisture = extract_and_format(data_moisture, "value", "float")
-    f_data_temp = extract_and_format(data_temp, "value", "float")
+        # extract series from key value pairs
+        f_data_time = data["Time"].tolist()
+        f_data_moisture = extract_and_format_csv(data, "tension")
+        f_data_temp = extract_and_format_csv(data, "soil_temp")
+
+        # make sure that the data is not empty
+
+        # unite similar series
+        # f_data_moisture = [item for sublist in f_data_moisture for item in sublist]
+
+        if not f_data_moisture or not f_data_temp:
+            response_data = {"available": False}
+            status_code = 404
+
+            return status_code, bytes(json.dumps(response_data), "utf8"), []
+    else:
+        for moisture in currentPlot.device_and_sensor_ids_moisture: #There is an Error if sensor data is loaded from file
+            data_moisture.append(currentPlot.load_data_api(moisture, "sensors", currentPlot.start_date))
+        for temp in currentPlot.device_and_sensor_ids_temp:
+            data_temp.append(currentPlot.load_data_api(temp, "sensors", currentPlot.start_date))
+        # for flow in currentPlot.device_and_sensor_ids_flow: # TODO: maybe display that also here (is displayed in datasets data)
+        #     data_flow.append(currentPlot.load_data_api(flow, "actuators", currentPlot.start_date))
+
+        # # Merge lists
+        # for list in data_moisture:
+        #     for item in list:
+        #         data_moisture.append(item)
+
+
+        # extract series from key value pairs
+        f_data_time = extract_and_format(data_moisture, "time", "str")
+        f_data_moisture = extract_and_format(data_moisture, "value", "float")
+        f_data_temp = extract_and_format(data_temp, "value", "float")
+        
+        if not data_moisture or not data_temp:
+            response_data = {"available": False}
+            status_code = 404
+
+            return status_code, bytes(json.dumps(response_data), "utf8"), []
 
     # Create the chart_data dictionary
     chart_data = {
@@ -805,6 +964,17 @@ if __name__ == "__main__":
     # Load all plots once on startup
     plot_manager.loadPlots()
 
+    # Detect debug configuration on start, adjust globals accordingly
+    if os.getenv("LOAD_DATA_FROM_CSV") == "True":
+        for plot in plot_manager.Plots.values():
+            plot.load_data_from_csv = True
+    if os.getenv("SKIP_DATA_PREPROCESSING") == "True":
+        create_model.skip_data_preprocessing = True
+    if os.getenv("SKIP_TRAINING") == "True":
+        create_model.skip_training = True
+    if os.getenv("PERFORM_TRAINING") == "False":
+        create_model.perform_training = False
+
     # Get saved config from all plots and save it in objects
     getConfigsFromAllFiles()
 
@@ -815,6 +985,19 @@ if __name__ == "__main__":
     # Clean logs
     schedule_log_cleanup()
 
-    # Start serving
-    usock.sockAddr = NetworkUtils.Proxy
-    usock.start() # will be "stuck" in here, code afterwards is not executed
+    # # Start serving
+    # usock.sockAddr = NetworkUtils.Proxy
+    # usock.start() # will be "stuck" in here, code afterwards is not executed
+
+        # Start serving in a dedicated thread
+    server_thread = threading.Thread(target=usock.start, name="HTTP_Server")
+    server_thread.daemon = False  # Keep alive until shutdown
+    server_thread.start()
+
+    # Keep main thread alive
+    try:
+        while True:
+            time.sleep(3600)  # Check every hour
+    except KeyboardInterrupt:
+        print("\nShutting down server...")
+        # Add cleanup logic here if needed
