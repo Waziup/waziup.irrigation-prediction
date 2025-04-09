@@ -98,12 +98,12 @@ Model_mapping = {
     'DummyRegressor': 'dummy'
 }
 
-## DEBUG -> TODO: move to .env?
+## DEBUG -> is overwritten by .env
 # to skip data preprocessing and training, load data from file
-SkipDataPreprocessing = True
-SkipTraning = True # if true, load model from static file
+SkipDataPreprocessing = False       # if true, load dataset from static file
+SkipTraning = False                 # if true, load predictions from static file
 # Load variables of training from file, that had been saved from former training/predictions to debug actuation part: DEBUG
-Perform_training = True # kind of redundant, but automatically saves and loads former results of predictions
+Perform_training = True             # kind of redundant, but automatically saves and loads former results of predictions
 
 # Restrict time to training
 class TimeLimitCallback(Callback):
@@ -406,8 +406,11 @@ def calc_volumetric_water_content_single_value(soil_tension_value, currentPlot):
     return volumetric_water_content
 
 # This function will align values sensor values with weather data from API -> not used any more
-def align_retention_curve_with_api(data, data_weather_api):
-    soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in Current_config['Soil_water_retention_curve']]
+def align_retention_curve_with_api(data, data_weather_api, currentPlot):
+    # Check config beeing loaded, otherwise read it
+    if not currentPlot.config:
+        currentPlot.config = currentPlot.read_config() # this is just for the case of returning to index, after settings was created/changed
+    soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in currentPlot.config['Soil_water_retention_curve']]
     # Sort the soil-water retention curve points by soil tension in ascending order => TODO: NOT EFFICIENT HERE, move out
     sorted_curve = sorted(soil_water_retention_tupel_list, key=lambda x: x[0])
     # compare weatherdata from past against messured values more expressive:
@@ -2029,6 +2032,8 @@ def data_pipeline(plot):
 def main(plot) -> int:
     # Check version of pycaret, should be >= 3.0
     print("Check version of pycaret:", pycaret.__version__, "should be >= 3.0")
+    # Load config, to get latest changes before training starts
+    plot.config = plot.read_config()
     
     if SkipDataPreprocessing:
         # Load data from disk
@@ -2156,8 +2161,9 @@ def main(plot) -> int:
     current_time = pd.Timestamp(datetime.datetime.now().replace(microsecond=0, second=0, minute=0))
 
     # Now, slice the predictions DataFrame based on the timestamp
-    plot.predictions = plot.predictions.loc[current_time:]
-    #plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]    
+    if not plot.load_data_from_csv:
+        plot.predictions = plot.predictions.loc[current_time:]
+        #plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]    
     
     # Align predictions with historical data
     align_with_latest_sensor_values(plot)

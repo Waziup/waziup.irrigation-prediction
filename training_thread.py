@@ -15,6 +15,7 @@ Restart_time = 1800  # DEBUG 1800 ~ 30 min in s
 class TrainingThread(threading.Thread):
     def __init__(self, plot, startTrainingNow):
         super().__init__()
+        self.daemon = True
         self.currentPlot = plot  # Attach process to a specific plot
         self.startTrainingNow = startTrainingNow
         self.stop_event = threading.Event()  # Stop flag
@@ -83,7 +84,7 @@ class TrainingThread(threading.Thread):
                 if (
                     self.currentPlot.prediction_thread is None 
                     and not create_model.SkipDataPreprocessing
-                    and not create_model.SkipModelTraining
+                    and not create_model.SkipTraning
                 ):
                     prediction_thread.start(self.currentPlot)
                 else:
