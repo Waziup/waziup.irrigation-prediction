@@ -98,6 +98,9 @@ Model_mapping = {
     'DummyRegressor': 'dummy'
 }
 
+# Currently active? -> to prevent concurrent training of plots 
+Currently_active = False
+
 ## DEBUG -> is overwritten by .env
 # to skip data preprocessing and training, load data from file
 SkipDataPreprocessing = False       # if true, load dataset from static file
@@ -572,6 +575,9 @@ def create_features(data, plot):
     data['date'] = data.index.day#.astype("float64")
     data['month'] = data.index.month#.astype("float64")
     data['day_of_year'] = data.index.dayofyear#.astype("float64")
+
+    # Save the length of sensordata to var in days
+    plot.train_period_days = (data.index[-1] - data.index[0]).days
 
     # Get weather from weather meteo
     data_weather = get_historical_weather_api(data, plot)
@@ -1980,6 +1986,13 @@ def calc_threshold(predictions, col, plot):
 
 
 def predict_with_updated_data(plot):
+    # Prevents multiple training or prediction at the same time
+    while Currently_active:
+        print(f"[{plot.user_given_name}] Waiting for resources to be released. Another training or prediction is already running.")
+        time.sleep(10)
+    # Before training starts, lock the resource    
+    Currently_active = True
+    
     # Run data pipeline to obtain latest data
     train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = data_pipeline(plot)
     # Create future value set to feed new data to model
@@ -2005,6 +2018,9 @@ def predict_with_updated_data(plot):
     # Add volumetric water content
     if plot.sensor_kind == 'tension':
         plot.predictions = add_volumetric_col_to_df(plot.predictions, "smoothed_values", plot)
+        
+    # After finished job set active to false
+    Currently_active = False
 
     # Return last accumulated reading and threshold timestamp currentSoilTension, threshold_timestamp, predictions 
     return plot.data['rolling_mean_grouped_soil'][-1], plot.threshold_timestamp, plot.predictions
@@ -2030,6 +2046,16 @@ def data_pipeline(plot):
 
 # Mighty main fuction ;) -> create some meaningful logs
 def main(plot) -> int:
+    global Currently_active
+    
+    # Prevents multiple training or prediction at the same time
+    while Currently_active:
+        print(f"[{plot.user_given_name}] Waiting for resources to be released. Another training or prediction is already running.")
+        time.sleep(10)
+        
+    # Before training starts, lock the resource    
+    Currently_active = True
+        
     # Check version of pycaret, should be >= 3.0
     print("Check version of pycaret:", pycaret.__version__, "should be >= 3.0")
     # Load config, to get latest changes before training starts
@@ -2174,6 +2200,9 @@ def main(plot) -> int:
     # Add volumetric water content
     if plot.sensor_kind == 'tension':
         plot.predictions = add_volumetric_col_to_df(plot.predictions, "smoothed_values", plot)
+
+    # After finished job set active to false
+    Currently_active = False
 
     # Return last accumulated reading and threshold timestamp
     return plot.data['rolling_mean_grouped_soil'][-1], plot.threshold_timestamp, plot.predictions

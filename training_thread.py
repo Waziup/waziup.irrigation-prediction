@@ -3,6 +3,7 @@ import time
 import pathlib
 import pickle
 from datetime import datetime, timedelta
+import math
 
 # local
 import create_model
@@ -13,8 +14,8 @@ import plot_manager
 Restart_time = 1800  # DEBUG 1800 ~ 30 min in s
 
 class TrainingThread(threading.Thread):
-    def __init__(self, plot, startTrainingNow):
-        super().__init__()
+    def __init__(self, plot, startTrainingNow, name=None):
+        super().__init__(name=name)
         self.daemon = True
         self.currentPlot = plot  # Attach process to a specific plot
         self.startTrainingNow = startTrainingNow
@@ -24,9 +25,17 @@ class TrainingThread(threading.Thread):
         """Calculate the time difference from now until the next noon."""
         now = datetime.now()
         noon_today = now.replace(hour=12, minute=0, second=0, microsecond=0)
-        if now >= noon_today:
-            noon_today += timedelta(days=train_period_days)
+        noon_today += timedelta(days=train_period_days)
         return (noon_today - now).total_seconds()
+
+    def calculate_retrain_interval(self, current_data_days):
+        base_interval = 1       # Initial daily training
+        growth_factor = 0.25    # Adjusted from 0.15 to 0.25
+        max_interval = 30       # Maximum interval of 30 days
+        
+        # Modified logarithmic growth curve
+        interval = base_interval * math.exp(growth_factor * math.log1p(current_data_days/30))
+        return min(math.ceil(interval), max_interval)
 
     def run(self):
         # To stop via event
@@ -36,7 +45,7 @@ class TrainingThread(threading.Thread):
                 print(f"Child process started for {self.currentPlot.user_given_name}")
                 if not self.startTrainingNow:
                     # Wait until the next noon
-                    time_to_sleep = self.time_until_noon(self.currentPlot.train_period_days)
+                    time_to_sleep = self.time_until_noon(self.calculate_retrain_interval(self.currentPlot.train_period_days))
                     print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until next training...")
                     time.sleep(time_to_sleep)
 
@@ -91,7 +100,9 @@ class TrainingThread(threading.Thread):
                     print("Prediction thread is already running. Or skipping data preprocessing and model training was set in create_model.")
 
             except Exception as e:
-                print(f"Training error: {e}. Retrying after 30 minutes.")
+                print(f"[{self.currentPlot.user_given_name }] Training thread error: {e}. Retrying after {Restart_time/60} minute.")
+                # Release resources
+                create_model.Currently_active = False
                 time.sleep(Restart_time)
 
     def stop(self):
@@ -100,14 +111,14 @@ class TrainingThread(threading.Thread):
 # Starts a training process
 def start(currentPlot):
     # Stop previous training process
-    if currentPlot.training_process is not None:
-        currentPlot.training_process.stop()
-        currentPlot.training_process.join()
+    if currentPlot.training_thread is not None:
+        currentPlot.training_thread.stop()
+        currentPlot.training_thread.join()
 
     # Reset flags
     currentPlot.training_finished = False
     currentPlot.currently_training = True
 
     # Create and start a new training process
-    currentPlot.training_process = TrainingThread(currentPlot, True)
-    currentPlot.training_process.start()
+    currentPlot.training_thread = TrainingThread(currentPlot, True, name="TrainingThread_" + str(currentPlot.user_given_name))
+    currentPlot.training_thread.start()

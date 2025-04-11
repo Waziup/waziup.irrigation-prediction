@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from io import StringIO
 import json
 import threading
+from threading import Timer
 import time
 from urllib.parse import urlparse, parse_qs
 from dotenv import load_dotenv
@@ -86,8 +87,8 @@ usock.routerPOST("/ui/(.*)", ui)
 
 # Cleans python and pycaret logs
 class LogCleanerThread(threading.Thread):
-    def __init__(self, file_path, age_limit_days=90, check_interval=86400):
-        super().__init__()
+    def __init__(self, file_path, age_limit_days=90, check_interval=86400, name=None):
+        super().__init__(name=name)
         self.file_path = file_path
         self.age_limit_days = age_limit_days
         self.check_interval = check_interval
@@ -95,13 +96,16 @@ class LogCleanerThread(threading.Thread):
 
     def clean_log(self):
         """Clears log file if it is older than the age limit."""
+        print(f"[{self.name}] Checking log file: {self.file_path}")
         if os.path.exists(self.file_path):
             last_modified_time = datetime.fromtimestamp(os.path.getmtime(self.file_path))
             if datetime.now() - last_modified_time > timedelta(days=self.age_limit_days):
                 open(self.file_path, 'w').close()  # Clear the file contents
-                print(f"{self.file_path} has been cleaned.")
+                print(f"[{self.name}] {self.file_path} has been cleaned.")
             else:
-                print(f"{self.file_path} is not old enough to clean.")
+                print(f"[{self.name}] {self.file_path} is not old enough to clean.")
+        else:
+            print(f"[{self.name}] Log file does not exist: {self.file_path}")
 
     def run(self):
         while not self.stop_thread.is_set():
@@ -120,10 +124,26 @@ def schedule_log_cleanup():
 
     # Start a thread for each log file
     for log_path, age_limit in logs_to_clean:
-        cleaner = LogCleanerThread(file_path=log_path, age_limit_days=age_limit)
+        thread_name = f"LogCleaner-{os.path.basename(log_path)}"
+        cleaner = LogCleanerThread(file_path=log_path, age_limit_days=age_limit, name=thread_name)
         cleaner.daemon = True  # Run thread in the background
         cleaner.start()
 
+class ModelCleanerThread(threading.Thread):
+    def __init__(self, folder_path, interval_days=7, name="ModelCleaner"):
+        super().__init__(name=name)
+        self.folder_path = folder_path
+        self.interval_days = interval_days
+        self.daemon = True
+        self.stop_event = threading.Event()
+
+    def run(self):
+        while not self.stop_event.is_set():
+            delete_old_files(self.folder_path)
+            time.sleep(self.interval_days * 24 * 3600)
+
+    def stop(self):
+        self.stop_event.set()
 
 # Deletes files older than the threshold from the specified folder and its subfolders.
 def delete_old_files(folder_path):
@@ -147,15 +167,8 @@ def schedule_model_cleanup(folder_path, interval_days=7):
     """
     Periodically runs the delete_old_files function every interval_hours.
     """
-    from threading import Timer
-    
-    # Inner function to recursively schedule the cleanup
-    def run_cleanup():
-        delete_old_files(folder_path)
-        Timer(interval_days * 24 * 3600, run_cleanup).start()
-    
-    # Start the first cleanup run
-    run_cleanup()
+    cleaner = ModelCleanerThread(folder_path, interval_days)
+    cleaner.start()
 
 # Get URL of API from .env file => TODO: better with try catch than locals, getenv can still stop backend
 def getApiUrl(url, body):

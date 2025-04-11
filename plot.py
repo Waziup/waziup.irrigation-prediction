@@ -62,7 +62,7 @@ class Plot:
         self.config = {}
 
         # Threading
-        self.training_process = None                    # Training thread of object
+        self.training_thread = None                     # Training thread of object
         self.prediction_thread = None                   # Prediction thread of object
         self.training_finished = False                  # Flag training process finished
         self.currently_training = False                 # Flag currently training this plot

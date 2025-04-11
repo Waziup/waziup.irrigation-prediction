@@ -12,8 +12,8 @@ Restart_time = 1800 # DEBUG 1800 ~ 30 min in s
 
 
 class PredictionThread(threading.Thread):
-    def __init__(self, plot):
-        super().__init__()
+    def __init__(self, plot, name=None):
+        super().__init__(name=name)
         self.daemon = True
         self.currentPlot = plot  # Attach thread to a specific plot
         self.stop_event = threading.Event()  # Stop flag
@@ -78,7 +78,9 @@ class PredictionThread(threading.Thread):
                 print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until conducting next prediction...")
                 time.sleep(time_to_sleep)  # Sleep until threshold
             except Exception as e:
-                print(f"Prediction thread error: {e}. Retrying after {Restart_time/60} minute.")
+                print(f"[{self.currentPlot.user_given_name }] Prediction thread error: {e}. Retrying after {Restart_time/60} minute.")
+                # Release resources
+                create_model.Currently_active = False
                 time.sleep(Restart_time)  # Retry after 30 minute if there is an error
 
     def stop(self):
@@ -96,7 +98,7 @@ def start(currentPlot):
                 currentPlot.prediction_thread.join()
         
         # Start prediction thread
-        currentPlot.prediction_thread = PredictionThread(currentPlot)
+        currentPlot.prediction_thread = PredictionThread(currentPlot, name="PredictionThread_" + str(currentPlot.user_given_name))
         currentPlot.prediction_thread.start()
     else:
         print("Perdiction Thread: Currently training, prediction will be started after training is finished.")

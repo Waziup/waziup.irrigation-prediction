@@ -1,12 +1,12 @@
 {
     "DeviceAndSensorIdsMoisture": [
-        "657360e268f319085542e336/657360f468f319085542e337"
+        "657360e268f319085542e336/657360f468f319085542e337111"
     ],
     "DeviceAndSensorIdsTemp": [
-        "657360e268f319085542e336/657360f468f319085542e33b"
+        "657360e268f319085542e336/657360f468f319085542e33b111"
     ],
     "DeviceAndSensorIdsFlow": [
-        "6645c4d468f31971148f2ab1/667ae30068f3197114901717"
+        "6645c4d468f31971148f2ab1/667ae30068f3197114901717111"
     ],
     "Sensor_kind": "tension",
     "Name": "Plot_new4",
@@ -59,8 +59,8 @@
             "VWC": " 0.025"
         }
     ],
-    "PermanentWiltingPoint": 40,
-    "FieldCapacityUpper": 30,
-    "FieldCapacityLower": 10,
+    "PermanentWiltingPoint": 3,
+    "FieldCapacityUpper": 2,
+    "FieldCapacityLower": 1,
     "Saturation": 0
 }
