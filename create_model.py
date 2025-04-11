@@ -1860,16 +1860,16 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
         overwrite=True
     )
 
-    # Set the max time in seconds
-    max_time_seconds = 3600 #3600 DEBUG
-    time_limit_callback = TimeLimitCallback(max_time_seconds)
+    # Set the max time in seconds DEBUG
+    #max_time_seconds = 3600 #3600 DEBUG
+    #time_limit_callback = TimeLimitCallback(max_time_seconds)
 
     tuner.search(X_train_scaled, 
                     y_train, 
                     epochs=hp.Int('epochs', 5, 50), #10 50 DEBUG
                     batch_size=32, 
-                    validation_split=0.2,
-                    callbacks=[time_limit_callback]  # Add the time limit callback here TODO: fix: it is not working
+                    validation_split=0.2#,
+                    #callbacks=[time_limit_callback]  # Add the time limit callback here TODO: fix: it is not working
     )
 
     # Print the best hyperparameters
