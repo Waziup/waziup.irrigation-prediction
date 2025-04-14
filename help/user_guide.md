@@ -30,7 +30,7 @@ The **Irrigation Prediction Application** is designed to predict soil moisture l
 
 Installation
 -------
-Visit the WaziGates UI and open the App section. Press the plus button and click install custom app. Type into the textbox "waziup/irrigation-prediction:dev" to download/install the application from dockerhub. 
+Visit the WaziGates UI and open the App section. Press the plus button and click install custom app. Type into the textbox "waziup/irrigation-prediction:latest" to download/install the application from dockerhub. 
 
 All dependencies are included in the docker image, so no further actions are required.
 Configuring Sensor Settings

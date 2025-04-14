@@ -2,7 +2,7 @@ version: "3"
 
 services:
   wazi-app:
-    image: waziup/irrigation-prediction:dev
+    image: waziup/irrigation-prediction:latest
     container_name: waziup.irrigation-prediction
     build:
       context: ./

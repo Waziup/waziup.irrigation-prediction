@@ -115,7 +115,7 @@ def removePlot(plot_nr_to_be_removed):
         print("IndexError: Number of plot in frontend is different than backend, might have just deleted the wrong plot.")
 
     # Remove json config file TODO: DEBUG
-    #os.remove(plot_to_remove.configPath)
+    os.remove(plot_to_remove.configPath)
 
     # Finally remove the plot from the list TODO: not array not suitable
     del Plots[CurrentPlotTab]

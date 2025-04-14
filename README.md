@@ -3,7 +3,7 @@ This application (WaziApp) for the WaziGate predicts irrigation times with help 
 
 ## How to install
 
-Visit the WaziGates UI and open the App section. Press the plus button and click install custom app. Type into the textbox "waziup/irrigation-prediction:dev" to download/install the application from dockerhub. 
+Visit the WaziGates UI and open the App section. Press the plus button and click install custom app. Type into the textbox "waziup/irrigation-prediction:latest" to download/install the application from dockerhub. 
 
 ## How to change run configuration
 
@@ -19,13 +19,13 @@ You can change the "run configuration" in the [".env" file](.env), just choose o
 
 ### Just clone the git and run the following cmd in the root folder:
 
-    docker buildx build --platform linux/arm64/v8 -t waziup/irrigation-prediction:dev --no-cache --pull --build-arg CACHEBUST=$(date +%s) --load .
+    docker buildx build --platform linux/arm64/v8 -t waziup/irrigation-prediction:latest --no-cache --pull --build-arg CACHEBUST=$(date +%s) --load .
 
 ### Push to dockerhub:
 
 Issue the following cmd to push to dockerhub (you have to be logged in):
     
-    docker push waziup/irrigation-prediction:dev
+    docker push waziup/irrigation-prediction:latest
 
 ### Copy image to local Raspberry Pi:
 

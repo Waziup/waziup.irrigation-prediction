@@ -6,9 +6,10 @@
 *.txt
 *.csv
 *.tar
-config/current_config.json
+config/*
 data/*
 /catboost_info
 /.vscode
 /hyperband_dir
 notes.txt
+/test-reports
