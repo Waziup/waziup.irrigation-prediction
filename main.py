@@ -673,7 +673,7 @@ def getValuesForDashboard(url, body):
 
     currentPlot = plot_manager.getCurrentPlot()
     # Load config, to get latest changes
-    currentPlot.config = plot.read_config()
+    currentPlot.config = currentPlot.read_config()
 
     if not currentPlot.load_data_from_csv:
         for temp in currentPlot.device_and_sensor_ids_temp:
@@ -719,7 +719,7 @@ def getHistoricalChartData(url, body):
 
     currentPlot = plot_manager.getCurrentPlot()
     # Load config, to get latest changes
-    currentPlot.config = plot.read_config()
+    currentPlot.config = currentPlot.read_config()
 
     if currentPlot.load_data_from_csv:
         data = currentPlot.load_data_csv()
