@@ -82,6 +82,7 @@ header_Accept_text_plain = {
 # GET /api/startTraining - Start training
 # GET /api/getCurrentPlot - Get current plot ID
 
+# Conduct Unittests against the Apps API
 class TestIrrigationPredictionAPI(unittest.TestCase):
     token = None
     current_plot_id = None
@@ -128,7 +129,7 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
         # Remove plot
         remove_resp = requests.post(
             f"{wazigate_app_url}/api/removePlot",
-            data={'currentPlot': 1},
+            data={'currentPlot': 25},
             cookies=self.cookies
         )
         self.assertEqual(remove_resp.status_code, 200)
@@ -263,6 +264,19 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
             )
             response_time = time.time() - start_time
             self.assertLess(response_time, 2)  # 2 seconds max
+
+    # Conduct Unittests against the Apps API
+class TestIrrigationPredictionIntegration(unittest.TestCase):
+    token = None
+    current_plot_id = None
+
+    def setUp(self):
+        # Authentication
+        resp = requests.post(wazigate_url + '/auth/token', json=auth)
+        self.token = resp.text.strip('"')
+        self.headers = {'Authorization': f'Bearer {self.token}'}
+        self.cookies = {'Token': self.token}
+
 
 if __name__ == "__main__":
     unittest.main(

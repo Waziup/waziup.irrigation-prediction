@@ -235,8 +235,67 @@ def get_historical_weather_api(data, plot):
 
     return plot.data_w
 
+# For debug the weather data has to be retrieved without saving and other stuff from open-meteo 
+def only_get_historical_weather_api(start, end, plot):
+
+    start_str = start.strftime("%Y-%m-%d")
+    last_date_str = end.strftime("%Y-%m-%d")
+
+    # TODO: save in instance of specific plot as [] not string :|
+    lat = plot.gps_info['lattitude']
+    long = plot.gps_info['longitude']
+
+    url = (
+        f'https://archive-api.open-meteo.com/v1/era5'
+        f'?latitude={lat}'
+        f'&longitude={long}'
+        f'&start_date={start_str}'
+        f'&end_date={last_date_str}'
+        f'&hourly=temperature_2m,relativehumidity_2m,rain,cloudcover,shortwave_radiation,windspeed_10m,winddirection_10m,soil_temperature_7_to_28cm,soil_moisture_0_to_7cm,et0_fao_evapotranspiration'
+        f'&timezone={TimeUtils.Timezone}'
+    )
+
+    dct = subprocess.check_output(['curl', url]).decode()
+    dct = json.loads(dct)
+
+    # Also convert it to a pandas dataframe
+    data_w_fetched = (pd.DataFrame([dct['hourly']['temperature_2m'], 
+                          dct['hourly']['relativehumidity_2m'], 
+                          dct['hourly']['rain'], 
+                          dct['hourly']['cloudcover'], 
+                          dct['hourly']['shortwave_radiation'],
+                          dct['hourly']['windspeed_10m'], 
+                          dct['hourly']['winddirection_10m'], 
+                          dct['hourly']['soil_temperature_7_to_28cm'], 
+                          dct['hourly']['soil_moisture_0_to_7cm'],  
+                          dct['hourly']['et0_fao_evapotranspiration'],
+                          dct['hourly']['time']], 
+                         index = ['Temperature', 'Humidity', 'Rain', 'Cloudcover', 'Shortwave_Radiation', 'Windspeed', 'Winddirection', 'Soil_temperature_7-28', 'Soil_moisture_0-7', 'Et0_evapotranspiration', 'Timestamp'])
+            .T
+            .assign(Timestamp = lambda x : pd.to_datetime(x.Timestamp, format='%Y-%m-%dT%H:%M'))
+            .set_index(['Timestamp'])
+            .dropna())
+
+    # Add timezone information without converting 
+    data_w_fetched.index = data_w_fetched.index.map(lambda x: x.replace(tzinfo=pytz.timezone(TimeUtils.Timezone)))
+    #data_w.index = pd.to_datetime(data_w.index) + pd.DateOffset(hours=get_timezone_offset(timezone))
+    
+    # convert cols to float64
+    data_w_fetched = convert_cols(data_w_fetched)
+
+    return data_w_fetched
+
 # Get weather forecast from open-meteo
-def get_weather_forecast_api(start_date, end_date, plot):
+def get_weather_forecast_api(start_date, end_date, plot, data):
+    # Compare if forecast date is in the past, important for DEBUG and past data
+    local_tz = pytz.timezone(TimeUtils.Timezone)
+    now = datetime.datetime.now()
+    localized_now = local_tz.localize(now)  # Now has timezone info
+
+    if end_date < localized_now:
+        print("Forecast date is in the past. Using historical weather data instead.")
+        return get_historical_weather_api(data, plot)
+
 
     # Geo_location
     lat = plot.gps_info['lattitude']
@@ -576,7 +635,7 @@ def create_features(data, plot):
     data['month'] = data.index.month#.astype("float64")
     data['day_of_year'] = data.index.dayofyear#.astype("float64")
 
-    # Save the length of sensordata to var in days
+    # Save the length of sensordata to var in days -> to dynamically adjust train interval
     plot.train_period_days = (data.index[-1] - data.index[0]).days
 
     # Get weather from weather meteo
@@ -586,18 +645,21 @@ def create_features(data, plot):
     data_weather = resample(data_weather)
 
     # historical weather data is not available for the latest two days, use forecast to account for that!
-    data_weather_endtime = data_weather.index[-1]
-    data_endtime = data.index[-1]
+    if not plot.load_data_from_csv:
+        data_weather_endtime = data_weather.index[-1]
+        data_endtime = data.index[-1]
 
-    # Get forecast for the ~last two days
-    data_weather_recent_forecast = get_weather_forecast_api(data_weather_endtime, data_endtime, plot)
+        # Get forecast for the ~last two days
+        data_weather_recent_forecast = get_weather_forecast_api(data_weather_endtime, data_endtime, plot, data)
 
-    # Merge weather data to one dataframe
-    data_weather_merged = pd.concat([data_weather.loc[data.index[0]:], 
-                                     data_weather_recent_forecast.loc[data_weather_endtime + 
-                                                                      timedelta(minutes=Sample_rate) 
-                                                                      : data_endtime]
-                                                                      ])
+        # Merge weather data to one dataframe
+        data_weather_merged = pd.concat([data_weather.loc[data.index[0]:], 
+                                        data_weather_recent_forecast.loc[data_weather_endtime + 
+                                                                        timedelta(minutes=Sample_rate) 
+                                                                        : data_endtime]
+                                                                        ])
+    else:
+        data_weather_merged = data_weather.loc[data.index[0]:data.index[-1]]
 
     # Merge data_weather_merged into data
     data = pd.merge(data, data_weather_merged, left_index=True, right_index=True, how='outer')
@@ -1153,7 +1215,10 @@ def create_future_values(data, plot):
     print("all dates: ", all_dates,"\n")
 
     # Fetch data from weather API
-    data_weather_api_cut = get_weather_forecast_api(train_end, end, plot)
+    if plot.load_data_from_csv:
+        data_weather_api_cut = only_get_historical_weather_api(train_end, end, plot)
+    else:
+        data_weather_api_cut = get_weather_forecast_api(train_end, end, plot, data)
     data_weather_api_cut.rename_axis('Timestamp', inplace=True)
 
     # Create features and merge data from weather API
@@ -1861,15 +1926,15 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
     )
 
     # Set the max time in seconds DEBUG
-    #max_time_seconds = 3600 #3600 DEBUG
-    #time_limit_callback = TimeLimitCallback(max_time_seconds)
+    max_time_seconds = 3600 #3600 DEBUG
+    time_limit_callback = TimeLimitCallback(max_time_seconds)
 
     tuner.search(X_train_scaled, 
                     y_train, 
                     epochs=hp.Int('epochs', 10, 80), #10 50 DEBUG
                     batch_size=32, 
-                    validation_split=0.2#,
-                    #callbacks=[time_limit_callback]  # Add the time limit callback here TODO: fix: it is not working
+                    validation_split=0.2,
+                    callbacks=[time_limit_callback]  # Add the time limit callback here TODO: fix: it is not working
     )
 
     # Print the best hyperparameters
@@ -1923,7 +1988,7 @@ def generate_predictions_nn(best_model_nn, features, start, end):
 
     return predictions
 
-# Quadratic weighting function, to be used in align_with_latest_sensor_values
+# Quadratic weighting function, to be used in align_with_latest_sensor_values -> obsolete
 def quadratic_weights(length):
     """
     Generate quadratic weights for blending.
@@ -1957,14 +2022,6 @@ def align_with_latest_sensor_values(plot):
     plot.predictions['smoothed_values'] = (
         weights * last_actual_value + (1 - weights) * plot.predictions['prediction_label']
     )
-
-    # # Combine for visualization
-    # combined_data = pd.concat([
-    #     Data.set_index('Timestamp'),
-    #     Predictions.index
-    # ]).reset_index()
-
-    # return combined_data
 
 # Calculates the time when threshold will be meet, according to predictions
 def calc_threshold(predictions, col, plot):

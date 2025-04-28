@@ -712,11 +712,14 @@ usock.routerGET("/api/getValuesForDashboard", getValuesForDashboard)
 
 
 def getHistoricalChartData(url, body): 
-    # Load data from local wazigate api -> each sensor individually
+    # Load data from local wazigate api -> each sensor individually, save as key-value pairs
     data_moisture = []
     data_temp = []
     #data_flow = [] # TODO:later also show flow in vis
+    data_moisture_average = []
+    data_temp_average = []
 
+    # Get current plot (selected in UI)
     currentPlot = plot_manager.getCurrentPlot()
     # Load config, to get latest changes
     currentPlot.config = currentPlot.read_config()
@@ -724,18 +727,15 @@ def getHistoricalChartData(url, body):
     if currentPlot.load_data_from_csv:
         data = currentPlot.load_data_csv()
 
-        # Merge lists  
-
         # extract series from key value pairs
         f_data_time = data["Time"].tolist()
         f_data_moisture = extract_and_format_csv(data, "tension")
         f_data_temp = extract_and_format_csv(data, "soil_temp")
 
-        # make sure that the data is not empty
-
         # unite similar series
         # f_data_moisture = [item for sublist in f_data_moisture for item in sublist]
-
+        
+        # Make sure that the data is not empty
         if not f_data_moisture or not f_data_temp:
             response_data = {"available": False}
             status_code = 404
@@ -750,9 +750,9 @@ def getHistoricalChartData(url, body):
         #     data_flow.append(currentPlot.load_data_api(flow, "actuators", currentPlot.start_date))
 
         # # Merge lists
-        # for list in data_moisture:
-        #     for item in list:
-        #         data_moisture.append(item)
+        for list in data_moisture:
+            for item in list:
+                data_moisture.append(item)
 
 
         # extract series from key value pairs
@@ -998,12 +998,12 @@ if __name__ == "__main__":
     # Clean logs
     schedule_log_cleanup()
 
-    # # Start serving
+    # Former Start serving
     # usock.sockAddr = NetworkUtils.Proxy
     # usock.start() # will be "stuck" in here, code afterwards is not executed
 
         # Start serving in a dedicated thread
-    server_thread = threading.Thread(target=usock.start, name="HTTP_Server")
+    server_thread = threading.Thread(target=usock.start_with_recovery, name="HTTP_Server")
     server_thread.daemon = False  # Keep alive until shutdown
     server_thread.start()
 
