@@ -1419,10 +1419,18 @@ def create_rnn_model(hp, shape):
 def create_gru_model(hp, shape):
     model = Sequential()
 
-    # Tune the number of units in the GRU layer
-    units_hidden1 = hp.Int('units_hidden1', min_value=32, max_value=256, step=32)
-    model.add(GRU(units=units_hidden1, activation='relu', input_shape=shape))
-    
+    # Choose number of GRU layers
+    num_layers = hp.Int('num_gru_layers', 1, 3)
+
+    for i in range(num_layers):
+        return_sequences = (i < num_layers - 1)
+        units = hp.Int(f'units_gru_{i}', min_value=32, max_value=256, step=32)
+        if i == 0:
+            model.add(GRU(units=units, activation='relu', input_shape=shape, return_sequences=return_sequences))
+        else:
+            model.add(GRU(units=units, activation='relu', return_sequences=return_sequences))
+
+    # Output layer
     model.add(Dense(1))
 
     # Tune the optimizer and learning rate
@@ -1516,56 +1524,56 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Create an array to store all the models
     nn_models = []
 
-    # Create neural network # DEBUG
+    # # Create neural network # DEBUG
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('units_hidden1', 64)
-    hp.Fixed('units_hidden2', 32)
-    hp.Fixed('optimizer', 'adam')
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('units_hidden1', 64)
+    # hp.Fixed('units_hidden2', 32)
+    # hp.Fixed('optimizer', 'adam')
 
-    # Call the model function with the hp object and the input shape
-    input_shape = (X_train.shape[1],)
-    model_nn = create_nn_model(hp, shape=input_shape)
+    # # Call the model function with the hp object and the input shape
+    # input_shape = (X_train.shape[1],)
+    # model_nn = create_nn_model(hp, shape=input_shape)
 
-    # Train the model
-    print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
-    history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_nn)
+    # # Train the model
+    # print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
+    # history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_nn)
 
-    # Create conv neural network
+    # # Create conv neural network
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('units_hidden1', 64)
-    hp.Fixed('optimizer', 'adam')
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('units_hidden1', 64)
+    # hp.Fixed('optimizer', 'adam')
 
-    # Call the model function with the hp object and the input shape
-    input_shape = (X_train_cnn.shape[1], 1)
-    model_cnn = create_cnn_model(hp, shape=input_shape)
+    # # Call the model function with the hp object and the input shape
+    # input_shape = (X_train_cnn.shape[1], 1)
+    # model_cnn = create_cnn_model(hp, shape=input_shape)
     
-    # Train the model
-    print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
-    history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_cnn)
+    # # Train the model
+    # print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
+    # history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_cnn)
 
-    # Create RNN model
+    # # Create RNN model
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('units_hidden1', 50)  # Fixed units for RNN
-    hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('units_hidden1', 50)  # Fixed units for RNN
+    # hp.Fixed('optimizer', 'adam')  # Fixed optimizer
 
-    input_shape = (X_train.shape[1], 1)
-    model_rnn = create_rnn_model(hp, shape=input_shape)
+    # input_shape = (X_train.shape[1], 1)
+    # model_rnn = create_rnn_model(hp, shape=input_shape)
 
-    # Train the model
-    print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
-    history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_rnn)
+    # # Train the model
+    # print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
+    # history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_rnn)
 
     # Create GRU model
 
@@ -1582,20 +1590,20 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Append for comparison
     nn_models.append(model_gru)
 
-    # LSTM architecture
+    # # LSTM architecture
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('units_hidden1', 50)  # Fixed units for LSTM
-    hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('units_hidden1', 50)  # Fixed units for LSTM
+    # hp.Fixed('optimizer', 'adam')  # Fixed optimizer
 
-    input_shape = (X_train.shape[1], 1)
-    model_lstm = create_lstm_model(hp, shape=input_shape)
-    # Train the model
-    print('Will now train a Long short-term memory neural network (LSTM), with the following hyperparameters: ' + str(hp.values))
-    history_bilstm = model_lstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_lstm)
+    # input_shape = (X_train.shape[1], 1)
+    # model_lstm = create_lstm_model(hp, shape=input_shape)
+    # # Train the model
+    # print('Will now train a Long short-term memory neural network (LSTM), with the following hyperparameters: ' + str(hp.values))
+    # history_bilstm = model_lstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_lstm)
 
     # # Keras regressor and grid search -> TODO: Kerastuner does not work, package conflict, try optuna hyperopt
     # # Param grid to big -> not supported

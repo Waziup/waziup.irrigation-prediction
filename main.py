@@ -16,6 +16,8 @@ import usock
 import os
 import pathlib
 import numpy as np
+from collections import defaultdict
+from dateutil import parser
 
 import create_model
 import actuation
@@ -550,6 +552,27 @@ def extract_and_format(data, key, datatype):
     
     return values
 
+def group_sensor_data(sensor_lists, agg_func=lambda vals: sum(vals)/len(vals)):
+    """
+    Given a list of sensor-lists (each a list of {'time':…, 'value':…}),
+    return two lists:
+      - sorted timestamps (strings)
+      - aggregated values (floats) per timestamp
+    agg_func receives the list of values for that timestamp.
+    """
+    bucket = defaultdict(list)
+    for series in sensor_lists:
+        for rec in series:
+            # normalize time strings if you want
+            t = rec['time']
+            bucket[t].append(rec['value'])
+
+    # sort timestamps chronologically
+    timestamps = sorted(bucket.keys(), key=lambda t: parser.isoparse(t))
+    values     = [agg_func(bucket[t]) for t in timestamps]
+    return timestamps, values
+
+
 # def interpolate_list(data_list):
 #     data = np.array(data_list, dtype=float)
 
@@ -749,16 +772,13 @@ def getHistoricalChartData(url, body):
         # for flow in currentPlot.device_and_sensor_ids_flow: # TODO: maybe display that also here (is displayed in datasets data)
         #     data_flow.append(currentPlot.load_data_api(flow, "actuators", currentPlot.start_date))
 
-        # # Merge lists
-        for list in data_moisture:
-            for item in list:
-                data_moisture.append(item)
-
+        f_data_time, f_data_moisture = group_sensor_data(data_moisture)
+        f_data_time, f_data_temp = group_sensor_data(data_temp)
 
         # extract series from key value pairs
-        f_data_time = extract_and_format(data_moisture, "time", "str")
-        f_data_moisture = extract_and_format(data_moisture, "value", "float")
-        f_data_temp = extract_and_format(data_temp, "value", "float")
+        # f_data_time = extract_and_format(data_moisture, "time", "str")
+        # f_data_moisture = extract_and_format(data_moisture, "value", "float")
+        # f_data_temp = extract_and_format(data_temp, "value", "float")
         
         if not data_moisture or not data_temp:
             response_data = {"available": False}
