@@ -27,7 +27,7 @@ import pytz
 # new imports nn
 import tensorflow
 from tensorflow.keras.models import Sequential, Model
-from tensorflow.keras.layers import Dense, Conv1D, MaxPooling1D, Flatten, Dense, LSTM, GRU, Bidirectional, Dropout
+from tensorflow.keras.layers import Dense, Conv1D, MaxPooling1D, Flatten, Dense, SimpleRNN, LSTM, GRU, Bidirectional, Dropout
 from tensorflow.keras.optimizers import Adam, SGD, RMSprop
 from tensorflow.keras.callbacks import Callback
 from tensorflow.keras.backend import floatx
@@ -293,7 +293,8 @@ def get_weather_forecast_api(start_date, end_date, plot, data):
     localized_now = local_tz.localize(now)  # Now has timezone info
 
     if end_date < localized_now:
-        print("Forecast date is in the past. Using historical weather data instead.")
+        print("Forecast date is in the past. Using historical weather data instead. Start: ", start_date, " End: ", end_date)
+        # Use historical weather data
         return get_historical_weather_api(data, plot)
 
 
@@ -1090,7 +1091,7 @@ def create_and_compare_model_reg(train):
 
     # Run pycarets setup
     s = re_exp.setup(train, 
-              target = 'rolling_mean_grouped_soil', 
+              target = 'rolling_mean_grouped_soil',
               session_id = 123,
               verbose = True,
               ignore_features = To_be_dropped, 
@@ -1295,7 +1296,7 @@ def train_best(best_model, data):
 
     # Run pycarets setup
     s = re_exp.setup(data, 
-              target = 'rolling_mean_grouped_soil', 
+              target = 'rolling_mean_grouped_soil',
               session_id = 123,
               verbose = True,
               ignore_features = To_be_dropped, 
@@ -1309,17 +1310,26 @@ def train_best(best_model, data):
     return model, re_exp
 
 # Create NN
-# TODO: Save the 
 def create_nn_model(hp, shape):
     model = Sequential()
 
-    # Tune the number of units in the first dense layer
-    units_hidden1 = hp.Int('units_hidden1', min_value=32, max_value=256, step=32)
-    model.add(Dense(units_hidden1, activation='relu', input_shape=shape))
+    activation = hp.Choice('activation', ['relu', 'tanh'])
 
-    # Tune the number of units in the second dense layer
-    units_hidden2 = hp.Int('units_hidden2', min_value=16, max_value=128, step=16)
-    model.add(Dense(units_hidden2, activation='relu'))
+    # First layer (always present)
+    units_hidden1 = hp.Int('units_hidden1', min_value=32, max_value=256, step=32)
+    model.add(Dense(units_hidden1, activation=activation, input_shape=shape))
+
+    # Optional second layer
+    use_second_layer = hp.Boolean('use_second_layer')
+    if use_second_layer:
+        units_hidden2 = hp.Int('units_hidden2', min_value=16, max_value=128, step=16)
+        model.add(Dense(units_hidden2, activation=activation))
+
+    # Optional third layer
+    use_third_layer = hp.Boolean('use_third_layer')
+    if use_third_layer:
+        units_hidden3 = hp.Int('units_hidden3', min_value=8, max_value=64, step=8)
+        model.add(Dense(units_hidden3, activation=activation))
 
     # Output layer
     model.add(Dense(1))
@@ -1350,15 +1360,30 @@ def create_nn_model(hp, shape):
 def create_cnn_model(hp, shape):
     model = Sequential()
 
-    # Tune the number of filters in the first convolutional layer
-    units_hidden1 = hp.Int('units_hidden1', min_value=32, max_value=128, step=16)
-    model.add(Conv1D(filters=units_hidden1, kernel_size=3, activation='relu', input_shape=shape))
-    model.add(MaxPooling1D(pool_size=2))
+    # Tune number of convolutional layers: 1 to 3
+    num_conv_layers = hp.Int('num_conv_layers', 1, 3)
+
+    for i in range(num_conv_layers):
+        filters = hp.Int(f'filters_{i}', min_value=32, max_value=256, step=32)
+        kernel_size = hp.Choice(f'kernel_size_{i}', values=[2, 3, 5])
+        if i == 0:
+            model.add(Conv1D(filters=filters, kernel_size=kernel_size, activation='relu', input_shape=shape))
+        else:
+            model.add(Conv1D(filters=filters, kernel_size=kernel_size, activation='relu'))
+
+        model.add(MaxPooling1D(pool_size=2))
+
+        # Optional: Add dropout for regularization
+        dropout_rate = hp.Float('dropout_rate', min_value=0.1, max_value=0.5, step=0.1)
+        model.add(Dropout(dropout_rate))
+
     model.add(Flatten())
 
     # Dense layer
-    dense_units = hp.Int('dense_units', min_value=64, max_value=256, step=32)
+    dense_units = hp.Int('dense_units', min_value=64, max_value=512, step=64)
     model.add(Dense(dense_units, activation='relu'))
+
+    # Output layer
     model.add(Dense(1))
 
     # Tune the optimizer and learning rate
@@ -1387,9 +1412,22 @@ def create_cnn_model(hp, shape):
 def create_rnn_model(hp, shape):
     model = Sequential()
 
-    # Tune the number of units in the LSTM layer
-    units_hidden1 = hp.Int('units_hidden1', min_value=32, max_value=256, step=32)
-    model.add(LSTM(units=units_hidden1, activation='relu', input_shape=shape))
+    # Tune number of RNN layers
+    num_layers = hp.Int('num_rnn_layers', 1, 3)
+
+    for i in range(num_layers):
+        units = hp.Int(f'units_rnn_{i}', min_value=32, max_value=256, step=32)
+        return_sequences = (i < num_layers - 1)  # Only return sequences for intermediate layers
+
+        if i == 0:
+            model.add(SimpleRNN(units=units, activation='relu', input_shape=shape, return_sequences=return_sequences))
+        else:
+            model.add(SimpleRNN(units=units, activation='relu', return_sequences=return_sequences))
+
+        # Optional dropout
+        if hp.Boolean(f'use_dropout_{i}'):
+            dropout_rate = hp.Float(f'dropout_rate_{i}', 0.1, 0.5, step=0.1)
+            model.add(Dropout(dropout_rate))
     
     model.add(Dense(1))
 
@@ -1425,10 +1463,14 @@ def create_gru_model(hp, shape):
     for i in range(num_layers):
         return_sequences = (i < num_layers - 1)
         units = hp.Int(f'units_gru_{i}', min_value=32, max_value=256, step=32)
+        dropout_rate = hp.Float(f'dropout_rate_{i}', 0.0, 0.5, step=0.1)
+
         if i == 0:
             model.add(GRU(units=units, activation='relu', input_shape=shape, return_sequences=return_sequences))
         else:
             model.add(GRU(units=units, activation='relu', return_sequences=return_sequences))
+
+        model.add(Dropout(dropout_rate))  # Add dropout after each GRU layer
 
     # Output layer
     model.add(Dense(1))
@@ -1459,10 +1501,30 @@ def create_gru_model(hp, shape):
 def create_lstm_model(hp, shape):
     model = Sequential()
 
-    # Tune the number of units in the Bidirectional LSTM layer
-    units_hidden1 = hp.Int('units_hidden1', min_value=32, max_value=256, step=32)
-    model.add(Bidirectional(LSTM(units=units_hidden1, activation='relu', input_shape=shape)))
-    
+    # Tune number of LSTM layers
+    num_layers = hp.Int('num_lstm_layers', 1, 3)
+
+    for i in range(num_layers):
+        units = hp.Int(f'units_lstm_{i}', min_value=32, max_value=256, step=32)
+        use_bidirectional = hp.Boolean(f'bidir_layer_{i}')
+
+        return_sequences = (i < num_layers - 1)  # Return sequences for all but last layer
+
+        lstm_layer = LSTM(units=units, activation='relu', return_sequences=return_sequences)
+        layer = Bidirectional(lstm_layer) if use_bidirectional else lstm_layer
+
+        if i == 0:
+            model.add(layer if not isinstance(layer, Bidirectional) else layer)
+            model.layers[-1]._batch_input_shape = (None,) + shape  # Set input shape explicitly
+        else:
+            model.add(layer)
+
+        # Optional dropout after each layer
+        if hp.Boolean(f'use_dropout_{i}'):
+            dropout_rate = hp.Float(f'dropout_rate_{i}', 0.1, 0.5, step=0.1)
+            model.add(Dropout(dropout_rate))
+
+    #Output layer
     model.add(Dense(1))
 
     # Tune the optimizer and learning rate
@@ -1524,63 +1586,103 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Create an array to store all the models
     nn_models = []
 
-    # # Create neural network # DEBUG
+    # Create neural network # DEBUG
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # hp.Fixed('units_hidden1', 64)
-    # hp.Fixed('units_hidden2', 32)
-    # hp.Fixed('optimizer', 'adam')
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('activation', 'relu')
+    hp.Fixed('units_hidden1', 128)
+    hp.Fixed('use_second_layer', True)
+    hp.Fixed('units_hidden2', 64)
+    hp.Fixed('use_third_layer', True)
+    hp.Fixed('units_hidden3', 32)
+    hp.Fixed('optimizer', 'adam')
+    hp.Fixed('learning_rate', 0.001)
 
-    # # Call the model function with the hp object and the input shape
-    # input_shape = (X_train.shape[1],)
-    # model_nn = create_nn_model(hp, shape=input_shape)
+    # Call the model function with the hp object and the input shape
+    input_shape = (X_train.shape[1],)
+    model_nn = create_nn_model(hp, shape=input_shape)
 
-    # # Train the model
-    # print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
-    # history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_nn)
+    # Train the model
+    print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
+    history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_nn)
 
-    # # Create conv neural network
+    # Create conv neural network
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # hp.Fixed('units_hidden1', 64)
-    # hp.Fixed('optimizer', 'adam')
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('num_conv_layers', 2)
 
-    # # Call the model function with the hp object and the input shape
-    # input_shape = (X_train_cnn.shape[1], 1)
-    # model_cnn = create_cnn_model(hp, shape=input_shape)
+    # First conv layer
+    hp.Fixed('filters_0', 64)
+    hp.Fixed('kernel_size_0', 3)
+
+    # Second conv layer
+    hp.Fixed('filters_1', 64)
+    hp.Fixed('kernel_size_1', 3)
+
+    # Dropout rate (shared across all layers in your model)
+    hp.Fixed('dropout_rate', 0.3)
+
+    # Dense layer
+    hp.Fixed('dense_units', 128)
+
+    # Optimizer and learning rate
+    hp.Fixed('optimizer', 'adam')
+    hp.Fixed('learning_rate', 0.001)
+
+    # Call the model function with the hp object and the input shape
+    input_shape = (X_train_cnn.shape[1], 1)
+    model_cnn = create_cnn_model(hp, shape=input_shape)
     
-    # # Train the model
-    # print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
-    # history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_cnn)
+    # Train the model
+    print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
+    history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_cnn)
 
-    # # Create RNN model
+    # Create RNN model
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # hp.Fixed('units_hidden1', 50)  # Fixed units for RNN
-    # hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    # Number of RNN layers
+    hp.Fixed('num_rnn_layers', 2)
 
-    # input_shape = (X_train.shape[1], 1)
-    # model_rnn = create_rnn_model(hp, shape=input_shape)
+    # Layer 0
+    hp.Fixed('units_rnn_0', 64)
+    hp.Fixed('use_dropout_0', True)
+    hp.Fixed('dropout_rate_0', 0.3)
 
-    # # Train the model
-    # print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
-    # history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_rnn)
+    # Layer 1
+    hp.Fixed('units_rnn_1', 32)
+    hp.Fixed('use_dropout_1', False)  # No dropout in the second layer
+
+    # Optimizer settings
+    hp.Fixed('optimizer', 'adam')
+    hp.Fixed('learning_rate', 0.001)
+
+    input_shape = (X_train.shape[1], 1)
+    model_rnn = create_rnn_model(hp, shape=input_shape)
+
+    # Train the model
+    print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
+    history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_rnn)
 
     # Create GRU model
 
     # Create a dummy HyperParameters object with fixed values
     hp = HyperParameters()
-    hp.Fixed('units_hidden1', 50)  # Fixed units for GRU
-    hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+    hp.Fixed('num_gru_layers', 2)
+    hp.Fixed('units_gru_0', 64)
+    hp.Fixed('dropout_rate_0', 0.2)
+    hp.Fixed('units_gru_1', 32)
+    hp.Fixed('dropout_rate_1', 0.2)
+    hp.Fixed('optimizer', 'adam')
+    hp.Fixed('learning_rate', 1e-3)
 
     input_shape = (X_train.shape[1], 1)
     model_gru = create_gru_model(hp, shape=input_shape)
@@ -1590,20 +1692,33 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Append for comparison
     nn_models.append(model_gru)
 
-    # # LSTM architecture
+    # LSTM architecture
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # hp.Fixed('units_hidden1', 50)  # Fixed units for LSTM
-    # hp.Fixed('optimizer', 'adam')  # Fixed optimizer
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    # Architecture
+    hp.Fixed('num_lstm_layers', 2)
+    hp.Fixed('units_lstm_0', 64)
+    hp.Fixed('bidir_layer_0', True)
+    hp.Fixed('use_dropout_0', True)
+    hp.Fixed('dropout_rate_0', 0.2)
 
-    # input_shape = (X_train.shape[1], 1)
-    # model_lstm = create_lstm_model(hp, shape=input_shape)
-    # # Train the model
-    # print('Will now train a Long short-term memory neural network (LSTM), with the following hyperparameters: ' + str(hp.values))
-    # history_bilstm = model_lstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_lstm)
+    hp.Fixed('units_lstm_1', 32)
+    hp.Fixed('bidir_layer_1', False)
+    hp.Fixed('use_dropout_1', True)
+    hp.Fixed('dropout_rate_1', 0.2)
+
+    # Optimizer and learning rate
+    hp.Fixed('optimizer', 'adam')
+    hp.Fixed('learning_rate', 0.001)
+
+    input_shape = (X_train.shape[1], 1)
+    model_lstm = create_lstm_model(hp, shape=input_shape)
+    # Train the model
+    print('Will now train a Long short-term memory neural network (LSTM), with the following hyperparameters: ' + str(hp.values))
+    history_bilstm = model_lstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_lstm)
 
     # # Keras regressor and grid search -> TODO: Kerastuner does not work, package conflict, try optuna hyperopt
     # # Param grid to big -> not supported
@@ -1839,6 +1954,7 @@ def compare_models_on_test(nn_models, ZZ, Z_cnn):
     return best_model_index
 
 def eval_approach(results, results_nn, metrics):
+    use_pycaret = True
     if metrics == 'mae':
         best_result = float('inf')
         for i in range(len(results)):
@@ -1940,7 +2056,7 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
     tuner.search(X_train_scaled, 
                     y_train, 
                     epochs=hp.Int('epochs', 10, 80), #10 50 DEBUG
-                    batch_size=32, 
+                    batch_size=hp.Choice('batch_size', [16, 32, 64, 128]),
                     validation_split=0.2,
                     callbacks=[time_limit_callback]  # Add the time limit callback here TODO: fix: it is not working
     )
@@ -2172,7 +2288,7 @@ def main(plot) -> int:
     index, plot.use_pycaret = eval_approach(results, results_nn, 'mae')
 
     # TODO: Debug mode
-    #Use_pycaret = False
+    #plot.use_pycaret = False
 
     # Train best model on whole dataset (without skipping "test-set")
     if plot.use_pycaret:

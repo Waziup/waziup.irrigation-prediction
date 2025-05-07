@@ -992,7 +992,7 @@ usock.routerGET("/api/getCurrentPlot", getCurrentPlot)
 
 if __name__ == "__main__":
     # Load environment variables
-    NetworkUtils.get_env()
+    NetworkUtils.get_env()  
 
     # Load all plots once on startup
     plot_manager.loadPlots()
@@ -1004,6 +1004,7 @@ if __name__ == "__main__":
     if os.getenv("SKIP_DATA_PREPROCESSING") == "True":
         create_model.skip_data_preprocessing = True
     if os.getenv("SKIP_TRAINING") == "True":
+        #
         create_model.skip_training = True
     if os.getenv("PERFORM_TRAINING") == "False":
         create_model.perform_training = False

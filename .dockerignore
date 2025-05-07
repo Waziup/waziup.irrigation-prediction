@@ -7,7 +7,6 @@
 *.csv
 *.tar
 config/*
-data/*
 /catboost_info
 /.vscode
 /hyperband_dir

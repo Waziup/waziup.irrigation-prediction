@@ -12,7 +12,6 @@ Config_folder_path = "config/"                      # Folder with configfiles
 # Array of active threads TODO: if training started kill other threads.(formerly done in main.py)
 Threads = []
 ThreadId = 0
-#Restart_time = 1800 # DEBUG 1800 ~ 30 min in s
 
 # Just read directory and retrieve filenames in sorted manner
 def readFiles():
