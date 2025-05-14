@@ -207,7 +207,7 @@ def setPlot(url, body):
 
     plot_manager.setPlot(currentTab)
 
-    return 200, b"Plot has been set.", []
+    return 200, f"Plot has been set. PlotId = {currentTab}".encode(), []
 
 usock.routerPOST("/api/setPlot", setPlot)
 

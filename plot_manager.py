@@ -24,28 +24,27 @@ def readFiles():
     return files
 
 # Set the current ṕlot
-def setPlot(plot_nr_in_ui):
-    global CurrentPlotId, CurrentPlotTab, ConfigPath, Plots
+def setPlot(plot_nr_in_id):
+    global CurrentPlotId, CurrentPlotTab, ConfigPath
 
-    #files = readFiles()
-    max_index = max(Plots.keys())
+    #currentPlot = getCurrentPlotWithId(plot_nr_in_id)
+    currentPlot = getCurrentPlot()
 
     # Point to config file of current plot
     try:
         # Should work if config is already set 
-        newPlot = Plots[plot_nr_in_ui]
-        ConfigPath = Config_folder_path + "current_config_plot" + str(newPlot.id) + ".json" #files[plot_nr_in_ui - 1] # -1 because the dict start with 1, not with 0
+        ConfigPath = Config_folder_path + "current_config_plot" + str(currentPlot.id) + ".json" #files[plot_nr_in_ui - 1] # -1 because the dict start with 1, not with 0
     # Newplot has been added as "last plot"
     except Exception as e:
-        # Should only be the case if config was not set
+        # Should never be the case, but just in case
         max_index = max(Plots.keys())
         newPlot = Plots[max_index]
-        
         ConfigPath = newPlot.configPath
+        print (f"Error setting plot: {e}. Using last plot's config path: {ConfigPath}")
 
     # Set also changes in manager_class, TODO: redundant
-    CurrentPlotId = newPlot.id
-    CurrentPlotTab = plot_nr_in_ui
+    CurrentPlotId = currentPlot.id
+    CurrentPlotTab = getCurrentPlotNumberWithId(currentPlot)
 
     return ConfigPath
 
@@ -102,24 +101,43 @@ def addPlot(tabid):
 
 # Remove a plot from the list
 def removePlot(plot_nr_to_be_removed):
-    global Plots
+    global Plots, CurrentPlotTab, CurrentPlotId
 
-    # Get current plot and remove
-    plot_to_remove = getCurrentPlot()
+    # Get current plot and remove -> formerly was getCurrentPlot()
+    # plot_to_remove = Plots[CurrentPlotTab]
+    plot_to_remove = getCurrentPlotWithId(plot_nr_to_be_removed)
 
     # Compare plot scope
-    if plot_nr_to_be_removed is not CurrentPlotTab:
+    if plot_nr_to_be_removed is CurrentPlotTab:
         print("Will remove plot number: ", plot_nr_to_be_removed)
     else:
         print("IndexError: Number of plot in frontend is different than backend, might have just deleted the wrong plot.")
 
-    # Remove json config file TODO: DEBUG
-    os.remove(plot_to_remove.configPath)
+    try:
+        # Remove json config file TODO: DEBUG
+        os.remove(plot_to_remove.configPath)
+    except Exception as e:
+        print(f"Error removing file, most likely it is not being created. Error: {e}")
 
     # Finally remove the plot from the list TODO: not array not suitable
-    del Plots[CurrentPlotTab]
+    if removePlotWithId(plot_nr_to_be_removed):
+        print(f"Plot {plot_nr_to_be_removed} removed successfully.")
+    else: 
+        print(f"Failed to remove plot {plot_nr_to_be_removed}.")
 
-    return plot_to_remove.CurrentPlotTab, plot_to_remove.configPath
+    # Set plot to former plot
+    CurrentPlotTab = CurrentPlotTab - 1
+    if CurrentPlotTab < 1:
+        CurrentPlotTab = 1
+
+    # Assign former plot to be current plot (id)
+    try:
+        CurrentPlotId = Plots[CurrentPlotTab].id
+    except Exception as e:
+        print(f"Error setting current plot ID: {e}")
+        CurrentPlotId = False
+
+    return plot_nr_to_be_removed, plot_to_remove.configPath
 
 # Just access 
 def getPlots():
@@ -140,10 +158,29 @@ def getCurrentPlot():
 #     print(f"[{multiprocessing.current_process().name}] Lock released.")
 #     return plot
 
+def getCurrentPlotNumberWithId(currentPlot):
+    global Plots
+    i = 1
+    for plot in Plots.values():
+        if plot.id == currentPlot.id:
+            return i
+        i += 1
+    return 1
+
 def getCurrentPlotWithId(passed_id):
-    for plot in Plots:
-        if plot.id is passed_id:
+    for plot in Plots.values():
+        if plot.id == passed_id:
             return plot
+    return False
+
+def removePlotWithId(passed_id):
+    global Plots
+    i = 1
+    for plot in Plots.values():
+        if plot.id == passed_id:
+            del Plots[i]
+            return True
+        i += 1
     return False
 
 def setCurrentConfig(path):
