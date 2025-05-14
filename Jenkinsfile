@@ -12,7 +12,7 @@ pipeline {
         DOCKER_PLATFORM = 'linux/arm64/v8'
         FORMER_IMAGES_DOCKER_ID = ''
         APP_NAME = 'waziup.irrigation-prediction'
-        LOCAL_WAZIGATE_IP = '172.16.11.186'
+        LOCAL_WAZIGATE_IP = 'wazigate-ci.local'
     }
 
     stages {
