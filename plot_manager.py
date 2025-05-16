@@ -24,11 +24,11 @@ def readFiles():
     return files
 
 # Set the current ṕlot
-def setPlot(plot_nr_in_id):
+def setPlot(plot_nr_tab):
     global CurrentPlotId, CurrentPlotTab, ConfigPath
 
-    #currentPlot = getCurrentPlotWithId(plot_nr_in_id)
-    currentPlot = getCurrentPlot()
+    # Get the plot object from the dictionary
+    currentPlot = Plots[plot_nr_tab] 
 
     # Point to config file of current plot
     try:
@@ -70,7 +70,7 @@ def loadPlots():
     return len(files)
 
 # Add a plot during runtine TODO: finish
-def addPlot(tabid):
+def addPlot(tabNumber):
     global Plots
 
     #files = readFiles()
@@ -81,7 +81,7 @@ def addPlot(tabid):
     # except Exception as e: # in case setup has never been run
     #     newfilename = 'config/current_config_plot0.json' # LOL
             
-    next_number = Plots[max(Plots.keys())].id + 1
+    next_number = max(plot.id for plot in Plots.values()) + 1
     newfilepath = os.path.join(Config_folder_path, "current_config_plot" + str(next_number) + ".json")
     # next_number = 0
     # match = re.search(r'plot(\d+)\.json$', newfilename)
@@ -91,21 +91,21 @@ def addPlot(tabid):
     #     newfilename = re.sub(r'plot(\d+)(\.json)$', f'plot{next_number}.json', newfilename)   # Replace with new number
 
     # Create new plot
-    plot_obj = Plot(int(tabid), newfilepath)
+    plot_obj = Plot(int(tabNumber), newfilepath)
     Plots[len(Plots)+1] = plot_obj
 
     plot_obj.printPlotNumber()  # Print for debugging
     plot_obj.setState(True) # TODO: obsolete?
 
-    return next_number, newfilepath
+    return tabNumber, newfilepath
 
 # Remove a plot from the list
 def removePlot(plot_nr_to_be_removed):
     global Plots, CurrentPlotTab, CurrentPlotId
 
     # Get current plot and remove -> formerly was getCurrentPlot()
-    # plot_to_remove = Plots[CurrentPlotTab]
-    plot_to_remove = getCurrentPlotWithId(plot_nr_to_be_removed)
+    plot_to_remove = Plots[CurrentPlotTab]
+    #plot_to_remove = getCurrentPlotWithId(plot_nr_to_be_removed)
 
     # Compare plot scope
     if plot_nr_to_be_removed is CurrentPlotTab:

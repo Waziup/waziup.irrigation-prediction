@@ -709,27 +709,35 @@ def getValuesForDashboard(url, body):
         for moisture in currentPlot.device_and_sensor_ids_moisture:
             data_moisture.append(currentPlot.load_latest_data_csv(moisture, "sensors"))
 
-    # Calculate the temp average
-    temp_average = sum(data_temp) / len(data_temp)
-    # Calculate the moisture average
-    moisture_average = sum(data_moisture) / len(data_moisture)
-    # Calculate the VVO average if tension sensor is used
-    if currentPlot.sensor_kind == "tension":
-        vwc_average = round(create_model.calc_volumetric_water_content_single_value(moisture_average, currentPlot)*100,2) 
+    # Check if data is empty
+    if data_temp == [] or data_moisture == []:
+        response_data = {"available": False}
+        status_code = 404
 
-        dashboard_data = {
-            "temp_average": temp_average,
-            "moisture_average": moisture_average,
-            "vwc_average": vwc_average
-        }
+        return status_code, bytes(json.dumps(response_data), "utf8"), []
+    # If present:
     else:
-        dashboard_data = {
-            "temp_average": temp_average,
-            "moisture_average": "-- (Sensor not present)",
-            "vwc_average": moisture_average
-        }
-    
-    return 200, bytes(json.dumps(dashboard_data), "utf8"), []
+        # Calculate the temp average
+        temp_average = sum(data_temp) / len(data_temp)
+        # Calculate the moisture average
+        moisture_average = sum(data_moisture) / len(data_moisture)
+        # Calculate the VVO average if tension sensor is used
+        if currentPlot.sensor_kind == "tension":
+            vwc_average = round(create_model.calc_volumetric_water_content_single_value(moisture_average, currentPlot)*100,2) 
+
+            dashboard_data = {
+                "temp_average": temp_average,
+                "moisture_average": moisture_average,
+                "vwc_average": vwc_average
+            }
+        else:
+            dashboard_data = {
+                "temp_average": temp_average,
+                "moisture_average": "-- (Sensor not present)",
+                "vwc_average": moisture_average
+            }
+        
+        return 200, bytes(json.dumps(dashboard_data), "utf8"), []
 
 usock.routerGET("/api/getValuesForDashboard", getValuesForDashboard)
 

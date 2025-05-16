@@ -198,7 +198,6 @@ def start():
 # Just a wrapper to start the server with recovery
 # This function will restart the server if it crashes
 def start_with_recovery():
-    global sockAddr
     while True:
         try:
             print("Attempting to start HTTP server...")

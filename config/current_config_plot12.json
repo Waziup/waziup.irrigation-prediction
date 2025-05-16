@@ -1,15 +1,9 @@
 {
-    "DeviceAndSensorIdsMoisture": [
-        "657360e268f319085542e336/657360f468f319085542e337"
-    ],
-    "DeviceAndSensorIdsTemp": [
-        "657360e268f319085542e336/657360f468f319085542e33b"
-    ],
-    "DeviceAndSensorIdsFlow": [
-        "6645c4d468f31971148f2ab1/667ae30068f3197114901717"
-    ],
+    "DeviceAndSensorIdsMoisture": [],
+    "DeviceAndSensorIdsTemp": [],
+    "DeviceAndSensorIdsFlow": [],
     "Sensor_kind": "tension",
-    "Name": "Plot_new6",
+    "Name": "6",
     "Gps_info": {
         "lattitude": "51.023591",
         "longitude": "13.744087"
@@ -18,7 +12,7 @@
     "Threshold": 7.0,
     "Irrigation_amount": 10.0,
     "Look_ahead_time": 6.0,
-    "Start_date": "2025-03-11T00:00:00.000Z",
+    "Start_date": "2025-05-08T00:00:00.000Z",
     "Period": 0,
     "Soil_type": "Sandy_Soil",
     "Soil_water_retention_curve": [

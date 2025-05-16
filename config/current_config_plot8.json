@@ -5,9 +5,11 @@
     "DeviceAndSensorIdsTemp": [
         "657360e268f319085542e336/657360f468f319085542e33b"
     ],
-    "DeviceAndSensorIdsFlow": [],
+    "DeviceAndSensorIdsFlow": [
+        "6645c4d468f31971148f2ab1/667ae30068f3197114901717"
+    ],
     "Sensor_kind": "tension",
-    "Name": "Plot8",
+    "Name": "4",
     "Gps_info": {
         "lattitude": "51.023591",
         "longitude": "13.744087"

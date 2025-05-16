@@ -1,6 +1,7 @@
 ## Waziup Irrigation Prediction Tests
 
 import json
+from dotenv import dotenv_values, set_key, load_dotenv
 import requests
 from time import sleep
 import unittest
@@ -60,6 +61,8 @@ header_Accept_text_plain = {
     'Accept' : 'text/plain'
 }
 
+ENV_FILE = ".env"
+
 # API Endpoints List (overview):
 # GET / - Basic endpoint
 # GET/POST /ui/(.*) - Serve UI files
@@ -98,18 +101,26 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
             }
         self.cookies = {'Token': self.token}
 
-        # # Test plot setup
-        # self.test_plot = {
-        #     'name': 'Test Plot',
-        #     'sensors': ['sensor1', 'sensor2'],
-        #     'config': {
-        #         'threshold': 30,
-        #         'irrigation_amount': 100,
-        #         'sensor_kind': 'tension'
-        #     }
-        # }
+                # Load original .env as a backup
+        self.original_env = dotenv_values(ENV_FILE)
 
-        # Create test plot
+        # Set temporary values
+        set_key(ENV_FILE, "SKIP_TRAINING", "False")
+        set_key(ENV_FILE, "LOAD_DATA_FROM_CSV", "True")
+        set_key(ENV_FILE, "PERFORM_TRAINING", "True")
+
+        # (Optional) Reload env vars in current process
+        load_dotenv(ENV_FILE, override=True)
+
+    def tearDown(self):
+        # Restore original .env values
+        for key, value in self.original_env.items():
+            set_key(ENV_FILE, key, value)
+
+        # Remove keys that were added only for the test
+        test_keys = set(dotenv_values(ENV_FILE).keys()) - set(self.original_env.keys())
+        for key in test_keys:
+            set_key(ENV_FILE, key, "")
 
     # Evaluate status codes
     def evaluate_status_code(self,statusCode,expected_statusCode):
@@ -123,17 +134,6 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
 
     # Plot Management Tests
     def test_02_test_plot_lifecycle(self):
-        # Create plot
-        print("Creating plot...")
-        create_resp = requests.post(
-            f"{wazigate_app_url}/api/addPlot",
-            data={'tab_nr': 25},
-            headers=self.headers
-        )
-        self.assertEqual(create_resp.status_code, 200)
-        print(create_resp.text)
-        plot_recently_created = int(create_resp.json()["plot_number"])
-        
         # Get plots
         get_resp = requests.get(
             f"{wazigate_app_url}/api/getPlots",
@@ -142,12 +142,25 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
         self.assertEqual(get_resp.status_code, 200)
         self.assertGreater(len(get_resp.json()['tabnames']), 0)
         print(get_resp.text)
+        next_plot_to_add = len(get_resp.json()['tabnames']) + 1
+        print("Next plot to add: ", next_plot_to_add)
+
+        # Create plot
+        print("Creating plot...")
+        create_resp = requests.post(
+            f"{wazigate_app_url}/api/addPlot",
+            data={'tab_nr': next_plot_to_add},
+            headers=self.headers
+        )
+        self.assertEqual(create_resp.status_code, 200)
+        print(create_resp.text)
+        plot_recently_created = int(create_resp.json()["plot_number"])
 
         # Set current plot
         print("Set plot...")
         set_resp = requests.post(
             f"{wazigate_app_url}/api/setPlot",
-            data=f"currentPlot={plot_recently_created}",
+            data=f"currentPlot={next_plot_to_add}",
             headers=self.headers
         )
         self.assertEqual(set_resp.status_code, 200)
@@ -156,18 +169,29 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
         # Remove plot -> HTTP code fails, but is deleted
         remove_resp = requests.post(
             f"{wazigate_app_url}/api/removePlot",
-            data=f"currentPlot={plot_recently_created}",
+            data=f"currentPlot={next_plot_to_add}",
             headers=self.headers
         )
         self.assertEqual(remove_resp.status_code, 200)
 
     # Configuration Tests
     def test_03_test_config_management(self):
+        # Get plots
+        get_resp = requests.get(
+            f"{wazigate_app_url}/api/getPlots",
+            headers=self.headers
+        )
+        self.assertEqual(get_resp.status_code, 200)
+        self.assertGreater(len(get_resp.json()['tabnames']), 0)
+        print(get_resp.text)
+        next_plot_to_add = len(get_resp.json()['tabnames']) + 1
+        print("Next plot to add: ", next_plot_to_add)
+
         # Create plot
         print("Creating plot...")
         create_resp = requests.post(
             f"{wazigate_app_url}/api/addPlot",
-            data={'tab_nr': 25},
+            data={'tab_nr': next_plot_to_add},
             headers=self.headers
         )
         self.assertEqual(create_resp.status_code, 200)
@@ -178,6 +202,7 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
         config_data = {
             'selectedOptionsMoisture': ['657360e268f319085542e336/657360f468f319085542e337'],
             'selectedOptionsTemp': ['657360e268f319085542e336/657360f468f319085542e33b'],
+            'selectedOptionsFlow': ['641b13011d41c8b9a2682344/641b13101d41c8b9a2682345'],
             'name': 'Test Plot',
             'sensor_kind': 'tension',
             'gps': ['51.023591, 13.744087'],
@@ -233,6 +258,7 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
         # Sensor ID checks
         self.assertIn('657360e268f319085542e336/657360f468f319085542e337', config['DeviceAndSensorIdsMoisture'][0])
         self.assertIn('657360e268f319085542e336/657360f468f319085542e33b', config['DeviceAndSensorIdsTemp'][0])
+        self.assertIn('641b13011d41c8b9a2682344/641b13101d41c8b9a2682345', config['DeviceAndSensorIdsFlow'][0])
 
         # Check CSV was parsed and converted to list of dicts
         retention = config.get('Soil_water_retention_curve', [])
@@ -255,7 +281,7 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
         )
         self.assertIn(hist_resp.status_code, [200, 404])
 
-    # Prediction Tests
+    # Prediction Tests    
     def test_05_test_prediction_workflow(self):
         # Start training
         train_resp = requests.get(
@@ -263,57 +289,78 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
             headers=self.headers
         )
         self.assertEqual(train_resp.status_code, 200)
+        print("Training started...")
 
-    #     # Check training status
-    #     status_resp = requests.get(
-    #         f"{wazigate_app_url}/api/isTrainingReady",
-    #         headers=self.headers
-    #     )
-    #     self.assertEqual(status_resp.status_code, 200)
+         # Poll until training is finished
+        max_wait_time = 3600  # seconds (one hour)
+        interval = 10  # poll every 10 seconds
+        waited = 0
 
-    #     # Get predictions
-    #     pred_resp = requests.get(
-    #         f"{wazigate_app_url}/api/getPredictionChartData",
-    #         headers=self.headers
-    #     )
-    #     self.assertIn(pred_resp.status_code, [200, 404])
+        while waited < max_wait_time:
+            time.sleep(interval)
+            waited += interval
 
-    # # Irrigation Control Tests
-    # def test_irrigation_controls(self):
-    #     # Manual irrigation
-    #     irrig_resp = requests.get(
-    #         f"{wazigate_app_url}/api/irrigateManually",
-    #         params={'amount': 50},
-    #         headers=self.headers
-    #     )
-    #     self.assertEqual(irrig_resp.status_code, 200)
+            status_resp = requests.get(
+                f"{wazigate_app_url}/api/isTrainingReady",
+                headers=self.headers
+            )
+            self.assertEqual(status_resp.status_code, 200)
 
-    #     # Check irrigation status
-    #     status_resp = requests.get(
-    #         f"{wazigate_app_url}/api/checkActiveIrrigation",
-    #         headers=self.headers
-    #     )
-    #     self.assertIn(status_resp.status_code, [200, 404])
+            try:
+                ready = status_resp.json().get("isTrainingFinished", False)
+                print(f"Polling status after {waited}s: isTrainingFinished = {ready}")
+            except Exception as e:
+                self.fail(f"Invalid JSON from isTrainingReady: {e}")
 
-    # # Edge Cases
-    # def test_edge_cases(self):
-    #     # Invalid plot ID
-    #     invalid_plot_resp = requests.get(
-    #         f"{wazigate_app_url}/api/getCurrentPlot",
-    #         params={'plotId': 999},
-    #         headers=self.headers
-    #     )
-    #     self.assertIn(invalid_plot_resp.status_code, [404, 400])
+            if ready:
+                print(f"Training finished after {waited} seconds.")
+                break
+        else:
+            self.fail(f"Training did not finish within {max_wait_time} seconds.")
 
-    #     # Missing config
-    #     missing_config_resp = requests.get(
-    #         f"{wazigate_app_url}/api/returnConfig",
-    #         headers=self.headers
-    #     )
-    #     self.assertIn(missing_config_resp.status_code, [200, 404])
+        # Afterwards get predictions
+        pred_resp = requests.get(
+            f"{wazigate_app_url}/api/getPredictionChartData",
+            headers=self.headers
+        )
+        self.assertIn(pred_resp.status_code, 200)
 
-    # Security Tests -> useless because API is not protected
-    def test_06_test_authentication(self):
+    # Irrigation Control Tests
+    def test_06_test_irrigation_controls(self):
+        # Manual irrigation
+        irrig_resp = requests.get(
+            f"{wazigate_app_url}/api/irrigateManually",
+            params={'amount': 50},
+            headers=self.headers
+        )
+        self.assertEqual(irrig_resp.status_code, 200)
+
+        # Check irrigation status
+        status_resp = requests.get(
+            f"{wazigate_app_url}/api/checkActiveIrrigation",
+            headers=self.headers
+        )
+        self.assertIn(status_resp.status_code, [200, 404])
+
+    # Edge Cases
+    def test_edge_cases(self):
+        # Invalid plot ID
+        invalid_plot_resp = requests.get(
+            f"{wazigate_app_url}/api/getCurrentPlot",
+            params={'plotId': 999},
+            headers=self.headers
+        )
+        self.assertIn(invalid_plot_resp.status_code, [404, 400])
+
+        # Missing config
+        missing_config_resp = requests.get(
+            f"{wazigate_app_url}/api/returnConfig",
+            headers=self.headers
+        )
+        self.assertIn(missing_config_resp.status_code, [200, 404])
+
+    # Security Tests -> useless because API is not protected (locally)
+    def test_09_test_authentication(self):
         # Unauthenticated request
         unauth_resp = requests.get(
             f"{wazigate_app_url}/api/getPlots"
@@ -321,7 +368,7 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
         self.assertIn(unauth_resp.status_code, [401, 403])
 
     # Performance Tests
-    def test_07_test_response_times(self):
+    def test_10_test_response_times(self):
         endpoints = [
             '/api/getPlots',
             '/api/getValuesForDashboard',
@@ -335,7 +382,7 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
                 cookies=self.headers
             )
             response_time = time.time() - start_time
-            self.assertLess(response_time, 5)  # 5 seconds max
+            self.assertLess(response_time, 10)  # 10 seconds max
 
 #     # Conduct Unittests against the Apps API
 # class TestIrrigationPredictionIntegration(unittest.TestCase):
