@@ -5,7 +5,9 @@ from pathlib import Path
 import socket
 import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import time
 from urllib.parse import urlparse
+import traceback 
 
 from dotenv import load_dotenv
 
@@ -57,26 +59,30 @@ class HTTPHandler(BaseHTTPRequestHandler):
     # protocol_version = "HTTP/1.1"
     # ---------------#
     def callAPI(self, method="GET", body=""):
-        # # Check if the request is for a static file
-        # if self.path.startswith("/ui/"):
-        #     self.serve_static_file()
-        #     return
         inPath = urlparse(self.path).path
         routPath = ""
-        # print( body)
-        for key in routing.get(method):
-            if re.match(r"^" + key + "$", inPath):
-                routPath = key
-                break
+        
         try:
-            resCode, resBody, resHeaders = routing.get(method).get(routPath)(self.path,
-                                                                             body)
-        except Exception as e:
-            print("Error: ", e)
-            resCode = 404
-            resBody = b"Route not found"
-            resHeaders = []
+            # Try matching the incoming path with the registered routes
+            for key in routing.get(method, {}):
+                if re.match(r"^" + key + "$", inPath):
+                    routPath = key
+                    break
 
+            if not routPath:
+                raise Exception(f"No route matched for path: {inPath} and method: {method}")
+
+            # Call the registered route function
+            resCode, resBody, resHeaders = routing[method][routPath](self.path, body)
+
+        except Exception as e:
+            print(f"Exception in callAPI(): {e}")
+            traceback.print_exc()
+            resCode = 500
+            resBody = f"Internal server error:\n{str(e)}".encode("utf-8")
+            resHeaders = ["text/plain"]
+
+        # Send the response regardless
         self.send(resCode, resBody, resHeaders)
 
     # ---------------#
@@ -159,9 +165,11 @@ def start():
 
     # Make sure the socket does not already exist
     try:
+        print(f"Removing old socket file at {sockAddr}")
         os.unlink(sockAddr)
     except OSError:
         if os.path.exists(sockAddr):
+            print(f"Failed to remove old socket file: {e}")
             raise
 
     unixSock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -173,10 +181,32 @@ def start():
     unixSock.listen(5)
 
     server = HTTPServer(sockAddr, HTTPHandler, False)
+
     # ThreadingHTTPServer
     server.socket = unixSock
     server.serve_forever()
 
-    unixSock.shutdown(socket.SHUT_RDWR)
-    unixSock.close()
-    os.remove(sockAddr)
+    # Cleanup after server stops
+    try:
+        unixSock.shutdown(socket.SHUT_RDWR)
+        unixSock.close()
+        os.remove(sockAddr)
+        print(f"HTTP server stopped and socket cleaned up.")
+    except Exception as e:
+        print(f"Error during socket cleanup: {e}")
+
+# Just a wrapper to start the server with recovery
+# This function will restart the server if it crashes
+def start_with_recovery():
+    while True:
+        try:
+            print("Attempting to start HTTP server...")
+            start()  # real server function
+        except Exception as e:
+            print("Server crashed with error:")
+            traceback.print_exc()
+            print("Restarting in 5 seconds...")
+            time.sleep(5)
+        else:
+            print("Server exited normally — breaking out.")
+            break  # Exit if server stops on purpose

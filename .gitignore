@@ -170,3 +170,6 @@ hyperband_dir/
 
 # notes
 notes.txt
+
+# unit tests results
+test-reports/

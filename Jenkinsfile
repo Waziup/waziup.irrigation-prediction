@@ -8,9 +8,11 @@ pipeline {
     }
     environment {
         DOCKER_IMAGE_NAME = 'waziup/irrigation-prediction'
-        DOCKER_TAG_NAME = 'dev'
+        DOCKER_TAG_NAME = 'latest'
         DOCKER_PLATFORM = 'linux/arm64/v8'
         FORMER_IMAGES_DOCKER_ID = ''
+        APP_NAME = 'waziup.irrigation-prediction'
+        LOCAL_WAZIGATE_IP = 'wazigate-ci.local'
     }
 
     stages {
@@ -81,6 +83,47 @@ pipeline {
                     }
                     else {
                         echo "No old image to remove."
+                    }
+                }
+            }
+        }
+
+        stage('Push to local Gateway & Restart') {
+            steps {
+                script {
+                    def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}"
+                    try {
+                        echo "Pushing Docker image to local gateway..."
+                        sh "docker save ${dockerImage} | gzip | pv | ssh pi@${LOCAL_WAZIGATE_IP} docker load"
+
+                        echo "Deploying updated container on gateway..."
+                        sh """
+                            ssh pi@${LOCAL_WAZIGATE_IP} '
+                                cd /var/lib/wazigate/apps/${APP_NAME} && \
+                                docker-compose down && \
+                                docker-compose up -d
+                            '
+                        """
+
+                        echo "Successfully deployed ${dockerImage} to local gateway."
+                    } catch (Exception e) {
+                        echo "Exception during deployment: ${e.getMessage()}"
+                        error "Failed to push and deploy image on local gateway."
+                    }
+                }
+            }
+        }
+
+        stage('Test Docker Image - Run Unit Tests') {
+            steps {
+                script {
+                    def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}"
+                    try {
+                        sh "docker run --rm ${dockerImage} python3 -m unittest discover -s tests"
+                        echo "Tests passed successfully."
+                    } catch (Exception e) {
+                        echo "Exception during testing: ${e.getMessage()}"
+                        error "Tests failed."
                     }
                 }
             }

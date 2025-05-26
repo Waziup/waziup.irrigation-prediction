@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from io import StringIO
 import json
 import threading
+from threading import Timer
 import time
 from urllib.parse import urlparse, parse_qs
 from dotenv import load_dotenv
@@ -15,6 +16,8 @@ import usock
 import os
 import pathlib
 import numpy as np
+from collections import defaultdict
+from dateutil import parser
 
 import create_model
 import actuation
@@ -86,8 +89,8 @@ usock.routerPOST("/ui/(.*)", ui)
 
 # Cleans python and pycaret logs
 class LogCleanerThread(threading.Thread):
-    def __init__(self, file_path, age_limit_days=90, check_interval=86400):
-        super().__init__()
+    def __init__(self, file_path, age_limit_days=90, check_interval=86400, name=None):
+        super().__init__(name=name)
         self.file_path = file_path
         self.age_limit_days = age_limit_days
         self.check_interval = check_interval
@@ -95,13 +98,16 @@ class LogCleanerThread(threading.Thread):
 
     def clean_log(self):
         """Clears log file if it is older than the age limit."""
+        print(f"[{self.name}] Checking log file: {self.file_path}")
         if os.path.exists(self.file_path):
             last_modified_time = datetime.fromtimestamp(os.path.getmtime(self.file_path))
             if datetime.now() - last_modified_time > timedelta(days=self.age_limit_days):
                 open(self.file_path, 'w').close()  # Clear the file contents
-                print(f"{self.file_path} has been cleaned.")
+                print(f"[{self.name}] {self.file_path} has been cleaned.")
             else:
-                print(f"{self.file_path} is not old enough to clean.")
+                print(f"[{self.name}] {self.file_path} is not old enough to clean.")
+        else:
+            print(f"[{self.name}] Log file does not exist: {self.file_path}")
 
     def run(self):
         while not self.stop_thread.is_set():
@@ -120,10 +126,26 @@ def schedule_log_cleanup():
 
     # Start a thread for each log file
     for log_path, age_limit in logs_to_clean:
-        cleaner = LogCleanerThread(file_path=log_path, age_limit_days=age_limit)
+        thread_name = f"LogCleaner-{os.path.basename(log_path)}"
+        cleaner = LogCleanerThread(file_path=log_path, age_limit_days=age_limit, name=thread_name)
         cleaner.daemon = True  # Run thread in the background
         cleaner.start()
 
+class ModelCleanerThread(threading.Thread):
+    def __init__(self, folder_path, interval_days=7, name="ModelCleaner"):
+        super().__init__(name=name)
+        self.folder_path = folder_path
+        self.interval_days = interval_days
+        self.daemon = True
+        self.stop_event = threading.Event()
+
+    def run(self):
+        while not self.stop_event.is_set():
+            delete_old_files(self.folder_path)
+            time.sleep(self.interval_days * 24 * 3600)
+
+    def stop(self):
+        self.stop_event.set()
 
 # Deletes files older than the threshold from the specified folder and its subfolders.
 def delete_old_files(folder_path):
@@ -147,15 +169,8 @@ def schedule_model_cleanup(folder_path, interval_days=7):
     """
     Periodically runs the delete_old_files function every interval_hours.
     """
-    from threading import Timer
-    
-    # Inner function to recursively schedule the cleanup
-    def run_cleanup():
-        delete_old_files(folder_path)
-        Timer(interval_days * 24 * 3600, run_cleanup).start()
-    
-    # Start the first cleanup run
-    run_cleanup()
+    cleaner = ModelCleanerThread(folder_path, interval_days)
+    cleaner.start()
 
 # Get URL of API from .env file => TODO: better with try catch than locals, getenv can still stop backend
 def getApiUrl(url, body):
@@ -192,7 +207,7 @@ def setPlot(url, body):
 
     plot_manager.setPlot(currentTab)
 
-    return 200, b"Plot has been set.", []
+    return 200, f"Plot has been set. PlotId = {currentTab}".encode(), []
 
 usock.routerPOST("/api/setPlot", setPlot)
 
@@ -537,6 +552,27 @@ def extract_and_format(data, key, datatype):
     
     return values
 
+def group_sensor_data(sensor_lists, agg_func=lambda vals: sum(vals)/len(vals)):
+    """
+    Given a list of sensor-lists (each a list of {'time':…, 'value':…}),
+    return two lists:
+      - sorted timestamps (strings)
+      - aggregated values (floats) per timestamp
+    agg_func receives the list of values for that timestamp.
+    """
+    bucket = defaultdict(list)
+    for series in sensor_lists:
+        for rec in series:
+            # normalize time strings if you want
+            t = rec['time']
+            bucket[t].append(rec['value'])
+
+    # sort timestamps chronologically
+    timestamps = sorted(bucket.keys(), key=lambda t: parser.isoparse(t))
+    values     = [agg_func(bucket[t]) for t in timestamps]
+    return timestamps, values
+
+
 # def interpolate_list(data_list):
 #     data = np.array(data_list, dtype=float)
 
@@ -660,7 +696,7 @@ def getValuesForDashboard(url, body):
 
     currentPlot = plot_manager.getCurrentPlot()
     # Load config, to get latest changes
-    currentPlot.config = plot.read_config()
+    currentPlot.config = currentPlot.read_config()
 
     if not currentPlot.load_data_from_csv:
         for temp in currentPlot.device_and_sensor_ids_temp:
@@ -673,56 +709,64 @@ def getValuesForDashboard(url, body):
         for moisture in currentPlot.device_and_sensor_ids_moisture:
             data_moisture.append(currentPlot.load_latest_data_csv(moisture, "sensors"))
 
-    # Calculate the temp average
-    temp_average = sum(data_temp) / len(data_temp)
-    # Calculate the moisture average
-    moisture_average = sum(data_moisture) / len(data_moisture)
-    # Calculate the VVO average if tension sensor is used
-    if currentPlot.sensor_kind == "tension":
-        vwc_average = round(create_model.calc_volumetric_water_content_single_value(moisture_average, currentPlot)*100,2) 
+    # Check if data is empty
+    if data_temp == [] or data_moisture == []:
+        response_data = {"available": False}
+        status_code = 404
 
-        dashboard_data = {
-            "temp_average": temp_average,
-            "moisture_average": moisture_average,
-            "vwc_average": vwc_average
-        }
+        return status_code, bytes(json.dumps(response_data), "utf8"), []
+    # If present:
     else:
-        dashboard_data = {
-            "temp_average": temp_average,
-            "moisture_average": "-- (Sensor not present)",
-            "vwc_average": moisture_average
-        }
-    
-    return 200, bytes(json.dumps(dashboard_data), "utf8"), []
+        # Calculate the temp average
+        temp_average = sum(data_temp) / len(data_temp)
+        # Calculate the moisture average
+        moisture_average = sum(data_moisture) / len(data_moisture)
+        # Calculate the VVO average if tension sensor is used
+        if currentPlot.sensor_kind == "tension":
+            vwc_average = round(create_model.calc_volumetric_water_content_single_value(moisture_average, currentPlot)*100,2) 
+
+            dashboard_data = {
+                "temp_average": temp_average,
+                "moisture_average": moisture_average,
+                "vwc_average": vwc_average
+            }
+        else:
+            dashboard_data = {
+                "temp_average": temp_average,
+                "moisture_average": "-- (Sensor not present)",
+                "vwc_average": moisture_average
+            }
+        
+        return 200, bytes(json.dumps(dashboard_data), "utf8"), []
 
 usock.routerGET("/api/getValuesForDashboard", getValuesForDashboard)
 
 
 def getHistoricalChartData(url, body): 
-    # Load data from local wazigate api -> each sensor individually
+    # Load data from local wazigate api -> each sensor individually, save as key-value pairs
     data_moisture = []
     data_temp = []
     #data_flow = [] # TODO:later also show flow in vis
+    data_moisture_average = []
+    data_temp_average = []
 
+    # Get current plot (selected in UI)
     currentPlot = plot_manager.getCurrentPlot()
     # Load config, to get latest changes
-    currentPlot.config = plot.read_config()
+    currentPlot.config = currentPlot.read_config()
 
     if currentPlot.load_data_from_csv:
         data = currentPlot.load_data_csv()
-
-        # Merge lists  
 
         # extract series from key value pairs
         f_data_time = data["Time"].tolist()
         f_data_moisture = extract_and_format_csv(data, "tension")
         f_data_temp = extract_and_format_csv(data, "soil_temp")
 
-        # make sure that the data is not empty
-
         # unite similar series
         # f_data_moisture = [item for sublist in f_data_moisture for item in sublist]
-
+        
+        # Make sure that the data is not empty
         if not f_data_moisture or not f_data_temp:
             response_data = {"available": False}
             status_code = 404
@@ -736,16 +780,13 @@ def getHistoricalChartData(url, body):
         # for flow in currentPlot.device_and_sensor_ids_flow: # TODO: maybe display that also here (is displayed in datasets data)
         #     data_flow.append(currentPlot.load_data_api(flow, "actuators", currentPlot.start_date))
 
-        # # Merge lists
-        # for list in data_moisture:
-        #     for item in list:
-        #         data_moisture.append(item)
-
+        f_data_time, f_data_moisture = group_sensor_data(data_moisture)
+        f_data_time, f_data_temp = group_sensor_data(data_temp)
 
         # extract series from key value pairs
-        f_data_time = extract_and_format(data_moisture, "time", "str")
-        f_data_moisture = extract_and_format(data_moisture, "value", "float")
-        f_data_temp = extract_and_format(data_temp, "value", "float")
+        # f_data_time = extract_and_format(data_moisture, "time", "str")
+        # f_data_moisture = extract_and_format(data_moisture, "value", "float")
+        # f_data_temp = extract_and_format(data_temp, "value", "float")
         
         if not data_moisture or not data_temp:
             response_data = {"available": False}
@@ -959,7 +1000,7 @@ usock.routerGET("/api/getCurrentPlot", getCurrentPlot)
 
 if __name__ == "__main__":
     # Load environment variables
-    NetworkUtils.get_env()
+    NetworkUtils.get_env()  
 
     # Load all plots once on startup
     plot_manager.loadPlots()
@@ -971,6 +1012,7 @@ if __name__ == "__main__":
     if os.getenv("SKIP_DATA_PREPROCESSING") == "True":
         create_model.skip_data_preprocessing = True
     if os.getenv("SKIP_TRAINING") == "True":
+        #
         create_model.skip_training = True
     if os.getenv("PERFORM_TRAINING") == "False":
         create_model.perform_training = False
@@ -985,12 +1027,12 @@ if __name__ == "__main__":
     # Clean logs
     schedule_log_cleanup()
 
-    # # Start serving
+    # Former Start serving
     # usock.sockAddr = NetworkUtils.Proxy
     # usock.start() # will be "stuck" in here, code afterwards is not executed
 
         # Start serving in a dedicated thread
-    server_thread = threading.Thread(target=usock.start, name="HTTP_Server")
+    server_thread = threading.Thread(target=usock.start_with_recovery, name="HTTP_Server")
     server_thread.daemon = False  # Keep alive until shutdown
     server_thread.start()
 

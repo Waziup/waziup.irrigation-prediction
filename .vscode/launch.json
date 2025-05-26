@@ -9,6 +9,7 @@
             "type": "python",
             "request": "launch",
             "program": "main.py",
+            //"program": "${workspaceFolder}/unittests.py",
             "console": "integratedTerminal",
             "justMyCode": false,
             "subProcess": true

@@ -62,7 +62,7 @@ class Plot:
         self.config = {}
 
         # Threading
-        self.training_process = None                    # Training thread of object
+        self.training_thread = None                     # Training thread of object
         self.prediction_thread = None                   # Prediction thread of object
         self.training_finished = False                  # Flag training process finished
         self.currently_training = False                 # Flag currently training this plot
@@ -280,7 +280,7 @@ class Plot:
 
         return config
 
-    # Load from wazigate API
+    # Load from wazigate API, !!!! TODO: investigate why HTTP server becomes unresponsive after running!!!!
     def load_data_api(self, sensor_name, type, from_timestamp):  # , token)
         print("load_data_api: will load data for plot: " + self.user_given_name
                + " For the sensor: " + sensor_name)

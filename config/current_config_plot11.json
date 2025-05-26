@@ -5,21 +5,19 @@
     "DeviceAndSensorIdsTemp": [
         "657360e268f319085542e336/657360f468f319085542e33b"
     ],
-    "DeviceAndSensorIdsFlow": [
-        "6645c4d468f31971148f2ab1/667ae30068f3197114901717"
-    ],
+    "DeviceAndSensorIdsFlow": [],
     "Sensor_kind": "tension",
-    "Name": "Plot_new6",
+    "Name": "2",
     "Gps_info": {
         "lattitude": "51.023591",
         "longitude": "13.744087"
     },
-    "Slope": "-0.07",
-    "Threshold": 7.0,
-    "Irrigation_amount": 10.0,
-    "Look_ahead_time": 6.0,
+    "Slope": "5",
+    "Threshold": 30.0,
+    "Irrigation_amount": 100.0,
+    "Look_ahead_time": 24.0,
     "Start_date": "2025-03-11T00:00:00.000Z",
-    "Period": 0,
+    "Period": 7,
     "Soil_type": "Sandy_Soil",
     "Soil_water_retention_curve": [
         {
@@ -59,8 +57,8 @@
             "VWC": " 0.025"
         }
     ],
-    "PermanentWiltingPoint": 40,
-    "FieldCapacityUpper": 30,
-    "FieldCapacityLower": 10,
+    "PermanentWiltingPoint": 3,
+    "FieldCapacityUpper": 2,
+    "FieldCapacityLower": 1,
     "Saturation": 0
 }

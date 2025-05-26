@@ -100,6 +100,7 @@ class NetworkUtils:
                 if response.status_code == 200:
                     # The response content contains the data from the API
                     cls.Token = response.json()
+                    print("Token retrieved successfully:", cls.Token)
                 else:
                     print("Request failed with status code:", response.status_code)
             except requests.exceptions.RequestException as e:

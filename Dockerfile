@@ -1,5 +1,5 @@
 FROM python:3.8-slim
-#later alpine to save even more, but is it worth it? (Alpine uses musl instead of glibc)
+#later alpine to save even more filesize of container, but is it worth it? (Alpine uses musl instead of glibc)
 
 # Set environment variables to ensure non-interactive apt-get and prevent cache busting
 ENV DEBIAN_FRONTEND=noninteractive
@@ -23,15 +23,16 @@ RUN  pip install requests \
      geopy \
      timezonefinder \
      python-dotenv \
+     python-dateutil \
      xgboost \
      catboost \
      tensorflow \
      scikeras \
      scikit-learn \
      joblib==1.3 \
-     keras-tuner
-     
+     keras-tuner   
 # keras tuner check usage!
+
 COPY . /root/src/
 
 RUN mkdir -p /root/src/data
