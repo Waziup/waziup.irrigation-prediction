@@ -1,0 +1,1208 @@
+:root {
+  --primary-color: #394e69;
+  --secondary-color: #f35e19;
+  --danger-color: #e74c3c;
+  --text-color: #333;
+  --light-gray: #f8f9fa;
+  --border-color: #e0e0e0;
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --border-radius: 8px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Inter", sans-serif;
+  background-color: var(--light-gray);
+  color: var(--text-color);
+  line-height: 1.6;
+}
+
+/* Tab container styles */
+.tab-container {
+  background-color: white;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.tab {
+  padding: 8px 16px;
+  background-color: #f8f9fa;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  position: relative;
+  transition: all 0.2s;
+}
+
+.tab:hover {
+  background-color: #e9ecef;
+}
+
+.tab.active {
+  background-color: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+.close-tab {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background-color: #dc3545;
+  color: white;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.add-tab-button {
+  background-color: #394e69;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.add-tab-button:hover {
+  background-color: #2d3d54;
+}
+
+/* Loading indicator */
+.loading-indicator {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.loading-content {
+  text-align: center;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid var(--primary-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 16px;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Main content */
+.main-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.main-content.loaded {
+  opacity: 1;
+}
+
+/* Header styles */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.location-title {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.header-controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.settings-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #555;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+}
+
+.settings-button:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.settings-button.highlight {
+  background-color: #ffc107;
+  color: white;
+}
+
+.plot-selector select {
+  padding: 8px 16px;
+  border-radius: var(--border-radius);
+  border: 1px solid var(--border-color);
+  background-color: white;
+  font-family: "Inter", sans-serif;
+  cursor: pointer;
+  min-width: 150px;
+}
+
+/* Action buttons */
+.action-buttons {
+  margin-bottom: 24px;
+}
+
+.train-button {
+  background-color: #6c757d;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 12px 24px;
+  cursor: pointer;
+  font-family: "Inter", sans-serif;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.train-button:hover {
+  background-color: #5a6268;
+}
+
+.train-button.highlight {
+  background-color: var(--secondary-color);
+  color: white;
+}
+
+.train-button:disabled {
+  background-color: #6c757d;
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Modern Training Button - Match Add Plot button size */
+.modern-train-btn {
+  position: relative;
+  background: var(--secondary-color);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(243, 94, 25, 0.2);
+  overflow: hidden;
+  height: 36px; /* Match add-tab-button height */
+}
+
+.modern-train-btn:hover:not(:disabled) {
+  background: #d9501a;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(243, 94, 25, 0.3);
+  cursor: pointer;
+}
+
+.modern-train-btn:active:not(:disabled) {
+  background: #c14717;
+  transform: translateY(0);
+}
+
+.modern-train-btn:disabled {
+  background: #9ca3af;
+  color: #ffffff;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: 0 2px 4px rgba(156, 163, 175, 0.2);
+  opacity: 0.7;
+}
+
+.modern-train-btn .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.modern-train-btn .btn-text {
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+/* Make sure both buttons have consistent sizing */
+.add-tab-button,
+.modern-train-btn {
+  height: 36px;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 8px;
+}
+
+/* Action buttons container alignment */
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Metrics cards */
+.metrics-container {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.metric-card {
+  background-color: white;
+  border-radius: var(--border-radius);
+  padding: 24px;
+  box-shadow: var(--card-shadow);
+  border: 1px solid var(--border-color);
+}
+
+.metric-card.compact {
+  background: white;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+}
+
+.metric-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: #666;
+}
+
+.metric-card.compact .metric-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.metric-card.compact .metric-header .material-symbols-outlined {
+  font-size: 16px;
+}
+
+.metric-title {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.metric-card.compact .metric-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #000000;
+  line-height: 1.2;
+}
+
+.metric-value {
+  font-size: 60px;
+  font-weight: 700;
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 16px;
+  margin-top: auto;
+}
+
+.metric-card.compact .metric-value {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  margin-top: auto;
+  margin-bottom: 0;
+}
+
+.metric-card.compact .metric-value span:first-child {
+  font-size: 28px;
+  font-weight: 700;
+  color: #000000;
+}
+
+.metric-unit {
+  font-size: 28px;
+  margin-left: 8px;
+  color: #777;
+  font-weight: 400;
+}
+
+.metric-card.compact .metric-unit {
+  font-size: 16px;
+  color: #666666;
+}
+
+/* Pump specific styles */
+.pump-details {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.irrigation-amount {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  color: #666;
+  font-weight: 500;
+}
+
+.pump-card .pump-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.pump-card .irrigation-amount {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: #6b7280;
+}
+
+.pump-card .irrigation-amount span:last-child {
+  font-weight: 600;
+  color: #1f2937;
+  font-size: 11px;
+}
+
+.pump-status {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pump-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.status-off {
+  background: #ef4444;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  min-width: 32px;
+}
+
+.status-on {
+  background: #10b981;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  min-width: 32px;
+}
+
+.compact-btn {
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex: 1;
+  justify-content: center;
+}
+
+.compact-btn:hover {
+  background: #2563eb;
+}
+
+.compact-btn .material-symbols-outlined {
+  font-size: 12px;
+}
+
+.status-off {
+  background-color: #ffebee;
+  color: #d32f2f;
+  font-weight: 700;
+  padding: 12px 20px;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 18px;
+  border: 1px solid #ffcdd2;
+}
+
+.status-on {
+  background-color: #e8f5e8;
+  color: #2e7d32;
+  font-weight: 700;
+  padding: 12px 20px;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 18px;
+  border: 1px solid #c8e6c9;
+}
+
+.status-inactive {
+  background-color: #f5f5f5;
+  color: #757575;
+  font-weight: 700;
+  padding: 12px 20px;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 18px;
+  border: 1px solid #e0e0e0;
+}
+
+.schedule-action {
+  margin-top: 12px;
+}
+
+.schedule-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-family: "Inter", sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.schedule-button:hover {
+  background-color: #e9ecef;
+  border-color: #ced4da;
+  color: #495057;
+}
+
+.schedule-button:active {
+  transform: scale(0.98);
+  background: #dee2e6;
+}
+
+.schedule-button::after {
+  content: ">";
+  font-size: 12px;
+  font-weight: bold;
+  color: #6c757d;
+  margin-left: auto;
+}
+
+/* Remove the material icon from the button in HTML */
+.schedule-btn .material-symbols-outlined {
+  display: none;
+}
+
+/* When pump is inactive/disabled */
+.schedule-btn:disabled {
+  background: #f8f9fa;
+  color: #adb5bd;
+  border-color: #dee2e6;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.schedule-btn:disabled::after {
+  color: #adb5bd;
+}
+
+/* Charts */
+.charts-container {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
+
+.chart-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
+  margin-bottom: 24px;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.chart-title-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0; /* Allows text to truncate if needed */
+}
+
+.chart-title-section h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+  white-space: nowrap;
+}
+
+.chart-title-section .tooltip {
+  color: #6b7280;
+  cursor: help;
+  font-size: 18px;
+}
+
+.chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chart-control-btn {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 6px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #64748b;
+}
+
+.chart-control-btn:hover {
+  background: #e2e8f0;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+.chart-control-btn:active {
+  background: #cbd5e1;
+  transform: scale(0.95);
+}
+
+.chart-control-btn .material-symbols-outlined {
+  font-size: 16px;
+}
+
+.chart-area {
+  min-height: 300px;
+  width: 100%;
+}
+
+/* Responsive design for chart header */
+@media (max-width: 768px) {
+  .chart-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .chart-title-section {
+    width: 100%;
+  }
+
+  .chart-title-section h3 {
+    font-size: 16px;
+  }
+
+  .chart-controls {
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .chart-control-btn {
+    width: 36px;
+    height: 36px;
+    padding: 8px;
+  }
+
+  .chart-control-btn .material-symbols-outlined {
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 480px) {
+  .chart-card {
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .chart-title-section h3 {
+    font-size: 14px;
+  }
+
+  .chart-title-section .tooltip {
+    font-size: 16px;
+  }
+
+  .chart-controls {
+    gap: 6px;
+  }
+
+  .chart-control-btn {
+    width: 34px;
+    height: 34px;
+  }
+}
+
+/* Tooltip styles for chart header */
+.chart-title-section .tooltip {
+  position: relative;
+}
+
+.chart-title-section .tooltiptext {
+  visibility: hidden;
+  width: 200px;
+  background-color: #374151;
+  color: white;
+  text-align: center;
+  border-radius: 6px;
+  padding: 8px;
+  position: absolute;
+  z-index: 1000;
+  bottom: 125%;
+  left: 50%;
+  margin-left: -100px;
+  opacity: 0;
+  transition: opacity 0.3s;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chart-title-section .tooltip:hover .tooltiptext {
+  visibility: visible;
+  opacity: 1;
+}
+
+.chart-title-section .tooltiptext::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -5px;
+  border-width: 5px;
+  border-style: solid;
+  border-color: #374151 transparent transparent transparent;
+}
+
+/* Responsive adjustments */
+@media (min-width: 768px) {
+  .charts-container {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 767px) {
+  .tab-container {
+    flex-direction: column;
+    gap: 16px;
+    align-items: stretch;
+  }
+
+  .tabs {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .header-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .location-title {
+    font-size: 24px;
+  }
+
+  .metrics-container {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .metric-card,
+  .metric-card.compact {
+    padding: 12px;
+    min-height: 100px;
+  }
+
+  .metric-value {
+    font-size: 20px;
+  }
+
+  .chart-card {
+    padding: 16px;
+  }
+
+  .chart-area {
+    height: 250px;
+  }
+
+  .chart-controls {
+    display: none;
+  }
+}
+
+@media (max-width: 1200px) {
+  .metrics-container {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+
+  .metric-card.compact {
+    min-height: 85px;
+    padding: 10px;
+  }
+
+  .metric-card.compact .metric-title {
+    font-size: 14px;
+  }
+
+  .metric-card.compact .metric-value span:first-child {
+    font-size: 24px;
+  }
+
+  .metric-card.compact .metric-unit {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 768px) {
+  .metrics-container {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .metric-card.compact {
+    padding: 12px;
+    min-height: 100px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .metric-card.compact .metric-header {
+    margin-bottom: 8px;
+    margin-right: 0;
+  }
+
+  .metric-card.compact .metric-value {
+    margin-top: auto;
+  }
+
+  .metric-card.compact .metric-title {
+    font-size: 14px;
+    color: #000000;
+    font-weight: 600;
+  }
+
+  .metric-card.compact .metric-value span:first-child {
+    font-size: 26px;
+    color: #000000;
+  }
+
+  .metric-card.compact .metric-unit {
+    font-size: 15px;
+    color: #666666;
+  }
+
+  .pump-card .pump-content {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .pump-card .irrigation-amount {
+    font-size: 11px;
+  }
+
+  .pump-card .irrigation-amount span:last-child {
+    font-size: 12px;
+  }
+
+  .compact-btn {
+    font-size: 10px;
+    padding: 3px 6px;
+  }
+
+  .status-off,
+  .status-on {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .metrics-container {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+
+  .metric-card.compact {
+    min-height: 80px;
+    padding: 8px;
+  }
+
+  .metric-card.compact .metric-title {
+    font-size: 12px;
+  }
+
+  .metric-card.compact .metric-value span:first-child {
+    font-size: 22px;
+  }
+
+  .metric-card.compact .metric-unit {
+    font-size: 13px;
+  }
+
+  .pump-card .irrigation-amount {
+    font-size: 9px;
+  }
+
+  .compact-btn {
+    font-size: 9px;
+    padding: 3px 6px;
+  }
+
+  .status-off,
+  .status-on {
+    font-size: 9px;
+    padding: 2px 6px;
+  }
+}
+
+/* Button states */
+.button-cancel {
+  background-color: #6c757d !important;
+  color: white !important;
+}
+
+.highlight {
+  background-color: var(--secondary-color) !important;
+  color: white !important;
+}
+
+/* Tooltip styles */
+.tooltip {
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
+  cursor: pointer;
+  margin-left: 5px; /* Space between label text and icon */
+}
+
+.tooltiptext {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
+    "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
+    sans-serif;
+  visibility: hidden;
+  width: max-content;
+  max-width: 200px;
+  background-color: #555;
+  color: #fff;
+  text-align: center;
+  padding: 8px;
+  border-radius: 6px;
+  position: absolute;
+  z-index: 10;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 1s ease;
+  white-space: normal; /* Allow wrapping */
+  max-width: 200px; /* Limit width to prevent excessive size */
+  box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+.tooltip:hover .tooltiptext {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Adjust position when tooltip is close to the left or right edge */
+.tooltiptext.edge-left {
+  left: 0;
+  transform: translateX(0);
+}
+
+.tooltiptext.edge-right {
+  left: auto;
+  right: 0;
+  transform: translateX(0);
+}
+
+.tooltiptext.edge-top {
+  bottom: auto;
+  top: 100%;
+}
+
+/* Water Pump Card Specific Styles */
+.pump-card {
+  background: white;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pump-card .metric-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.pump-card .tooltip {
+  margin-left: auto;
+  color: #6b7280;
+  cursor: help;
+  font-size: 16px;
+}
+
+.pump-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.pump-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+  white-space: nowrap;
+}
+
+/* Amount Input Group */
+.amount-input-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.amount-btn {
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #6b7280;
+}
+
+.amount-btn:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.amount-btn:active {
+  transform: scale(0.95);
+}
+
+.amount-btn .material-symbols-outlined {
+  font-size: 14px;
+}
+
+.amount-input {
+  border: none;
+  background: transparent;
+  width: 40px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
+  outline: none;
+}
+
+.amount-input::-webkit-outer-spin-button,
+.amount-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.amount-input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.amount-unit {
+  font-size: 10px;
+  color: #6b7280;
+  font-weight: 500;
+  padding-right: 4px;
+}
+
+/* Status Section */
+.pump-status-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-off {
+  background: #ef4444;
+  color: white;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-on {
+  background: #10b981;
+  color: white;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+/* Schedule Button */
+.schedule-btn {
+  background: #f8f9fa;
+  color: #6c757d;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  min-width: 120px;
+}
+
+.schedule-btn:hover {
+  background: #e9ecef;
+  border-color: #ced4da;
+  color: #495057;
+}
+
+.schedule-btn:active {
+  transform: scale(0.98);
+  background: #dee2e6;
+}
+
+.schedule-btn::after {
+  content: ">";
+  font-size: 12px;
+  font-weight: bold;
+  color: #6c757d;
+  margin-left: auto;
+}
+
+/* Remove the material icon from the button in HTML */
+.schedule-btn .material-symbols-outlined {
+  display: none;
+}
+
+/* When pump is inactive/disabled */
+.schedule-btn:disabled {
+  background: #f8f9fa;
+  color: #adb5bd;
+  border-color: #dee2e6;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.schedule-btn:disabled::after {
+  color: #adb5bd;
+}
