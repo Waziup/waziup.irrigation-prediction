@@ -1,0 +1,14 @@
+requests
+pycaret
+matplotlib
+pytz
+geopy
+timezonefinder
+python-dotenv
+xgboost
+catboost
+tensorflow
+scikeras
+scikit-learn
+joblib==1.3
+keras-tuner
