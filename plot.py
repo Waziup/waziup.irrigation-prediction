@@ -403,7 +403,7 @@ class Plot:
     def isTrainingRunning(self):
         return self.training_thread is not None and self.training_thread.is_alive()
     
-    # surveillance, check threads are running TODO: different plots
+    # surveillance, check threads are running
     def check_threads(self):
         print("Checking threads of plot: " + self.user_given_name)
         if not self.training_thread or not self.training_thread.is_alive():

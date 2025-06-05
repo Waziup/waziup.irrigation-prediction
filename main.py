@@ -1012,7 +1012,6 @@ if __name__ == "__main__":
     if os.getenv("SKIP_DATA_PREPROCESSING") == "True":
         create_model.skip_data_preprocessing = True
     if os.getenv("SKIP_TRAINING") == "True":
-        #
         create_model.skip_training = True
     if os.getenv("PERFORM_TRAINING") == "False":
         create_model.perform_training = False
