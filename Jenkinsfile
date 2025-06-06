@@ -94,16 +94,20 @@ pipeline {
                     def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}"
                     try {
                         echo "Pushing Docker image to local gateway..."
-                        sh "docker save ${dockerImage} | gzip | pv | ssh pi@${LOCAL_WAZIGATE_IP} docker load"
+                        withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
+                            sh "docker save ${dockerImage} | gzip | pv | sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} docker load"
+                        }
 
                         echo "Deploying updated container on gateway..."
-                        sh """
-                            ssh pi@${LOCAL_WAZIGATE_IP} '
-                                cd /var/lib/wazigate/apps/${APP_NAME} && \
-                                docker-compose down && \
-                                docker-compose up -d
-                            '
-                        """
+                        withCredentials([string(credentialsId: 'SSH_PASSWORD', variable: 'SSH_PASSWORD')]) {
+                            sh """
+                                sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
+                                    cd /var/lib/wazigate/apps/${APP_NAME} && \
+                                    docker-compose down && \
+                                    docker-compose up -d
+                                '
+                            """
+                        }
 
                         echo "Successfully deployed ${dockerImage} to local gateway."
                     } catch (Exception e) {
