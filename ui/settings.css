@@ -93,11 +93,17 @@ body {
   margin-bottom: 24px;
   overflow: hidden;
   border: 1px solid var(--border-color);
-  margin-left: 0; /* Align with form content */
+  margin-left: 0;
   margin-right: auto;
-  max-width: 800px; /* Match form-section width */
+  max-width: 800px;
+  /* Remove any internal borders */
+  border-collapse: collapse;
+  gap: 0; /* Remove any built-in spacing between buttons */
+  /* Additional fallback to remove spacing in older browsers */
+  border-spacing: 0;
 }
 
+/* Fix for tab buttons with full background highlight */
 .tab-button {
   flex: 1;
   display: flex;
@@ -106,28 +112,61 @@ body {
   gap: 8px;
   padding: 16px 20px;
   background: none;
-  border: none;
+  border: none !important;
   cursor: pointer;
   font-family: "Inter", sans-serif;
   font-size: 14px;
   font-weight: 500;
   transition: all 0.2s;
-  border-bottom: 3px solid transparent;
+  position: relative;
   color: #666;
+  /* Remove any margin that might be causing the gap */
+  margin: 0;
 }
 
-.tab-button:hover {
-  background-color: rgba(0, 0, 0, 0.02);
+/* Remove the pseudo-element bottom border */
+.tab-button.active::after {
+  display: none;
 }
 
+/* Change active tab to have full background and white text */
 .tab-button.active {
-  border-bottom: 3px solid var(--primary-color);
-  color: var(--primary-color);
-  background-color: rgba(57, 78, 105, 0.05);
+  background-color: var(--primary-color);
+  color: white;
+  font-weight: 500;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
-.tab-button .material-symbols-outlined {
-  font-size: 20px;
+/* Make material icons white when tab is active */
+.tab-button.active .material-symbols-outlined {
+  color: white;
+}
+
+/* Improve hover state for inactive tabs */
+.tab-button:not(.active):hover {
+  background-color: rgba(57, 78, 105, 0.08);
+  color: var(--primary-color);
+}
+
+/* Fix the tab separator issue */
+.tab-button + .tab-button {
+  /* Remove any border between tabs */
+  border-left: none !important;
+  margin-left: 0; /* Ensure no margin between tabs */
+  padding-left: 0; /* Avoid any leftover padding that might show a line */
+}
+
+/* Ensure clean borders for first and last tabs */
+.tab-button:first-child {
+  border-top-left-radius: var(--border-radius);
+  border-bottom-left-radius: var(--border-radius);
+}
+
+.tab-button:last-child {
+  border-top-right-radius: var(--border-radius);
+  border-bottom-right-radius: var(--border-radius);
 }
 
 /* Settings content */
@@ -306,17 +345,18 @@ textarea.form-control {
   .settings-tabs {
     margin-left: 0;
     max-width: none;
+    flex-direction: column; /* Stack tabs vertically on mobile */
   }
 
   .tab-button {
     justify-content: flex-start;
-    border-bottom: none;
-    border-left: 3px solid transparent;
+    border-radius: 0;
   }
 
+  /* Active tab still has full background on mobile */
   .tab-button.active {
-    border-bottom: none;
-    border-left: 3px solid var(--primary-color);
+    background-color: var(--primary-color);
+    color: white;
   }
 
   .tab-content {
@@ -388,4 +428,22 @@ textarea.form-control {
 .btn-secondary:focus {
   outline: 2px solid var(--primary-color);
   outline-offset: 2px;
+}
+
+/* Ensure no extra borders or outlines appear on any state */
+.tab-button,
+.tab-button:hover,
+.tab-button:focus,
+.tab-button:active,
+.tab-button:visited {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Default or user agent outlines can also cause lines in some browsers */
+/* This specifically targets Firefox’s default inner focus */
+.tab-button::-moz-focus-inner {
+  border: 0 !important;
+  padding: 0 !important;
 }

@@ -220,6 +220,11 @@
       }
 
       function removeTab(tabId) {
+        // Prompt for confirmation
+        if (!confirm("Are you sure you want to delete this plot?")) {
+          return;
+        }
+
         const tabToRemove = document.getElementById(`tab-${tabId}`);
         if (tabToRemove) {
           tabToRemove.remove();
@@ -233,9 +238,7 @@
           }
           fetch(`../api/removePlot`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/x-www-form-urlencoded",
-            },
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body: `currentPlot=${tabId}`,
           })
             .then((response) => response.text())
@@ -461,12 +464,12 @@
         fetch("../api/getDatasetChartData")
           .then((response) => response.json())
           .then((chartData) => {
-            const chartContainer = document.getElementById('chart_train_data');
+            const chartContainer = document.getElementById("chart_train_data");
             if (chartData.model == false) {
-              chartContainer.innerHTML = "";            // Clears the chart div
-              chartContainer.style.display = "none";    // Hide the div
+              chartContainer.innerHTML = ""; // Clears the chart div
+              chartContainer.style.display = "none"; // Hide the div
             } else {
-              chartContainer.style.display = "block";   // Show it when there’s data
+              chartContainer.style.display = "block"; // Show it when there’s data
               // Initialize variables outside the loop
               var elementsToDisplay = [];
               var formattedTimestamps;
@@ -483,7 +486,9 @@
 
                   if (isNumberArray) {
                     if (totalValues > MaxValuesToBeDisplayed) {
-                      chartData[key] = chartData[key].filter((value, index) => index % step === 0);
+                      chartData[key] = chartData[key].filter(
+                        (value, index) => index % step === 0
+                      );
                     }
                     // If all elements are numbers, push the series data
                     elementsToDisplay.push({
@@ -494,7 +499,9 @@
                     });
                   } else if (typeof chartData[key][0] === "string") {
                     if (totalValues > MaxValuesToBeDisplayed) {
-                      chartData[key] = chartData[key].filter((value, index) => index % step === 0);
+                      chartData[key] = chartData[key].filter(
+                        (value, index) => index % step === 0
+                      );
                     }
                     formattedTimestamps = chartData.timestamps.map(
                       (timestamp) => formatTimestamp(timestamp)
@@ -547,28 +554,33 @@
         fetch("../api/getPredictionChartData")
           .then((response) => response.json())
           .then((chartData) => {
-            const chartContainer = document.getElementById('chart_pred');
-            chartContainer.innerHTML = "";            // Clears the chart div
+            const chartContainer = document.getElementById("chart_pred");
+            chartContainer.innerHTML = ""; // Clears the chart div
             if (chartData.model === false) {
-              chartContainer.style.display = "none";    // Hide the div
+              chartContainer.style.display = "none"; // Hide the div
               // highlight train
               const trainButton = document.getElementById("train_btn");
               trainButton.classList.add("highlight");
-              alert('Please start training by pressing the "Start Training" button.'); //TODO: this needs to be capsulated and also checked for training in progress REFINE!!!
+              alert(
+                'Please start training by pressing the "Start Training" button.'
+              ); //TODO: this needs to be capsulated and also checked for training in progress REFINE!!!
             } else {
-              chartContainer.style.display = "block";   // Show it when there’s data
+              chartContainer.style.display = "block"; // Show it when there’s data
               // Format the data
-              const moistureSeriesRounded = chartData.moistureSeries.map((value) =>
-                parseFloat(value.toFixed(2))
+              const moistureSeriesRounded = chartData.moistureSeries.map(
+                (value) => parseFloat(value.toFixed(2))
               );
               let moistureSeriesVolRounded = null;
-              if (chartData.kind === "tension" && Array.isArray(chartData.moistureSeriesVol)) {
-                moistureSeriesVolRounded = chartData.moistureSeriesVol.map((value) =>
-                  parseFloat(value.toFixed(4))
+              if (
+                chartData.kind === "tension" &&
+                Array.isArray(chartData.moistureSeriesVol)
+              ) {
+                moistureSeriesVolRounded = chartData.moistureSeriesVol.map(
+                  (value) => parseFloat(value.toFixed(4))
                 );
               }
-              const formattedTimestamps = chartData.timestamps.map((timestamp) =>
-                formatTimestamp(timestamp)
+              const formattedTimestamps = chartData.timestamps.map(
+                (timestamp) => formatTimestamp(timestamp)
               );
 
               // Initialize series visibility state TODO: check for capcitive
@@ -584,22 +596,31 @@
                   events: {
                     render: function (chartContext, config) {
                       // Make sure the series exists before calling hideSeries
-                      if (chartData.kind === "tension" && moistureSeriesVolRounded) {
+                      if (
+                        chartData.kind === "tension" &&
+                        moistureSeriesVolRounded
+                      ) {
                         chartPred.hideSeries("Volumetric Water Content");
                       }
                     },
                     legendClick: function (chartContext, seriesIndex) {
-                      const seriesName = chartContext.w.globals.seriesNames[seriesIndex];
+                      const seriesName =
+                        chartContext.w.globals.seriesNames[seriesIndex];
                       // Toggle visibility state for the clicked series
-                      seriesVisibility[seriesName] = !seriesVisibility[seriesName];
+                      seriesVisibility[seriesName] =
+                        !seriesVisibility[seriesName];
 
                       // Determine the new annotations
-                      const annotations = seriesVisibility["Moisture in cbar (Soil Tension)"]
+                      const annotations = seriesVisibility[
+                        "Moisture in cbar (Soil Tension)"
+                      ]
                         ? getSoilTensionAnnotations(chartData)
                         : [];
 
-                      // Additional annotations from backend, like 
-                      const additionalAnnotations = seriesVisibility["Moisture in cbar (Soil Tension)"]
+                      // Additional annotations from backend, like
+                      const additionalAnnotations = seriesVisibility[
+                        "Moisture in cbar (Soil Tension)"
+                      ]
                         ? chartData.annotations.yaxis
                         : [];
 
@@ -619,11 +640,11 @@
                   },
                   ...(moistureSeriesVolRounded
                     ? [
-                      {
-                        name: "Volumetric Water Content",
-                        data: moistureSeriesVolRounded,
-                      },
-                    ]
+                        {
+                          name: "Volumetric Water Content",
+                          data: moistureSeriesVolRounded,
+                        },
+                      ]
                     : []),
                 ],
                 xaxis: {
@@ -640,7 +661,9 @@
                     },
                     labels: {
                       formatter: function (val) {
-                        return typeof val === "number" && !isNaN(val) ? val.toFixed(1) : "";
+                        return typeof val === "number" && !isNaN(val)
+                          ? val.toFixed(1)
+                          : "";
                       },
                     },
                     min: 0,
@@ -648,34 +671,40 @@
                   },
                   ...(moistureSeriesVolRounded
                     ? [
-                      {
-                        opposite: true,
-                        title: {
-                          text: "Volumetric Water Content",
-                        },
-                        labels: {
-                          formatter: function (val) {
-                            return typeof val === "number" && !isNaN(val)
-                              ? val.toFixed(2)
-                              : "";
+                        {
+                          opposite: true,
+                          title: {
+                            text: "Volumetric Water Content",
                           },
+                          labels: {
+                            formatter: function (val) {
+                              return typeof val === "number" && !isNaN(val)
+                                ? val.toFixed(2)
+                                : "";
+                            },
+                          },
+                          min: Math.min(...moistureSeriesVolRounded).toFixed(0),
+                          max: Math.max(...moistureSeriesVolRounded).toFixed(0),
                         },
-                        min: Math.min(...moistureSeriesVolRounded).toFixed(0),
-                        max: Math.max(...moistureSeriesVolRounded).toFixed(0),
-                      },
-                    ]
+                      ]
                     : []),
                 ],
                 annotations: {
                   yaxis: [
                     ...(() => {
-                      if (chartData.kind === 'tension') {
+                      if (chartData.kind === "tension") {
                         // Combine both soil tension annotations and the other y-axis annotations
-                        const soilTensionAnnotations = getSoilTensionAnnotations(chartData);
-                        const additionalAnnotations = Array.isArray(chartData.annotations?.yaxis)
+                        const soilTensionAnnotations =
+                          getSoilTensionAnnotations(chartData);
+                        const additionalAnnotations = Array.isArray(
+                          chartData.annotations?.yaxis
+                        )
                           ? chartData.annotations.yaxis
                           : [];
-                        return [...soilTensionAnnotations, ...additionalAnnotations];
+                        return [
+                          ...soilTensionAnnotations,
+                          ...additionalAnnotations,
+                        ];
                       }
                       // Return only the additional annotations if not tension
                       return Array.isArray(chartData.annotations?.yaxis)
@@ -687,7 +716,7 @@
                   legend: {
                     show: true, // Ensure the legend is always shown
                   },
-                }
+                },
               };
 
               chartPred = new ApexCharts(
@@ -698,124 +727,127 @@
             }
           })
           .catch((error) => console.error("Error fetching data:", error));
-        }
+      }
 
-        // Function to get midnight annotations
-        function getMidnightAnnotations(timestamps) {
-          days = 0
-          return timestamps
-            .filter((timestamp) => new Date(timestamp).getHours() === 0 && new Date(timestamp).getMinutes() === 0)
-            .map((midnight) => ({
-              x: formatTimestamp(midnight),
-              borderColor: '#FF5733', // Choose any color you like for midnight lines
-              strokeDashArray: 4, // Dashed lines
-            }));
-        }
+      // Function to get midnight annotations
+      function getMidnightAnnotations(timestamps) {
+        days = 0;
+        return timestamps
+          .filter(
+            (timestamp) =>
+              new Date(timestamp).getHours() === 0 &&
+              new Date(timestamp).getMinutes() === 0
+          )
+          .map((midnight) => ({
+            x: formatTimestamp(midnight),
+            borderColor: "#FF5733", // Choose any color you like for midnight lines
+            strokeDashArray: 4, // Dashed lines
+          }));
+      }
 
-        // Get active series dynamically
-        function getActiveSeries(chartContext) {
-          const activeSeries = [];
-          chartContext.w.globals.seriesNames.forEach((name, index) => {
-            // A series is active if its value is not null
-            if (chartContext.w.globals.series[index] !== null) {
-              activeSeries.push(name);
-            }
-          });
-          return activeSeries;
-        }
-
-        // Initial annotations function
-        function getInitialAnnotations(chartData) {
-          if (chartData.kind === "tension") {
-            return getSoilTensionAnnotations(chartData);
+      // Get active series dynamically
+      function getActiveSeries(chartContext) {
+        const activeSeries = [];
+        chartContext.w.globals.seriesNames.forEach((name, index) => {
+          // A series is active if its value is not null
+          if (chartContext.w.globals.series[index] !== null) {
+            activeSeries.push(name);
           }
-          return [];
-        }
+        });
+        return activeSeries;
+      }
 
-        // Function to get annotations for soil tension with colored areas
-        function getSoilTensionAnnotations(chartData) {
-          return [
-            // Area between Saturation and Field Capacity Lower
-            {
-              y: chartData.fieldCapacityLower,
-              borderColor: "transparent",
-              label: {
-                text: "Saturation",
-                style: {
-                  fontSize: "12px",
-                },
-                position: 'right', // Align to the right
-                offsetY: 50, // Vertical offset for middle alignment
-                offsetX: 0, // Horizontal offset for right alignment
-              },
-              offsetX: 0,
-              offsetY: 0,
-              shape: 'rect',
-              x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-              fillColor: "rgba(173, 216, 255, 0.5)", // Color for this area (light blue)
-              y2: chartData.saturation, // Ending y value to create the filled area
-            },
-            // Area between Field Capacity Lower and Field Capacity Upper
-            {
-              y: chartData.fieldCapacityUpper,
-              borderColor: "transparent",
-              label: {
-                text: "Field Capacity Lower",
-                style: {
-                  fontSize: "12px",
-                },
-                position: 'right', // Align to the right
-                offsetY: 50, // Vertical offset for middle alignment
-                offsetX: 0, // Horizontal offset for right alignment
-              },
-              offsetX: 0,
-              offsetY: 0,
-              shape: 'rect',
-              x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-              fillColor: "rgba(144, 238, 144, 0.5)", // Color for this area (light green)
-              y2: chartData.fieldCapacityLower, // Ending y value to create the filled area
-            },
-            {
-              y: chartData.permanentWiltingPoint,
-              borderColor: "transparent",
-              label: {
-                text: "Field Capacity Higher",
-                style: {
-                  fontSize: "12px",
-                },
-                position: 'right', // Align to the right
-                offsetY: 50, // Vertical offset for middle alignment
-                offsetX: 0, // Horizontal offset for right alignment
-              },
-              offsetX: 0,
-              offsetY: 0,
-              shape: 'rect',
-              x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-              fillColor: "rgba(255, 200, 124, 0.5)", // Color for this area (light orange)
-              y2: chartData.fieldCapacityUpper, // Ending y value to create the filled area
-            },
-            {
-              y: Math.max(...chartData.moistureSeries).toFixed(0),
-              borderColor: "transparent",
-              label: {
-                text: "Permanent Wilting Point",
-                style: {
-                  fontSize: "12px",
-                },
-                position: 'right', // Align to the right
-                offsetY: 50, // Vertical offset for middle alignment
-                offsetX: 0, // Horizontal offset for right alignment
-              },
-              offsetX: 0,
-              offsetY: 0,
-              shape: 'rect',
-              x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-              fillColor: "rgba(255, 182, 193, 0.5)", // Color for this area (light red)
-              y2: chartData.permanentWiltingPoint // Ending y value to create the filled area
-            },
-          ];
+      // Initial annotations function
+      function getInitialAnnotations(chartData) {
+        if (chartData.kind === "tension") {
+          return getSoilTensionAnnotations(chartData);
         }
+        return [];
+      }
 
+      // Function to get annotations for soil tension with colored areas
+      function getSoilTensionAnnotations(chartData) {
+        return [
+          // Area between Saturation and Field Capacity Lower
+          {
+            y: chartData.fieldCapacityLower,
+            borderColor: "transparent",
+            label: {
+              text: "Saturation",
+              style: {
+                fontSize: "12px",
+              },
+              position: "right", // Align to the right
+              offsetY: 50, // Vertical offset for middle alignment
+              offsetX: 0, // Horizontal offset for right alignment
+            },
+            offsetX: 0,
+            offsetY: 0,
+            shape: "rect",
+            x: chartData.timestamps.length - 1, // Rightmost position to cover the area
+            fillColor: "rgba(173, 216, 255, 0.5)", // Color for this area (light blue)
+            y2: chartData.saturation, // Ending y value to create the filled area
+          },
+          // Area between Field Capacity Lower and Field Capacity Upper
+          {
+            y: chartData.fieldCapacityUpper,
+            borderColor: "transparent",
+            label: {
+              text: "Field Capacity Lower",
+              style: {
+                fontSize: "12px",
+              },
+              position: "right", // Align to the right
+              offsetY: 50, // Vertical offset for middle alignment
+              offsetX: 0, // Horizontal offset for right alignment
+            },
+            offsetX: 0,
+            offsetY: 0,
+            shape: "rect",
+            x: chartData.timestamps.length - 1, // Rightmost position to cover the area
+            fillColor: "rgba(144, 238, 144, 0.5)", // Color for this area (light green)
+            y2: chartData.fieldCapacityLower, // Ending y value to create the filled area
+          },
+          {
+            y: chartData.permanentWiltingPoint,
+            borderColor: "transparent",
+            label: {
+              text: "Field Capacity Higher",
+              style: {
+                fontSize: "12px",
+              },
+              position: "right", // Align to the right
+              offsetY: 50, // Vertical offset for middle alignment
+              offsetX: 0, // Horizontal offset for right alignment
+            },
+            offsetX: 0,
+            offsetY: 0,
+            shape: "rect",
+            x: chartData.timestamps.length - 1, // Rightmost position to cover the area
+            fillColor: "rgba(255, 200, 124, 0.5)", // Color for this area (light orange)
+            y2: chartData.fieldCapacityUpper, // Ending y value to create the filled area
+          },
+          {
+            y: Math.max(...chartData.moistureSeries).toFixed(0),
+            borderColor: "transparent",
+            label: {
+              text: "Permanent Wilting Point",
+              style: {
+                fontSize: "12px",
+              },
+              position: "right", // Align to the right
+              offsetY: 50, // Vertical offset for middle alignment
+              offsetX: 0, // Horizontal offset for right alignment
+            },
+            offsetX: 0,
+            offsetY: 0,
+            shape: "rect",
+            x: chartData.timestamps.length - 1, // Rightmost position to cover the area
+            fillColor: "rgba(255, 182, 193, 0.5)", // Color for this area (light red)
+            y2: chartData.permanentWiltingPoint, // Ending y value to create the filled area
+          },
+        ];
+      }
 
       function fetchThreshold() {
         fetch("../api/getThreshold")
