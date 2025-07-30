@@ -292,7 +292,7 @@ def get_weather_forecast_api(start_date, end_date, plot, data):
     now = datetime.datetime.now()
     localized_now = local_tz.localize(now)  # Now has timezone info
 
-    if end_date < localized_now:
+    if end_date < localized_now - timedelta(days=2): # open meteo will have the historical data from the day before yesterday
         print("Forecast date is in the past. Using historical weather data instead. Start: ", start_date, " End: ", end_date)
         # Use historical weather data
         return get_historical_weather_api(data, plot)
@@ -582,7 +582,16 @@ def include_irrigation_amount(df, plot):
             # Load data and create the dataframe
             data_irrigation = plot.load_data_api(plot.device_and_sensor_ids_flow[0], "actuators", plot.start_date)
             df_irrigation = pd.DataFrame(data_irrigation)
+            
+            # Check if the dataframe is empty
+            if df_irrigation.empty:
+                print("No irrigation data found for the specified device and sensor IDs.")
+                return df
+            
+            # Rename columns for consistency
             df_irrigation.rename(columns={'time': 'Timestamp'}, inplace=True)
+
+            # Convert the 'Timestamp' column to datetime, ensuring it is in UTC
             df_irrigation['Timestamp'] = pd.to_datetime(df_irrigation['Timestamp'], utc=True)
             df_irrigation['Timestamp'] = df_irrigation['Timestamp'].dt.tz_convert(TimeUtils.Timezone)  # Replace with the correct timezone
 
@@ -1109,7 +1118,7 @@ def create_and_compare_model_reg(train):
         sort = 'R2',
         verbose = 1,
         #exclude=['lar']
-        include=['xgboost', 'llar', 'catboost'] #DEBUG
+        include=['xgboost', 'catboost'] #DEBUG
     )
 
     return re_exp, best_re

@@ -1034,6 +1034,7 @@ if __name__ == "__main__":
     server_thread = threading.Thread(target=usock.start_with_recovery, name="HTTP_Server")
     server_thread.daemon = False  # Keep alive until shutdown
     server_thread.start()
+    print("Server started and running in thread:", server_thread.name)
 
     # Keep main thread alive
     try:

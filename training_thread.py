@@ -47,7 +47,8 @@ class TrainingThread(threading.Thread):
                     # Wait until the next noon
                     time_to_sleep = self.time_until_noon(self.calculate_retrain_interval(self.currentPlot.train_period_days))
                     print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until next training...")
-                    time.sleep(time_to_sleep)
+                    if self.stop_event.wait(timeout=time_to_sleep):
+                        break
 
                 if self.stop_event.is_set():
                     break  # Exit if stopping
@@ -103,7 +104,8 @@ class TrainingThread(threading.Thread):
                 print(f"[{self.currentPlot.user_given_name }] Training thread error: {e}. Retrying after {Restart_time/60} minute.")
                 # Release resources
                 create_model.Currently_active = False
-                time.sleep(Restart_time)
+                if self.stop_event.wait(timeout=Restart_time):
+                    break
 
     def stop(self):
         self.stop_event.set()  # Signal the process to stop
@@ -113,7 +115,8 @@ def start(currentPlot):
     # Stop previous training process
     if currentPlot.training_thread is not None:
         currentPlot.training_thread.stop()
-        currentPlot.training_thread.join()
+        if currentPlot.training_thread.is_alive():
+            currentPlot.training_thread.join()
 
     # Reset flags
     currentPlot.training_finished = False
@@ -122,3 +125,4 @@ def start(currentPlot):
     # Create and start a new training process
     currentPlot.training_thread = TrainingThread(currentPlot, True, name="TrainingThread_" + str(currentPlot.user_given_name))
     currentPlot.training_thread.start()
+    print("Training thread started for plot:", currentPlot.user_given_name)

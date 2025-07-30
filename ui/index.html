@@ -293,18 +293,32 @@
         return fetch(`../api/checkActiveIrrigation`)
           .then((response) => response.json())
           .then((data) => {
+            const statusOff = document.getElementById("pump-status-off");
+            const statusOn = document.getElementById("pump-status-on");
+            const button = document.getElementById("schedule_irrigation");
+            
             if (data.data.activeIrrigation == true) {
+              statusOn.style.display = "block";
+              statusOff.style.display = "none";
+
+              //statusOn.className = "status-active";
+              //statusOn.innerText = "Active - pump is present";
+
+              button.className = "button-cancel";
+              button.disabled = false;
               return true;
             } else {
-              const text = document.getElementById("pump-status");
-              const button = document.getElementById("schedule_irrigation");
-              text.className = "status-inactive";
-              text.innerText = "Inactive - No present";
+              statusOn.style.display = "none";
+              statusOff.style.display = "block";
+
+              //statusOff.className = "status-inactive";
+              //statusOff.innerText = "Inactive - No present";
+
               button.className = "button-cancel";
               button.disabled = true;
               return false;
             }
-            console.log(data);
+           console.log(data);
           });
       }
 
@@ -941,6 +955,10 @@
           });
       }
 
+      function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+      }
+
       async function isTrainingReady() {
         const train_button = document.getElementById("train_btn");
 
@@ -1061,19 +1079,11 @@
       <div class="metrics-container">
         <div class="metric-card compact">
           <div class="metric-header">
-            <span class="material-symbols-outlined">device_thermostat</span>
-            <span class="metric-title">Soil Temperature</span>
-          </div>
-          <div class="metric-value">
-            <span id="temp-value">--</span>
-            <span class="metric-unit">°C</span>
-          </div>
-        </div>
-
-        <div class="metric-card compact">
-          <div class="metric-header">
             <span class="material-symbols-outlined">water_drop</span>
             <span class="metric-title">Soil Humidity</span>
+            <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorHumidityTooltip">help
+              <span class="tooltiptext" id="sensorTooltip"></span>
+            </span>
           </div>
           <div class="metric-value">
             <span id="humidity-value">--</span>
@@ -1085,10 +1095,27 @@
           <div class="metric-header">
             <span class="material-symbols-outlined">compress</span>
             <span class="metric-title">Soil Tension</span>
+            <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorTensionTooltip">help
+              <span class="tooltiptext" id="sensorTooltip"></span>
+            </span>
           </div>
           <div class="metric-value">
             <span id="tension-value">--</span>
             <span class="metric-unit">cb</span>
+          </div>
+        </div>
+
+        <div class="metric-card compact">
+          <div class="metric-header">
+            <span class="material-symbols-outlined">device_thermostat</span>
+            <span class="metric-title">Soil Temperature</span>
+            <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorTempTooltip">help
+              <span class="tooltiptext" id="sensorTooltip"></span>
+            </span>
+          </div>
+          <div class="metric-value">
+            <span id="temp-value">--</span>
+            <span class="metric-unit">°C</span>
           </div>
         </div>
 
@@ -1140,7 +1167,9 @@
           <!-- Row 2: Status and Schedule Button -->
           <div class="pump-row">
             <div class="pump-status-section">
-              <div id="pump-status" class="status-off">OFF</div>
+              <div id="pump-status-off" class="status-off">OFF</div>
+              <div id="pump-status-on" class="status-on">ON</div>
+            </div>
             </div>
             <button
               id="schedule_irrigation"

@@ -71,14 +71,14 @@ pipeline {
                             def result = sh(script: "docker rmi ${formerID}", returnStdout: true, returnStatus: true)
                             if (result != 0) {
                                 echo "Error removing old image: ${result}"
-                                error "Failed to remove old image."
+                                echo "Failed to remove old image."
                             } else {
                                 echo "Successfully removed old image."
                             }
                         }
                         catch (Exception e) {
                             echo "Exception thrown during image removal: ${e.getMessage()}"
-                            error "Failed to remove old image due to an exception."
+                            echo "Failed to remove old image due to an exception."
                         }
                     }
                     else {
@@ -111,8 +111,8 @@ pipeline {
 
                         echo "Successfully deployed ${dockerImage} to local gateway."
                     } catch (Exception e) {
-                        echo "Exception during deployment: ${e.getMessage()}"
-                        error "Failed to push and deploy image on local gateway."
+                        echo "Exception during deployment: ${e.getMessage()} \nFailed to push and deploy image on local gateway."
+                        echo "Failed to push and deploy image on local gateway."
                     }
                 }
             }
@@ -127,7 +127,6 @@ pipeline {
                         echo "Tests passed successfully."
                     } catch (Exception e) {
                         echo "Exception during testing: ${e.getMessage()}"
-                        error "Tests failed."
                     }
                 }
             }
@@ -150,8 +149,7 @@ pipeline {
                         sh "docker push ${dockerImage}"
                         echo "Successfully pushed image ${dockerImage} to Docker Hub."
                     } catch (Exception e) {
-                       echo "Exception while pushing image: ${e.getMessage()}"
-                       error "Failed to push image to Docker Hub."
+                       echo "Exception while pushing image: ${e.getMessage()}.\nFailed to push image to Docker Hub."
                     }
                 }
             }

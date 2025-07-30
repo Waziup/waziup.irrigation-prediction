@@ -200,6 +200,18 @@
           .catch((error) =>
             console.error("Error loading tooltip text:", error)
           );
+
+        // Current date for starting date
+        const dateInput = document.getElementById('starting_timestamp_form');
+
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+
+        const formattedDate = `${yyyy}-${mm}-${dd}`;
+        console.log("Setting date to:", formattedDate);
+        dateInput.value = formattedDate;
       });
 
       // handle menu button
@@ -514,7 +526,12 @@
         selectedOptionsTemp = evalSelected("sensor_list_temp");
         selectedOptionsFlow = evalSelected("actuator_list_flow");
 
-        //console.log("SensorID: " + selectedOptions)
+        if (selectedOptionsMoisture.length == 0 || selectedOptionsTemp.length == 0) {
+          alert(
+            "Please select at least one sensor for each category (Moisture, Temperature). Those sensors are required for the irrigation prediction."
+          );
+          return;
+        }
 
         // Encode the list as a query parameter & all other forms
         const queryParamsMoisture = selectedOptionsMoisture.join(
@@ -700,8 +717,8 @@
         $("#sensor_list")
           .html('<img src="./loading.gif" /> Loading...')
           .fadeIn();
-        loadStuff();
-        //loadStuff_remote() // DEBUG
+        //loadStuff();
+        loadStuff_remote() // DEBUG
       });
     </script>
   </head>
@@ -809,7 +826,7 @@
 
             <div class="form-row">
               <div class="form-group">
-                <label for="pwp_form">Permanent Wilting Point (%)</label>
+                <label for="pwp_form">Permanent Wilting Point (kPa, cBar)</label>
                 <p class="form-hint">Set the permanent wilting point</p>
                 <input
                   type="number"
@@ -819,7 +836,7 @@
                 />
               </div>
               <div class="form-group">
-                <label for="fcu_form">Field Capacity Upper (%)</label>
+                <label for="fcu_form">Field Capacity Upper (kPa, cBar)</label>
                 <p class="form-hint">Set the upper field capacity</p>
                 <input
                   type="number"
@@ -832,7 +849,7 @@
 
             <div class="form-row">
               <div class="form-group">
-                <label for="fcl_form">Field Capacity Lower (%)</label>
+                <label for="fcl_form">Field Capacity Lower (%kPa, cBar)</label>
                 <p class="form-hint">Set the lower field capacity</p>
                 <input
                   type="number"
@@ -842,7 +859,7 @@
                 />
               </div>
               <div class="form-group">
-                <label for="sat_form">Saturation (%)</label>
+                <label for="sat_form">Saturation (kPa, cBar)</label>
                 <p class="form-hint">Set the saturation level</p>
                 <input
                   type="number"
@@ -956,8 +973,11 @@
           <div class="form-section">
             <div class="form-group">
               <label for="tension_threshold_form"
-                >Soil Tension Threshold (cbar)</label
-              >
+                >Soil Tension Threshold (cbar)
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="tensionThresholdTooltip">help
+                  <span class="tooltiptext" id="tensionThresholdTooltip"></span>
+                </span>
+              </label>
               <p class="form-hint">
                 Set the soil tension threshold for irrigation
               </p>
@@ -972,8 +992,11 @@
             <div class="form-row">
               <div class="form-group">
                 <label for="irrigation_amount_form"
-                  >Irrigation Amount (liters)</label
-                >
+                  >Irrigation Amount (liters)
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationAmountTooltip">help
+                      <span class="tooltiptext" id="irrigationAmountTooltip"></span>
+                  </span>
+                </label>
                 <p class="form-hint">Amount per irrigation cycle</p>
                 <input
                   type="number"
@@ -984,9 +1007,12 @@
               </div>
               <div class="form-group">
                 <label for="look_ahead_time_form"
-                  >Look Ahead Time (hours)</label
-                >
-                <p class="form-hint">Forecast horizon in hours</p>
+                  >Look Ahead Time (hours)
+                    <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorHumidityTooltip">help
+                        <span class="tooltiptext" id="lookAheadTimeTooltip"></span>
+                    </span>
+                  </label>
+                <p class="form-hint">Set forecast lead time (in hours) for next irrigation.</p>
                 <input
                   type="number"
                   id="look_ahead_time_form"

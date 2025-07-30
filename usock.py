@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import socket
 import re
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import time
 from urllib.parse import urlparse
 import traceback 
@@ -149,6 +149,7 @@ class HTTPHandler(BaseHTTPRequestHandler):
         if len(resHeaders) > 0:
             for h in resHeaders:
                 self.send_header('Content-type', h)
+                self.send_header('Connection', 'close')
 
         # self.send_header('Content-type','text/html')
         self.end_headers()
@@ -167,12 +168,13 @@ def start():
     try:
         print(f"Removing old socket file at {sockAddr}")
         os.unlink(sockAddr)
-    except OSError:
+    except OSError as e:
         if os.path.exists(sockAddr):
             print(f"Failed to remove old socket file: {e}")
             raise
 
     unixSock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    unixSock.settimeout(20)
 
     print('Binding on %s' % sockAddr)
     unixSock.bind(sockAddr)
@@ -180,7 +182,7 @@ def start():
     # Listen for incoming connections
     unixSock.listen(5)
 
-    server = HTTPServer(sockAddr, HTTPHandler, False)
+    server = ThreadingHTTPServer(sockAddr, HTTPHandler, False)
 
     # ThreadingHTTPServer
     server.socket = unixSock
@@ -209,4 +211,4 @@ def start_with_recovery():
             time.sleep(5)
         else:
             print("Server exited normally — breaking out.")
-            break  # Exit if server stops on purpose
+            break  # Exit if server stops on purpose    

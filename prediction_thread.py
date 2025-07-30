@@ -29,7 +29,7 @@ class PredictionThread(threading.Thread):
     def run(self):
         # To stop via event
         while not self.stop_event.is_set():
-
+            print(f"Child process started for {self.currentPlot.user_given_name}")
             # Initial waiting, after model was trained, prediction was conducted and actuation was triggered 
             time_to_sleep = self.time_until_n_hours(self.currentPlot.predict_period_hours)
             print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until conducting next prediction...")
@@ -100,5 +100,6 @@ def start(currentPlot):
         # Start prediction thread
         currentPlot.prediction_thread = PredictionThread(currentPlot, name="PredictionThread_" + str(currentPlot.user_given_name))
         currentPlot.prediction_thread.start()
+        print("Prediction thread started for plot:", currentPlot.user_given_name)
     else:
         print("Perdiction Thread: Currently training, prediction will be started after training is finished.")
