@@ -1,4 +1,5 @@
 # .dockerignore
+.git
 *.log
 *.pkl
 *.h5
@@ -6,9 +7,14 @@
 *.txt
 *.csv
 *.tar
+.sock
+.gif
 config/*
 /catboost_info
 /.vscode
 /hyperband_dir
 notes.txt
-/test-reports
+/test-reports/*
+**/data/debug/*
+**/data/irrigations*.json
+/help

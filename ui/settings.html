@@ -717,8 +717,8 @@
         $("#sensor_list")
           .html('<img src="./loading.gif" /> Loading...')
           .fadeIn();
-        //loadStuff();
-        loadStuff_remote() // DEBUG
+        loadStuff();
+        //loadStuff_remote() // DEBUG
       });
     </script>
   </head>
@@ -761,7 +761,11 @@
         <div id="soil-tab" class="tab-content active">
           <div class="form-section">
             <div class="form-group">
-              <label for="sensor_kind_radio">Moisture sensor type</label>
+              <label for="sensor_kind_radio">Moisture sensor type
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="moistureKindTooltip">help
+                  <span class="tooltiptext" id="moistureKindTooltip"></span>
+                </span>
+              </label>
               <p class="form-hint">
                 Select the type of the soil moisture sensor
               </p>
@@ -774,8 +778,8 @@
                     value="capacitive"
                   />
                   <label for="capacitive"
-                    >Capacitive soil moisture sensor (Humidity in %)</label
-                  >
+                    >Capacitive soil moisture sensor (Humidity in %)
+                  </label>
                 </div>
                 <div class="radio-item">
                   <input
@@ -786,14 +790,18 @@
                     checked
                   />
                   <label for="tension"
-                    >Soil tension sensor (Soil tension in kPa, cBar)</label
-                  >
+                    >Soil tension sensor (Soil tension in kPa, cBar)
+                  </label>
                 </div>
               </div>
             </div>
 
             <div class="form-group">
-              <label for="soil_type_select">Soil type</label>
+              <label for="soil_type_select">Soil type
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="soilTypeTooltip">help
+                  <span class="tooltiptext" id="soilTypeTooltip"></span>
+                </span>
+              </label>
               <p class="form-hint">Select the type of soil in your plot</p>
               <select
                 id="soil_type_select"
@@ -826,30 +834,42 @@
 
             <div class="form-row">
               <div class="form-group">
-                <label for="pwp_form">Permanent Wilting Point (kPa, cBar)</label>
+                <label for="pwp_form">Permanent Wilting Point (kPa, cBar)
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="pwpTooltip">help
+                    <span class="tooltiptext" id="pwpTooltip"></span>
+                  </span>
+                </label>
                 <p class="form-hint">Set the permanent wilting point</p>
                 <input
                   type="number"
                   id="pwp_form"
                   class="form-control"
-                  value="40"
+                  value="35"
                 />
               </div>
               <div class="form-group">
-                <label for="fcu_form">Field Capacity Upper (kPa, cBar)</label>
+                <label for="fcu_form">Field Capacity Upper (kPa, cBar)
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="fcuTooltip">help
+                    <span class="tooltiptext" id="fcuTooltip"></span>
+                  </span>
+                </label>
                 <p class="form-hint">Set the upper field capacity</p>
                 <input
                   type="number"
                   id="fcu_form"
                   class="form-control"
-                  value="30"
+                  value="25"
                 />
               </div>
             </div>
 
             <div class="form-row">
               <div class="form-group">
-                <label for="fcl_form">Field Capacity Lower (%kPa, cBar)</label>
+                <label for="fcl_form">Field Capacity Lower (%kPa, cBar)
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="fclTooltip">help
+                    <span class="tooltiptext" id="fclTooltip"></span>
+                  </span>
+                </label>
                 <p class="form-hint">Set the lower field capacity</p>
                 <input
                   type="number"
@@ -859,7 +879,11 @@
                 />
               </div>
               <div class="form-group">
-                <label for="sat_form">Saturation (kPa, cBar)</label>
+                <label for="sat_form">Saturation (kPa, cBar)
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="satTooltip">help
+                    <span class="tooltiptext" id="satTooltip"></span>
+                  </span>
+                </label>
                 <p class="form-hint">Set the saturation level</p>
                 <input
                   type="number"
@@ -871,9 +895,12 @@
             </div>
 
             <div class="form-group">
-              <label for="soil_water_retention_text"
-                >Soil Water Retention Curve</label
-              >
+              <label for="soil_water_retention_text">
+                Soil Water Retention Curve
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="soilWaterRetentionTooltip">help
+                  <span class="tooltiptext" id="soilWaterRetentionTooltip"></span>
+                </span>
+                </label>
               <p class="form-hint">
                 Custom soil water retention curve (Soil tension, VWC)
               </p>
@@ -890,8 +917,7 @@
 100, 0.1
 200, 0.075
 500, 0.05
-1000, 0.025</textarea
-              >
+1000, 0.025</textarea>
             </div>
           </div>
         </div>
@@ -900,7 +926,11 @@
         <div id="device-tab" class="tab-content">
           <div class="form-section">
             <div class="form-group">
-              <label for="name_form">Plot name</label>
+              <label for="name_form">Plot name
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="plotNameTooltip">help
+                  <span class="tooltiptext" id="plotNameTooltip"></span>
+                </span>
+              </label>
               <p class="form-hint">Set the plot name</p>
               <input
                 type="text"
@@ -911,7 +941,11 @@
             </div>
 
             <div class="form-group">
-              <label for="sensor_list_moisture">Soil moisture sensors</label>
+              <label for="sensor_list_moisture">Soil moisture sensors
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorHumidityTooltip">help
+                  <span class="tooltiptext" id="sensorHumidityTooltip"></span>
+                </span>
+              </label>
               <p class="form-hint">Select the soil moisture sensors</p>
               <select
                 id="sensor_list_moisture"
@@ -922,7 +956,11 @@
             </div>
 
             <div class="form-group">
-              <label for="sensor_list_temp">Soil temperature sensors</label>
+              <label for="sensor_list_temp">Soil temperature sensors
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorTemperatureTooltip">help
+                  <span class="tooltiptext" id="sensorTemperatureTooltip"></span>
+                </span>
+              </label>
               <p class="form-hint">Select the soil temperature sensors</p>
               <select
                 id="sensor_list_temp"
@@ -933,7 +971,11 @@
             </div>
 
             <div class="form-group">
-              <label for="actuator_list_flow">Water flow sensor</label>
+              <label for="actuator_list_flow">Water flow sensor
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorFlowTooltip">help
+                  <span class="tooltiptext" id="sensorFlowTooltip"></span>
+                </span>
+              </label>
               <p class="form-hint">Select the water flow sensor</p>
               <select
                 id="actuator_list_flow"
@@ -944,7 +986,11 @@
             </div>
 
             <div class="form-group">
-              <label for="gps_form">GPS coordinates</label>
+              <label for="gps_form">GPS coordinates
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="gpsTooltip">help
+                  <span class="tooltiptext" id="gpsTooltip"></span>
+                </span>
+              </label>
               <p class="form-hint">Enter the GPS coordinates of your plot</p>
               <input
                 type="text"
@@ -955,7 +1001,11 @@
             </div>
 
             <div class="form-group">
-              <label for="slope_form">Irrigation slope detection</label>
+              <label for="slope_form">Irrigation slope detection
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="slopeTooltip">help
+                  <span class="tooltiptext" id="slopeTooltip"></span>
+                </span>
+              </label>
               <p class="form-hint">Slope for detecting artificial irrigation</p>
               <input
                 type="number"
@@ -1008,11 +1058,11 @@
               <div class="form-group">
                 <label for="look_ahead_time_form"
                   >Look Ahead Time (hours)
-                    <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorHumidityTooltip">help
+                    <span class="tooltip material-symbols-outlined" data-tooltip-id="lookAheadTimeTooltip">help
                         <span class="tooltiptext" id="lookAheadTimeTooltip"></span>
                     </span>
                   </label>
-                <p class="form-hint">Set forecast lead time (in hours) for next irrigation.</p>
+                <p class="form-hint">Set forecast lead time (in hours) for next irrigation</p>
                 <input
                   type="number"
                   id="look_ahead_time_form"
@@ -1024,7 +1074,11 @@
 
             <div class="form-row">
               <div class="form-group">
-                <label for="starting_timestamp_form">Starting Date</label>
+                <label for="starting_timestamp_form">Starting Date
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="startingDateTooltip">help
+                    <span class="tooltiptext" id="startingDateTooltip"></span>
+                  </span>
+                </label>
                 <p class="form-hint">
                   Select the starting date for predictions
                 </p>
@@ -1035,9 +1089,12 @@
                 />
               </div>
               <div class="form-group">
-                <label for="maximum_time_period_form"
-                  >Max Time Period (days)</label
-                >
+                <label for="maximum_time_period_form">
+                  Max Time Period (days)
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="maxTimePeriodTooltip">help
+                    <span class="tooltiptext" id="maxTimePeriodTooltip"></span>
+                  </span>
+                </label>
                 <p class="form-hint">Maximum time period for analysis</p>
                 <input
                   type="number"

@@ -288,11 +288,12 @@ def only_get_historical_weather_api(start, end, plot):
 # Get weather forecast from open-meteo
 def get_weather_forecast_api(start_date, end_date, plot, data):
     # Compare if forecast date is in the past, important for DEBUG and past data
+    daysOpenMeteoHistoricalDataAvailable = 2 # open meteo will have the historical data from the day before yesterday
     local_tz = pytz.timezone(TimeUtils.Timezone)
     now = datetime.datetime.now()
     localized_now = local_tz.localize(now)  # Now has timezone info
 
-    if end_date < localized_now - timedelta(days=2): # open meteo will have the historical data from the day before yesterday
+    if end_date < localized_now - timedelta(days=daysOpenMeteoHistoricalDataAvailable): 
         print("Forecast date is in the past. Using historical weather data instead. Start: ", start_date, " End: ", end_date)
         # Use historical weather data
         return get_historical_weather_api(data, plot)
@@ -1117,8 +1118,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        #exclude=['lar']
-        include=['xgboost', 'catboost'] #DEBUG
+        exclude=['lar']
+        #include=['xgboost', 'catboost'] #DEBUG
     )
 
     return re_exp, best_re
@@ -1597,109 +1598,109 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
 
     # Create neural network # DEBUG
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # hp.Fixed('activation', 'relu')
-    # hp.Fixed('units_hidden1', 128)
-    # hp.Fixed('use_second_layer', True)
-    # hp.Fixed('units_hidden2', 64)
-    # hp.Fixed('use_third_layer', True)
-    # hp.Fixed('units_hidden3', 32)
-    # hp.Fixed('optimizer', 'adam')
-    # hp.Fixed('learning_rate', 0.001)
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('activation', 'relu')
+    hp.Fixed('units_hidden1', 128)
+    hp.Fixed('use_second_layer', True)
+    hp.Fixed('units_hidden2', 64)
+    hp.Fixed('use_third_layer', True)
+    hp.Fixed('units_hidden3', 32)
+    hp.Fixed('optimizer', 'adam')
+    hp.Fixed('learning_rate', 0.001)
 
-    # # Call the model function with the hp object and the input shape
-    # input_shape = (X_train.shape[1],)
-    # model_nn = create_nn_model(hp, shape=input_shape)
+    # Call the model function with the hp object and the input shape
+    input_shape = (X_train.shape[1],)
+    model_nn = create_nn_model(hp, shape=input_shape)
 
-    # # Train the model
-    # print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
-    # history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_nn)
+    # Train the model
+    print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
+    history_nn = model_nn.fit(X_train_scaled, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_nn)
 
-    # # Create conv neural network
+    # Create conv neural network
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # hp.Fixed('num_conv_layers', 2)
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('num_conv_layers', 2)
 
-    # # First conv layer
-    # hp.Fixed('filters_0', 64)
-    # hp.Fixed('kernel_size_0', 3)
+    # First conv layer
+    hp.Fixed('filters_0', 64)
+    hp.Fixed('kernel_size_0', 3)
 
-    # # Second conv layer
-    # hp.Fixed('filters_1', 64)
-    # hp.Fixed('kernel_size_1', 3)
+    # Second conv layer
+    hp.Fixed('filters_1', 64)
+    hp.Fixed('kernel_size_1', 3)
 
-    # # Dropout rate (shared across all layers in your model)
-    # hp.Fixed('dropout_rate', 0.3)
+    # Dropout rate (shared across all layers in your model)
+    hp.Fixed('dropout_rate', 0.3)
 
-    # # Dense layer
-    # hp.Fixed('dense_units', 128)
+    # Dense layer
+    hp.Fixed('dense_units', 128)
 
-    # # Optimizer and learning rate
-    # hp.Fixed('optimizer', 'adam')
-    # hp.Fixed('learning_rate', 0.001)
+    # Optimizer and learning rate
+    hp.Fixed('optimizer', 'adam')
+    hp.Fixed('learning_rate', 0.001)
 
-    # # Call the model function with the hp object and the input shape
-    # input_shape = (X_train_cnn.shape[1], 1)
-    # model_cnn = create_cnn_model(hp, shape=input_shape)
+    # Call the model function with the hp object and the input shape
+    input_shape = (X_train_cnn.shape[1], 1)
+    model_cnn = create_cnn_model(hp, shape=input_shape)
     
-    # # Train the model
-    # print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
-    # history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_cnn)
+    # Train the model
+    print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
+    history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_cnn)
 
-    # # Create RNN model
+    # Create RNN model
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # # Number of RNN layers
-    # hp.Fixed('num_rnn_layers', 2)
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    # Number of RNN layers
+    hp.Fixed('num_rnn_layers', 2)
 
-    # # Layer 0
-    # hp.Fixed('units_rnn_0', 64)
-    # hp.Fixed('use_dropout_0', True)
-    # hp.Fixed('dropout_rate_0', 0.3)
+    # Layer 0
+    hp.Fixed('units_rnn_0', 64)
+    hp.Fixed('use_dropout_0', True)
+    hp.Fixed('dropout_rate_0', 0.3)
 
-    # # Layer 1
-    # hp.Fixed('units_rnn_1', 32)
-    # hp.Fixed('use_dropout_1', False)  # No dropout in the second layer
+    # Layer 1
+    hp.Fixed('units_rnn_1', 32)
+    hp.Fixed('use_dropout_1', False)  # No dropout in the second layer
 
-    # # Optimizer settings
-    # hp.Fixed('optimizer', 'adam')
-    # hp.Fixed('learning_rate', 0.001)
+    # Optimizer settings
+    hp.Fixed('optimizer', 'adam')
+    hp.Fixed('learning_rate', 0.001)
 
-    # input_shape = (X_train.shape[1], 1)
-    # model_rnn = create_rnn_model(hp, shape=input_shape)
+    input_shape = (X_train.shape[1], 1)
+    model_rnn = create_rnn_model(hp, shape=input_shape)
 
-    # # Train the model
-    # print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
-    # history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_rnn)
+    # Train the model
+    print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
+    history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_rnn)
 
-    # # Create GRU model
+    # Create GRU model
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # hp.Fixed('num_gru_layers', 2)
-    # hp.Fixed('units_gru_0', 64)
-    # hp.Fixed('dropout_rate_0', 0.2)
-    # hp.Fixed('units_gru_1', 32)
-    # hp.Fixed('dropout_rate_1', 0.2)
-    # hp.Fixed('optimizer', 'adam')
-    # hp.Fixed('learning_rate', 1e-3)
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('num_gru_layers', 2)
+    hp.Fixed('units_gru_0', 64)
+    hp.Fixed('dropout_rate_0', 0.2)
+    hp.Fixed('units_gru_1', 32)
+    hp.Fixed('dropout_rate_1', 0.2)
+    hp.Fixed('optimizer', 'adam')
+    hp.Fixed('learning_rate', 1e-3)
 
-    # input_shape = (X_train.shape[1], 1)
-    # model_gru = create_gru_model(hp, shape=input_shape)
-    # # Train the model
-    # print('Will now train a Gated Recurrent Unit neural network (GRU), with the following hyperparameters: ' + str(hp.values))
-    # history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # # Append for comparison
-    # nn_models.append(model_gru)
+    input_shape = (X_train.shape[1], 1)
+    model_gru = create_gru_model(hp, shape=input_shape)
+    # Train the model
+    print('Will now train a Gated Recurrent Unit neural network (GRU), with the following hyperparameters: ' + str(hp.values))
+    history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # Append for comparison
+    nn_models.append(model_gru)
 
     # LSTM architecture
 
@@ -2051,7 +2052,7 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
         model_builder_with_shape(Model_functions[best_model_nn.model_name], best_model_nn.shape),
         objective='val_mae',
         max_epochs=80,              # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
-        factor=5,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
+        factor=3,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
         hyperband_iterations=1,     # Limits the number full hyperband runs
         directory='hyperband_dir',
         project_name='hyperband_' + best_model_nn.model_name,

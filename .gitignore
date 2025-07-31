@@ -167,6 +167,8 @@ hyperband_dir/
 
 # saved data, irrigation, data and prediction records
 #data/*
+/data/irrigations*.json
+/data/debug/*
 
 # notes
 notes.txt
