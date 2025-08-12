@@ -552,7 +552,7 @@ def extract_and_format(data, key, datatype):
     
     return values
 
-def group_sensor_data(sensor_lists, agg_func=lambda vals: sum(vals)/len(vals)):
+def group_sensor_data(sensor_lists, agg_func=lambda vals: sum(vals)/len(vals), resample_interval="30T"):
     """
     Given a list of sensor-lists (each a list of {'time':…, 'value':…}),
     return two lists:
@@ -570,7 +570,16 @@ def group_sensor_data(sensor_lists, agg_func=lambda vals: sum(vals)/len(vals)):
     # sort timestamps chronologically
     timestamps = sorted(bucket.keys(), key=lambda t: parser.isoparse(t))
     values     = [agg_func(bucket[t]) for t in timestamps]
-    return timestamps, values
+
+    # Resample
+    df = pd.DataFrame({"value": values}, index=pd.to_datetime(timestamps))
+    df = df.resample(resample_interval).mean().dropna()
+
+    # Convert back to lists
+    resampled_timestamps = df.index.strftime("%Y-%m-%dT%H:%M:%S").tolist()
+    resampled_values     = df["value"].tolist()
+
+    return resampled_timestamps, resampled_values
 
 
 # def interpolate_list(data_list):
