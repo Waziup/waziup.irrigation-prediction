@@ -146,7 +146,9 @@ pipeline {
                 script {
                     def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}" // Combines image name and tag
                     try {
-                        sh "docker push ${dockerImage}"
+                        retry(2) {
+                            sh "docker push ${dockerImage}"
+                        }
                         echo "Successfully pushed image ${dockerImage} to Docker Hub."
                     } catch (Exception e) {
                        echo "Exception while pushing image: ${e.getMessage()}.\nFailed to push image to Docker Hub."

@@ -18,3 +18,5 @@ notes.txt
 **/data/debug/*
 **/data/irrigations*.json
 /help
+models/**/**/*.pkl
+models/**/**/*.h5

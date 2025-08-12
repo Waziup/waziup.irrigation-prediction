@@ -175,3 +175,8 @@ notes.txt
 
 # unit tests results
 test-reports/
+
+# include models and subfolders
+!models/.gitkeep
+models/**/**/*.pkl
+models/**/**/*.h5

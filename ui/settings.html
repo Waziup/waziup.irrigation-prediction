@@ -667,7 +667,7 @@
 
       // Main function for from same device fetching
       function loadStuff() {
-        $.get("/devices", function (data) {
+        $.get("../../../devices", function (data) {
           const sensors = parseSensorData(data);
           console.log("Sensors: ", sensors);
           displaySensorsAndElements(sensors);

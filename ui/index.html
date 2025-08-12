@@ -984,7 +984,7 @@
       }
 
       function loadStuff() {
-        $.get("/devices", function (data) {
+        $.get("../../../devices", function (data) {
           checkConfigPresent()
             .then((ret) => {
               if (ret) {
