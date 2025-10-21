@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta
+import zoneinfo
 import pytz
 
 from dotenv import load_dotenv
@@ -10,10 +11,12 @@ import requests
 
 #import create_model
 from utils import NetworkUtils, TimeUtils
+import threading
 
 
 # Globals
-OverThresholdAllowed = 1.2              # 20% allowed          
+OverThresholdAllowed = 1.2                      # 20% allowed, fixed value TODO: make configurable
+Irrigation_confirmation_sec = 120 #10800        # 3 hours until verification of irrigation is done, should be more than 1 h, fixed value TODO: make configurable DEBUG
 
 # Find global max and min => not used any more
 def get_max_min(df, target_col='smoothed_values'):
@@ -96,10 +99,11 @@ def save_data_to_file(filename, data):
         json.dump(data, json_file, indent=4)
 
 # Function to add a new record
-def add_record(data, timestamp, amount):
+def add_record(data, timestamp, amount, status="not confirmed"):
     record = {
         "timestamp": timestamp,
-        "amount": amount
+        "amount": amount,
+        "status": status
     }
     data["irrigations"].append(record)
 
@@ -117,7 +121,7 @@ def round_to_nearest_10_minutes(dt):
     return dt
 
 # to json file -> not needed because can just ask api, more consistant state
-def save_irrigation_time(amount, plotid):
+def save_irrigation_time(amount, plotid, status="not confirmed") -> int:
     # Load from file
     filename = 'data/irrigations_plot_' + str(plotid)  + '.json'
     data = read_data_from_file(filename)
@@ -131,7 +135,7 @@ def save_irrigation_time(amount, plotid):
     rounded_tz = round_to_nearest_10_minutes(now)
 
     # Add new records
-    data = add_record(data, str(rounded_tz), amount)
+    data = add_record(data, str(rounded_tz), amount, status)
 
     # Save updated data back to the JSON file
     save_data_to_file(filename, data)
@@ -140,14 +144,70 @@ def save_irrigation_time(amount, plotid):
 
     return 0
 
+def update_irrigation_status(plot, status="not_confirmed"):
+    # Load from file
+    filename = 'data/irrigations_plot_' + str(plot.id)  + '.json'
+    data = read_data_from_file(filename)
+
+    # Update the status of the last irrigation record
+    if data["irrigations"]:
+        data["irrigations"][-1]["status"] = status
+        save_data_to_file(filename, data)
+        print(f"Irrigation status updated to '{status}' for plot {plot.id}.")
+    else:
+        print(f"No irrigation records found for plot {plot.id} to update.")
+
+# Verify irrigation by checking the confirmed amount from the flow meter
+def verify_irrigation(plot, amount):
+    sensor_id = plot.device_and_sensor_ids_flow_confirmation[0]
+
+    # Example API call: curl -X GET "http://192.168.188.29/devices/689dad2768f319076487e4c7/sensors/689db4b868f319076487e500/value" -H "accept: application/json"
+
+    check_url = f"{NetworkUtils.ApiUrl}devices/{sensor_id.split('/')[0]}/sensors/{sensor_id.split('/')[1]}" # TODO: check time, invalidate if long time ago, API call is not suited to check time
+
+    headers = {
+        'Authorization': f'Bearer {NetworkUtils.Token}'
+    }
+
+    try:
+        response = requests.get(check_url, headers=headers)
+        if response.status_code == 200:
+            resp = response.json()
+            # Get Timezone offset
+            offset_hours = TimeUtils.get_timezone_offset(TimeUtils.Timezone)
+            # Get last irrigation time with timezone offset added, tz-aware
+            last_irrigation_time_daytime_timezone_added = (datetime.fromisoformat(resp.get('time').replace("Z", "+00:00")) + timedelta(hours=offset_hours)).replace(tzinfo=zoneinfo.ZoneInfo(TimeUtils.Timezone))
+            # Calculate time passed since last irrigation
+            time_passed = datetime.now() - last_irrigation_time_daytime_timezone_added
+            # Get last irrigation amount
+            last_value = float(resp.get('value'))
+
+            if abs(amount - last_value) <= 0.02 and time_passed <= timedelta(hours=3):  # threshold is 20 liters, could be dynamic, maybe 10% is better approach (TODO)
+                # irrigation confirmed, threshold was not met and not much time has passed
+                print(f"Irrigation confirmed for plot {plot.id}: amount_given: {last_value}m³, expected amount: {amount}m³.")
+                update_irrigation_status(plot, "confirmed")
+            else:
+                update_irrigation_status(plot, "irrigation failed")
+                print(f"Irrigation falied for plot {plot.id}: amount_given: {last_value}m³, expected amount: {amount}m³.")
+        else:
+            print("Verification failed:", response.status_code, response.text)
+            update_irrigation_status(plot, "verification_of_irrigation_failed")
+            print(f"Verification of irrigation falied for plot {plot.id}: expected amount: {amount}m³.")
+    except requests.exceptions.RequestException as e:
+        print("Request error:", e)
+        update_irrigation_status(plot, "verification_failed_request_error")
+        print(f"Request of verification of irrigation falied for plot {plot.id}:s expected amount: {amount}m³.")
+
+
 # Load from wazigate API
-def irrigate_amount(plot): #TODO: renew the token, make function in NetworkUtils that does a arbitrary API request
+def irrigate_amount(plot, amount=0): #TODO: renew the token, make function in NetworkUtils that does a arbitrary API request
     # Example API call: 
     # curl -X POST "http://192.168.189.2/devices/6645c4d468f31971148f2ab1/actuators/6673fcb568f31971148ff5f7/value"
     # -H "accept: */*" -H "Content-Type: application/json" -d "7.2"
 
-    # amount
-    amount = plot.irrigation_amount
+    # if there is no amount in arguments, take it from config -> It is automatically triggered, retrieve amount!
+    if amount == 0:
+        amount = plot.irrigation_amount
 
     # Name of flow meter sensor to initiate irrigation => TODO: decide on using single or multiple
     flow_meter_name = plot.device_and_sensor_ids_flow[0]
@@ -174,7 +234,14 @@ def irrigate_amount(plot): #TODO: renew the token, make function in NetworkUtils
         # Check if the request was successful (status code 200)
         if response.status_code == 200:
             # Save times on when there was an irrigation TODO: wait for confirmation from microcontroller, irrigation could be skipped, needs to be implemented!!
-            save_irrigation_time(amount, plot.id)
+            save_irrigation_time(amount, plot.id, status="not confirmed")
+            response_ok = True
+
+            # Schedule verification after 3 hours (10800 sec), the varification is only called once
+            timer = threading.Timer(Irrigation_confirmation_sec, verify_irrigation, args=[plot, amount]) # should be more than 1 h DEBUG
+            timer.name = f"IrrigationCheckRoutine-{plot.id}"
+            timer.start()
+
             response_ok = True
         else:
             print("Irrigation failed for plot")

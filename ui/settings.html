@@ -717,8 +717,8 @@
         $("#sensor_list")
           .html('<img src="./loading.gif" /> Loading...')
           .fadeIn();
-        loadStuff();
-        //loadStuff_remote() // DEBUG
+        //loadStuff();
+        loadStuff_remote() // DEBUG
       });
     </script>
   </head>
@@ -1042,12 +1042,12 @@
             <div class="form-row">
               <div class="form-group">
                 <label for="irrigation_amount_form"
-                  >Irrigation Amount (liters)
+                  >Irrigation Amount (m³)
                   <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationAmountTooltip">help
                       <span class="tooltiptext" id="irrigationAmountTooltip"></span>
                   </span>
                 </label>
-                <p class="form-hint">Amount per irrigation cycle</p>
+                <p class="form-hint">Amount per irrigation cycle (min 10l = 0.01)</p>
                 <input
                   type="number"
                   id="irrigation_amount_form"

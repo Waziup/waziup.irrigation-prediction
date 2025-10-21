@@ -882,7 +882,7 @@
 
       function irrigateManually() {
         const inputElement = document.getElementById("irrigation_value_form");
-        const amount = parseInt(inputElement.value, 10);
+        const amount = parseFloat(inputElement.value);
 
         if (!isNaN(amount)) {
           fetch(`../api/irrigateManually?amount=${amount}`)
@@ -906,7 +906,7 @@
               alert("An error occurred during the request. Please try again.");
             });
         } else {
-          alert("First type a valid amount in liters to be irrigated!");
+          alert("First type a valid amount in m³ to be irrigated!(min 0.01m³=10l)");
         }
       }
 
@@ -1013,12 +1013,13 @@
 
       function adjustAmount(change) {
         const input = document.getElementById("irrigation_value_form");
-        let currentValue = parseInt(input.value) || 0;
+        let currentValue = parseFloat(input.value) || 0;
         let newValue = currentValue + change;
+        newValue = Math.round(newValue * 100) / 100; // Round to 2 decimal places
 
         // Safety checks
-        if (newValue < 1) {
-          newValue = 1;
+        if (newValue < 0.01) {
+          newValue = 0.01;
         }
         if (newValue > 1000) {
           newValue = 1000;
@@ -1123,14 +1124,8 @@
           <div class="metric-header">
             <span class="material-symbols-outlined">water_pump</span>
             <span class="metric-title">Water Pump</span>
-            <span
-              class="tooltip material-symbols-outlined"
-              data-tooltip-id="pumpTooltip"
-              >help
-              <span class="tooltiptext" id="pumpTooltip"
-                >Control and monitor your irrigation pump. Set the amount of
-                water to irrigate and schedule irrigation cycles.</span
-              >
+            <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationTooltip">help
+               <span class="tooltiptext" id="irrigationTooltip"></span>
             </span>
           </div>
 
@@ -1141,26 +1136,26 @@
               <button
                 type="button"
                 class="amount-btn decrease"
-                onclick="adjustAmount(-1)"
+                onclick="adjustAmount(-0.1)"
               >
                 <span class="material-symbols-outlined">remove</span>
               </button>
               <input
                 id="irrigation_value_form"
                 type="number"
-                min="1"
+                min="0.01"
                 max="1000"
-                value="10"
+                value="1"
                 class="amount-input"
               />
               <button
                 type="button"
                 class="amount-btn increase"
-                onclick="adjustAmount(1)"
+                onclick="adjustAmount(0.1)"
               >
                 <span class="material-symbols-outlined">add</span>
               </button>
-              <span class="amount-unit">Ltr</span>
+              <span class="amount-unit">m³</span>
             </div>
           </div>
 

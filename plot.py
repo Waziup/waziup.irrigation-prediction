@@ -20,33 +20,34 @@ class Plot:
         self.tab_number = tab_number
         # Path to current_config.json
         self.configPath = configPath
-        # Current unique number, always increme
+        # Current unique number, always incremented
         self.id = int(re.search(r'(\d+)\.json$', self.configPath).group(1))
         # User given name is preset, but can be changed later
         self.user_given_name = "Plot " + str(self.id)
 
         # Variables that were global before, now plot-specific
         # Device
-        self.device_and_sensor_ids_moisture = []        # Device address of humidity sensor
-        self.device_and_sensor_ids_temp = []            # Device address of temperature sensor
-        self.device_and_sensor_ids_flow = []            # Device address of flow meter
-        self.gps_info = ""                              # Coordinates of sensors
-        self.sensor_kind = "tension"                    # Type of humidity sensor
-        self.sensor_unit = ""                           # Unit of humidity
-        self.slope = 0                                  # Slope to evaluate irrgation has taken place
-        self.threshold = 0                              # Threshold to irrigate plants
-        self.irrigation_amount = 0                      # Amount in liters to irrigate plants
-        self.look_ahead_time = 0                        # Time to look ahead in forecast how long soil tension threshold can be exceeded in hours
-        self.start_date = ""                            # Start date: use sensor and API data from this date
-        self.period = 0                                 # Time period to include into the model
-        self.train_period_days = 1                      # Frequencies in days inbeween train cycles
-        self.predict_period_hours = 6                   # Frequencies in hours inbeween predict cycles
-        self.soil_type = ""                             # Soil type for current field                           
-        self.permanent_wilting_point = 40               # Soil is to dry, plant cannot access any water with its roots
-        self.field_capacity_upper = 30                  # Upper bound of soil is getting to dry
-        self.field_capacity_lower = 10                  # Lower bound of wet soil, no more retention, water seeps through soil
-        self.saturation = 0                             # Soil is completly saturated with water
-        self.soil_water_retention_curve = [             # Soil water retention curve init
+        self.device_and_sensor_ids_moisture = []            # Device address of humidity sensor
+        self.device_and_sensor_ids_temp = []                # Device address of temperature sensor
+        self.device_and_sensor_ids_flow = []                # Device address of flow meter
+        self.device_and_sensor_ids_flow_confirmation = []   # Device address of flow meter confirmation sensor
+        self.gps_info = ""                                  # Coordinates of sensors
+        self.sensor_kind = "tension"                        # Type of humidity sensor
+        self.sensor_unit = ""                               # Unit of humidity
+        self.slope = 0                                      # Slope to evaluate irrgation has taken place
+        self.threshold = 0                                  # Threshold to irrigate plants
+        self.irrigation_amount = 0                          # Amount in liters to irrigate plants
+        self.look_ahead_time = 0                            # Time to look ahead in forecast how long soil tension threshold can be exceeded in hours
+        self.start_date = ""                                # Start date: use sensor and API data from this date
+        self.period = 0                                     # Time period to include into the model
+        self.train_period_days = 1                          # Frequencies in days inbeween train cycles
+        self.predict_period_hours = 6                       # Frequencies in hours inbeween predict cycles
+        self.soil_type = ""                                 # Soil type for current field                           
+        self.permanent_wilting_point = 40                   # Soil is to dry, plant cannot access any water with its roots
+        self.field_capacity_upper = 30                      # Upper bound of soil is getting to dry
+        self.field_capacity_lower = 10                      # Lower bound of wet soil, no more retention, water seeps through soil
+        self.saturation = 0                                 # Soil is completly saturated with water
+        self.soil_water_retention_curve = [                 # Soil water retention curve init
             (0, 0.45),
             (5, 0.40),
             (10, 0.37),
@@ -62,25 +63,25 @@ class Plot:
         self.config = {}
 
         # Threading
-        self.training_thread = None                     # Training thread of object
-        self.prediction_thread = None                   # Prediction thread of object
-        self.training_finished = False                  # Flag training process finished
-        self.currently_training = False                 # Flag currently training this plot
-        self.currently_active = False                   # Redundant as set in plot:manager
+        self.training_thread = None                         # Training thread of object
+        self.prediction_thread = None                       # Prediction thread of object
+        self.training_finished = False                      # Flag training process finished
+        self.currently_training = False                     # Flag currently training this plot
+        self.currently_active = False                       # Redundant as set in plot:manager
 
         # Data
-        self.data = pd.DataFrame                        # Dataframe that holds data for training
-        self.data_w = pd.DataFrame                      # Dataframe that stores weatherdata
-        self.predictions = pd.DataFrame                 # Dataframe that holds latest predictions
-        self.threshold_timestamp = ""                   # Threshold timestamp when soil will be to dry
+        self.data = pd.DataFrame                            # Dataframe that holds data for training
+        self.data_w = pd.DataFrame                          # Dataframe that stores weatherdata
+        self.predictions = pd.DataFrame                     # Dataframe that holds latest predictions
+        self.threshold_timestamp = ""                       # Threshold timestamp when soil will be to dry
 
         # Model
-        self.tuned_best = None                          # Stores the currently best model
-        self.best_exp = None                            # Stores the pycarets experiment object
+        self.tuned_best = None                              # Stores the currently best model
+        self.best_exp = None                                # Stores the pycarets experiment object
 
         # Debug
-        self.use_pycaret = True                         # Flag can be switched to decide on model usage
-        self.load_data_from_csv = False                 # Flag can be switched to decide on data source
+        self.use_pycaret = True                             # Flag can be switched to decide on model usage
+        self.load_data_from_csv = False                     # Flag can be switched to decide on data source
         self.data_from_csv = "data/debug/binned_removed_new_for_app.csv"
         # Load former irrigations from file "data/irrigations.json" DEBUG
         self.load_irrigations_from_file = False
@@ -117,6 +118,7 @@ class Plot:
                 self.device_and_sensor_ids_moisture = data.get('DeviceAndSensorIdsMoisture', [])
                 self.device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
                 self.device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
+                self.device_and_sensor_ids_flow_confirmation = data.get('DeviceAndSensorIdsFlowConfirmation', [])
 
             # Get data from forms
             self.user_given_name = data.get('Name', [])
@@ -148,7 +150,36 @@ class Plot:
             return True
         else:
             return False
+        
 
+    #Get the device ID of the confirmation sensor (xlppChan == 5)
+    def getConfirmationDeviceID(self, id):
+        # API request to get sensor meta data of a device
+        device_id = id[0].split('/')[0]
+        url = f"{NetworkUtils.ApiUrl}devices/{device_id}/sensors" 
+        headers = {
+            'Authorization': f'Bearer {NetworkUtils.Token}'
+        }
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code != 200:
+                print(f"Failed to fetch sensors, status code: {response.status_code}")
+                return None
+
+            data = response.json()
+
+            # Find the sensor ID with xlppChan == 5
+            sensor_id = next(
+                (sensor["id"] for sensor in data
+                if sensor.get("meta", {}).get("xlppChan") == 5),
+                None
+            )
+        except requests.exceptions.RequestException as e:
+            print("Request error:", e)
+            print(f"Determining the confirmation sensor of the actuator falied for plot {self.id}.")
+            return None
+        
+        return device_id + "/" + sensor_id
 
     # Obtain current sensor value from API
     def load_latest_data_api(self, sensor_name, type):  # , token)

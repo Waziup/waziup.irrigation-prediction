@@ -38,3 +38,8 @@ plt.show()
 This script defines a van Genuchten model function and fits it to your soil tension and water content data. You can adjust the initial guess and modify the model function as needed based on your specific requirements.
 
 Keep in mind that this is a simple example, and you may need to adapt the model or use more sophisticated models depending on the characteristics of your soil and the observed data.
+
+General TODOs:
+- move irrigation logic to seperate thread, better if training/inference fails
+- fail save irrigation, work with timestamps or confirmations, implemented in sensor device but not in app
+- include gen-ai style models:Temporal Fusion Transformer (TFT), Informer or FEDformeryy

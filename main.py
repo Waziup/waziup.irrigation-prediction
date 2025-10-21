@@ -274,6 +274,7 @@ def removePlot(url, body):
 
 usock.routerPOST("/api/removePlot", removePlot)
 
+
 # Get historical sensor values from WaziGates API
 def setConfig(url, body):
     # Get current plot
@@ -286,6 +287,9 @@ def setConfig(url, body):
     currentPlot.device_and_sensor_ids_moisture = parsed_data.get('selectedOptionsMoisture', [])
     currentPlot.device_and_sensor_ids_temp = parsed_data.get('selectedOptionsTemp', [])
     currentPlot.device_and_sensor_ids_flow = parsed_data.get('selectedOptionsFlow', [])
+    currentPlot.device_and_sensor_ids_flow_confirmation = [currentPlot.getConfirmationDeviceID(currentPlot.device_and_sensor_ids_flow)]# get confirmation sensors, part of the flow meter, always on xlpp channel 5
+
+    # Parse JSON
 
     # Get data from forms
     name_list = parsed_data.get('name', [])
@@ -321,6 +325,7 @@ def setConfig(url, body):
         "DeviceAndSensorIdsMoisture": currentPlot.device_and_sensor_ids_moisture,
         "DeviceAndSensorIdsTemp": currentPlot.device_and_sensor_ids_temp,
         "DeviceAndSensorIdsFlow": currentPlot.device_and_sensor_ids_flow,
+        "DeviceAndSensorIdsFlowConfirmation": currentPlot.device_and_sensor_ids_flow_confirmation,
         "Sensor_kind" : currentPlot.sensor_kind,
         "Name": currentPlot.user_given_name,
         #"Gps_info": {"lattitude": currentPlot.gps_info['lattitude'], "longitude": currentPlot.gps_info['longitude']},
@@ -388,6 +393,7 @@ def getConfigsFromAllFiles():
                 #print("After assignment:",  plot_manager.Plots[i].device_and_sensor_ids_moisture)
                 plots[i].device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
                 plots[i].device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
+                plots[i].device_and_sensor_ids_flow_confirmation = data.get('DeviceAndSensorIdsFlowConfirmation', [])
 
             # Get data from forms
             plots[i].user_given_name = data.get('Name', [])
@@ -690,15 +696,19 @@ def irrigateManually(url, body):
     query_params = parse_qs(urlparse(url).query)
 
     # Extract the 'amount' parameter (assuming it's passed as a query parameter)
-    amount = int(query_params.get('amount', [0])[0])
+    amount = float(query_params.get('amount', [0])[0])
 
     # Call the actuation function with the extracted amount
-    response = actuation.irrigate_amount(plot_manager.getCurrentPlot())
+    response = actuation.irrigate_amount(plot_manager.getCurrentPlot(), amount)
+
+    if response is False:
+        return 400, bytes(json.dumps({"status": "error", "message": "Irrigation failed or no active irrigation system.", "response": response}), "utf8"), []
 
     return 200, bytes(json.dumps({"status": "success", "amount": amount, "response": response}), "utf8"), []
     
 usock.routerGET("/api/irrigateManually", irrigateManually)
 
+# Get latest values for dashboard
 def getValuesForDashboard(url, body):
     data_moisture = []
     data_temp = []
