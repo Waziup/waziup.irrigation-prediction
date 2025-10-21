@@ -16,7 +16,8 @@ import threading
 
 # Globals
 OverThresholdAllowed = 1.2                      # 20% allowed, fixed value TODO: make configurable
-Irrigation_confirmation_sec = 120 #10800        # 3 hours until verification of irrigation is done, should be more than 1 h, fixed value TODO: make configurable DEBUG
+Irrigation_confirmation_sec = 10800             # 3 hours until verification of irrigation is done, should be more than 1 h, fixed value TODO: make configurable DEBUG
+Irrigation_retries = 0                          # number of retries for irrigation verification
 
 # Find global max and min => not used any more
 def get_max_min(df, target_col='smoothed_values'):
@@ -186,17 +187,26 @@ def verify_irrigation(plot, amount):
                 # irrigation confirmed, threshold was not met and not much time has passed
                 print(f"Irrigation confirmed for plot {plot.id}: amount_given: {last_value}m³, expected amount: {amount}m³.")
                 update_irrigation_status(plot, "confirmed")
+                Irrigation_retries = 0
             else:
-                update_irrigation_status(plot, "irrigation failed")
-                print(f"Irrigation falied for plot {plot.id}: amount_given: {last_value}m³, expected amount: {amount}m³.")
+                if Irrigation_retries == 0:
+                    print(f"Irrigation falied for plot {plot.id}: amount_given: {last_value}m³, expected amount: {amount}m³. Irrigation will be retried once.")
+                    update_irrigation_status(plot, "irrigation failed, retrying once")
+                    irrigate_amount(plot, amount)
+                    Irrigation_retries += 1
+                    # Here another action could be triggered, like sending notification
+                else:
+                    update_irrigation_status(plot, "irrigation failed, twice, no more retries")
+                    print(f"Irrigation falied for plot {plot.id}: amount_given: {last_value}m³, expected amount: {amount}m³. Irrigation will not be retried.")
+                    Irrigation_retries = 0
         else:
             print("Verification failed:", response.status_code, response.text)
             update_irrigation_status(plot, "verification_of_irrigation_failed")
-            print(f"Verification of irrigation falied for plot {plot.id}: expected amount: {amount}m³.")
+            print(f"Verification of irrigation falied for plot {plot.id}: expected amount: {amount}m³. Irrigation will not be retried.")
     except requests.exceptions.RequestException as e:
         print("Request error:", e)
         update_irrigation_status(plot, "verification_failed_request_error")
-        print(f"Request of verification of irrigation falied for plot {plot.id}:s expected amount: {amount}m³.")
+        print(f"Request of verification of irrigation falied for plot {plot.id}:s expected amount: {amount}m³. Irrigation will not be retried.")
 
 
 # Load from wazigate API
@@ -238,7 +248,7 @@ def irrigate_amount(plot, amount=0): #TODO: renew the token, make function in Ne
             response_ok = True
 
             # Schedule verification after 3 hours (10800 sec), the varification is only called once
-            timer = threading.Timer(Irrigation_confirmation_sec, verify_irrigation, args=[plot, amount]) # should be more than 1 h DEBUG
+            timer = threading.Timer(Irrigation_confirmation_sec, verify_irrigation, args=[plot, amount])
             timer.name = f"IrrigationCheckRoutine-{plot.id}"
             timer.start()
 
