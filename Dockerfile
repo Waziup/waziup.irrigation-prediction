@@ -30,7 +30,8 @@ RUN  pip install requests \
      scikeras \
      scikit-learn \
      joblib==1.3 \
-     keras-tuner   
+     keras-tuner \
+     backports.zoneinfo 
 # keras tuner check usage!
 
 COPY . /root/src/
