@@ -2,7 +2,6 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta
-import zoneinfo
 import pytz
 
 from dotenv import load_dotenv
@@ -160,11 +159,14 @@ def update_irrigation_status(plot, status="not_confirmed"):
 
 # Verify irrigation by checking the confirmed amount from the flow meter
 def verify_irrigation(plot, amount):
+    global Irrigation_retries
+
+    # Get sensor id of confirmation device
     sensor_id = plot.device_and_sensor_ids_flow_confirmation[0]
 
     # Example API call: curl -X GET "http://192.168.188.29/devices/689dad2768f319076487e4c7/sensors/689db4b868f319076487e500/value" -H "accept: application/json"
 
-    check_url = f"{NetworkUtils.ApiUrl}devices/{sensor_id.split('/')[0]}/sensors/{sensor_id.split('/')[1]}" # TODO: check time, invalidate if long time ago, API call is not suited to check time
+    check_url = f"{NetworkUtils.ApiUrl}devices/{sensor_id.split('/')[0]}/sensors/{sensor_id.split('/')[1]}"
 
     headers = {
         'Authorization': f'Bearer {NetworkUtils.Token}'
@@ -174,12 +176,12 @@ def verify_irrigation(plot, amount):
         response = requests.get(check_url, headers=headers)
         if response.status_code == 200:
             resp = response.json()
-            # Get Timezone offset
-            offset_hours = TimeUtils.get_timezone_offset(TimeUtils.Timezone)
-            # Get last irrigation time with timezone offset added, tz-aware
-            last_irrigation_time_daytime_timezone_added = (datetime.fromisoformat(resp.get('time').replace("Z", "+00:00")) + timedelta(hours=offset_hours)).replace(tzinfo=zoneinfo.ZoneInfo(TimeUtils.Timezone))
+            # Get Timezone
+            berlin  = pytz.timezone(TimeUtils.Timezone) # could be returned as timezone from TimeUtils TODO
+            # Convert in Berlin timezone
+            last_irrigation_time_daytime_timezone_added = datetime.fromisoformat(resp.get('time').replace("Z", "+00:00")).astimezone(berlin)
             # Calculate time passed since last irrigation
-            time_passed = datetime.now() - last_irrigation_time_daytime_timezone_added
+            time_passed = datetime.now(tz=pytz.timezone(TimeUtils.Timezone)) - last_irrigation_time_daytime_timezone_added
             # Get last irrigation amount
             last_value = float(resp.get('value'))
 
