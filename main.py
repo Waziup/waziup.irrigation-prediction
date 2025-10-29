@@ -23,7 +23,7 @@ import create_model
 import actuation
 from plot import Plot
 import plot_manager
-from utils import NetworkUtils
+from utils import NetworkUtils, TimeUtils
 import training_thread
 
 #---------------------#
@@ -577,9 +577,15 @@ def group_sensor_data(sensor_lists, agg_func=lambda vals: sum(vals)/len(vals), r
     timestamps = sorted(bucket.keys(), key=lambda t: parser.isoparse(t))
     values     = [agg_func(bucket[t]) for t in timestamps]
 
-    # Resample
-    df = pd.DataFrame({"value": values}, index=pd.to_datetime(timestamps))
+    # Convert to timezone-aware datetime index in UTC
+    df = pd.DataFrame({"value": values})
+    df.index = pd.to_datetime(timestamps, utc=True)  # force UTC
+
+    # Now resampling works
     df = df.resample(resample_interval).mean().dropna()
+
+    # If you want to display local time later:
+    df.index = df.index.tz_convert(TimeUtils.Timezone)
 
     # Convert back to lists
     resampled_timestamps = df.index.strftime("%Y-%m-%dT%H:%M:%S").tolist()
@@ -766,8 +772,6 @@ def getHistoricalChartData(url, body):
     data_moisture = []
     data_temp = []
     #data_flow = [] # TODO:later also show flow in vis
-    data_moisture_average = []
-    data_temp_average = []
 
     # Get current plot (selected in UI)
     currentPlot = plot_manager.getCurrentPlot()
