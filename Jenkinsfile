@@ -67,18 +67,12 @@ pipeline {
                     def formerID = readFile('former_image_id.txt').trim()
 
                     if(formerID) {
-                        try {
-                            def result = sh(script: "docker rmi ${formerID}", returnStdout: true, returnStatus: true)
-                            if (result != 0) {
-                                echo "Error removing old image: ${result}"
-                                echo "Failed to remove old image."
-                            } else {
-                                echo "Successfully removed old image."
-                            }
-                        }
-                        catch (Exception e) {
-                            echo "Exception thrown during image removal: ${e.getMessage()}"
-                            echo "Failed to remove old image due to an exception."
+                        def result = sh(script: "docker rmi ${formerID}", returnStdout: true, returnStatus: true)
+                        if (result != 0) {
+                            echo "Error removing old image: ${result}"
+                            echo "Failed to remove old image."
+                        } else {
+                            echo "Successfully removed old image."
                         }
                     }
                     else {
@@ -92,28 +86,21 @@ pipeline {
             steps {
                 script {
                     def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}"
-                    try {
-                        echo "Pushing Docker image to local gateway..."
-                        withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
-                            sh "docker save ${dockerImage} | gzip | pv | sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} docker load"
-                        }
-
-                        echo "Deploying updated container on gateway..."
-                        withCredentials([string(credentialsId: 'SSH_PASSWORD', variable: 'SSH_PASSWORD')]) {
-                            sh """
-                                sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
-                                    cd /var/lib/wazigate/apps/${APP_NAME} && \
-                                    docker-compose down && \
-                                    docker-compose up -d
-                                '
-                            """
-                        }
-
-                        echo "Successfully deployed ${dockerImage} to local gateway."
-                    } catch (Exception e) {
-                        echo "Exception during deployment: ${e.getMessage()} \nFailed to push and deploy image on local gateway."
-                        echo "Failed to push and deploy image on local gateway."
+                    echo "Pushing Docker image to local gateway..."
+                    withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
+                        sh "docker save ${dockerImage} | gzip | pv | sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} docker load"
                     }
+                    echo "Deploying updated container on gateway..."
+                    withCredentials([string(credentialsId: 'SSH_PASSWORD', variable: 'SSH_PASSWORD')]) {
+                        sh """
+                            sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
+                                cd /var/lib/wazigate/apps/${APP_NAME} && \
+                                docker-compose down && \
+                                docker-compose up -d
+                            '
+                        """
+                    }
+                    echo "Successfully deployed ${dockerImage} to local gateway."
                 }
             }
         }
@@ -121,12 +108,20 @@ pipeline {
         stage('Test Docker Image - Run Unit Tests') {
             steps {
                 script {
-                    def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}"
-                    try {
-                        sh "docker run --rm ${dockerImage} python3 -m unittest discover -s tests"
-                        echo "Tests passed successfully."
-                    } catch (Exception e) {
-                        echo "Exception during testing: ${e.getMessage()}"
+                    def service_name = "wazi-app"
+                    echo "Running tests on locally deployed Docker image..."
+                    withCredentials([string(credentialsId: 'SSH_PASSWORD', variable: 'SSH_PASSWORD')]) {
+                        sh """
+                            sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
+                                cd /var/lib/wazigate/apps/${APP_NAME} && \
+                                docker-compose exec ${service_name} python3 -m unittest discover -s tests
+                            '
+                        """
+                    }
+                    echo "Successfully deployed ${dockerImage} to local gateway."
+                    catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                        echo "Exception during testing: ${e.getMessage()} \nFailed to test deployed image on local gateway."
+                        echo "One or more test did failed on local gateway."
                     }
                 }
             }
@@ -145,14 +140,10 @@ pipeline {
             steps {
                 script {
                     def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}" // Combines image name and tag
-                    try {
-                        retry(2) {
-                            sh "docker push ${dockerImage}"
-                        }
-                        echo "Successfully pushed image ${dockerImage} to Docker Hub."
-                    } catch (Exception e) {
-                       echo "Exception while pushing image: ${e.getMessage()}.\nFailed to push image to Docker Hub."
+                    retry(2) {
+                        sh "docker push ${dockerImage}"
                     }
+                    echo "Successfully pushed image ${dockerImage} to Docker Hub."
                 }
             }
         }
