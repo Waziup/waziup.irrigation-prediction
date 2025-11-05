@@ -581,10 +581,10 @@ def group_sensor_data(sensor_lists, agg_func=lambda vals: sum(vals)/len(vals), r
     df = pd.DataFrame({"value": values})
     df.index = pd.to_datetime(timestamps, utc=True)  # force UTC
 
-    # Now resampling works
+    # Resampling 
     df = df.resample(resample_interval).mean().dropna()
 
-    # If you want to display local time later:
+    # Display in local time
     df.index = df.index.tz_convert(TimeUtils.Timezone)
 
     # Convert back to lists

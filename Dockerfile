@@ -15,11 +15,12 @@ RUN apt-get update \
     libhdf5-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN  pip install requests \
+RUN  pip install requests==2.28.2 \
+     urllib3<2.0 \
+     requests-unixsocket==0.2.0 \
      pycaret \
      matplotlib \
      pytz \
-     requests \
      geopy \
      timezonefinder \
      python-dotenv \
@@ -31,8 +32,8 @@ RUN  pip install requests \
      scikit-learn \
      joblib==1.3 \
      keras-tuner \
-     backports.zoneinfo 
-# keras tuner check usage!
+     xmlrunner
+# keras tuner check usage, also xmlrunner for testing, does not need to be included in the image
 
 COPY . /root/src/
 

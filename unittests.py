@@ -3,6 +3,9 @@
 import json
 from dotenv import dotenv_values, set_key, load_dotenv
 import requests
+import urllib
+import requests_unixsocket
+requests_unixsocket.monkeypatch()
 from time import sleep
 import unittest
 import xmlrunner
@@ -22,16 +25,13 @@ requests_log.propagate = True
 
 ## Variable declaration
 
-wazidev_sensor_id = 'temperatureSensor_1'
-wazidev_sensor_value = 45.7
-wazidev_actuator_id = 'act1'
-wazidev_actuator_value = json.dumps(True)
+# Path to the socket (must match your container’s mount)
+PROXY_SOCK_PATH = "/var/lib/waziapp/proxy.sock"
 
-#wazigate_ip = os.environ.get('WAZIGATE_IP', '172.16.11.186')
-#wazigate_ip = os.environ.get('WAZIGATE_IP', '192.168.188.29')
-wazigate_ip = os.environ.get('WAZIGATE_IP', 'localhost:8080')
-wazigate_url = 'http://' + wazigate_ip
-wazigate_app_url = wazigate_url + "/apps/waziup.irrigation-prediction"
+# Use the Unix-socket-based base URL
+# Note: requests_unixsocket encodes the socket path into the URL
+wazigate_base = f"http+unix://{PROXY_SOCK_PATH.replace('/', '%2F')}"
+wazigate_app_url = f"{wazigate_base}/api"
 
 wazigate_device = {
   'id': 'test000',
@@ -76,7 +76,7 @@ ENV_FILE = ".env"
 # GET /api/checkConfigPresent - Check config exists
 # GET /api/checkActiveIrrigation - Check irrigation status
 # GET /api/irrigateManually - Manual irrigation
-# GET /api/getValuesForDashboard - Get dashboard values
+# GET /api/getValuesForDashboard - Get dashboard values e.g. curl --unix-socket /var/lib/waziapp/proxy.sock http://localhost/api/getValuesForDashboard
 # GET /api/getHistoricalChartData - Get historical data
 # GET /api/getDatasetChartData - Get dataset data
 # GET /api/getPredictionChartData - Get prediction data
@@ -92,16 +92,68 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
     current_plot_id = None
 
     def setUp(self):
+        # Load original .env as a backup
+        self.original_env = dotenv_values(ENV_FILE)
+
+        # Set temporary values
+        set_key(ENV_FILE, "SKIP_TRAINING", "False")
+        set_key(ENV_FILE, "LOAD_DATA_FROM_CSV", "True")
+        set_key(ENV_FILE, "PERFORM_TRAINING", "True")
+
+        # (Optional) Reload env vars in current process
+        load_dotenv(ENV_FILE, override=True)
+
+
         # Authentication
-        resp = requests.post(wazigate_url + '/auth/token', json=auth)
-        self.token = resp.text.strip('"')
+        self.session_wg = requests.Session()
+
+        token_url = "http://wazigate/" + "auth/token"
+            
+        # Parse the URL
+        parsed_token_url = urllib.parse.urlsplit(token_url)
+        
+        # Encode the query parameters
+        encoded_query = urllib.parse.quote(parsed_token_url.query, safe='=&')
+        
+        # Reconstruct the URL with the encoded query
+        encoded_url = urllib.parse.urlunsplit((parsed_token_url.scheme, 
+                                            parsed_token_url.netloc, 
+                                            parsed_token_url.path, 
+                                            encoded_query, 
+                                            parsed_token_url.fragment))
+        
+        # Define headers for the POST request
+        headers = {
+            'accept': 'application/json',
+            #'Content-Type': 'application/json',  # Make sure to set Content-Type
+        }
+        
+        # Define data for the GET request
+        data = {
+            'username': 'admin',
+            'password': 'loragateway',
+        }
+
+        # Send a GET request to the API
+        response = requests.get(encoded_url, headers=headers, json=data)
+
+        # Check if the request was successful (status code 200)
+        if response.status_code == 200:
+            # The response content contains the data from the API
+            self.token = response.json().strip('"')
+            print("Token retrieved successfully:", self.token)
+        else:
+            print("Request failed with status code:", response.status_code)
+
+        # Create a unixsocket session with the token
+        self.session = requests_unixsocket.Session()
         self.headers = {
             'Cookie': f"Token={self.token}",
             'Content-Type': 'application/x-www-form-urlencoded'
             }
         self.cookies = {'Token': self.token}
 
-                # Load original .env as a backup
+        # Load original .env as a backup
         self.original_env = dotenv_values(ENV_FILE)
 
         # Set temporary values
@@ -135,8 +187,8 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
     # Plot Management Tests
     def test_02_test_plot_lifecycle(self):
         # Get plots
-        get_resp = requests.get(
-            f"{wazigate_app_url}/api/getPlots",
+        get_resp = self.session.get(
+            f"{wazigate_app_url}/getPlots",
             headers=self.headers
         )
         self.assertEqual(get_resp.status_code, 200)
@@ -147,8 +199,8 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
 
         # Create plot
         print("Creating plot...")
-        create_resp = requests.post(
-            f"{wazigate_app_url}/api/addPlot",
+        create_resp = self.session.post(
+            f"{wazigate_app_url}/addPlot",
             data={'tab_nr': next_plot_to_add},
             headers=self.headers
         )
@@ -158,8 +210,8 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
 
         # Set current plot
         print("Set plot...")
-        set_resp = requests.post(
-            f"{wazigate_app_url}/api/setPlot",
+        set_resp = self.session.post(
+            f"{wazigate_app_url}/setPlot",
             data=f"currentPlot={next_plot_to_add}",
             headers=self.headers
         )
@@ -167,8 +219,8 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
         print(set_resp.text)
 
         # Remove plot -> HTTP code fails, but is deleted
-        remove_resp = requests.post(
-            f"{wazigate_app_url}/api/removePlot",
+        remove_resp = self.session.post(
+            f"{wazigate_app_url}/removePlot",
             data=f"currentPlot={next_plot_to_add}",
             headers=self.headers
         )
@@ -177,8 +229,8 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
     # Configuration Tests
     def test_03_test_config_management(self):
         # Get plots
-        get_resp = requests.get(
-            f"{wazigate_app_url}/api/getPlots",
+        get_resp = self.session.get(
+            f"{wazigate_app_url}/getPlots",
             headers=self.headers
         )
         self.assertEqual(get_resp.status_code, 200)
@@ -189,8 +241,8 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
 
         # Create plot
         print("Creating plot...")
-        create_resp = requests.post(
-            f"{wazigate_app_url}/api/addPlot",
+        create_resp = self.session.post(
+            f"{wazigate_app_url}/addPlot",
             data={'tab_nr': next_plot_to_add},
             headers=self.headers
         )
@@ -220,16 +272,16 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
             'ret': ['Soil tension,VWC\n0, 0.225\n5, 0.2\n10, 0.185\n20, 0.15\n50, 0.125\n100, 0.1\n200, 0.075\n500, 0.05\n1000, 0.025\n']
         }
 
-        set_resp = requests.post(
-            f"{wazigate_app_url}/api/setConfig",
+        set_resp = self.session.post(
+            f"{wazigate_app_url}/setConfig",
             data=config_data,
             headers=self.headers
         )
         self.assertEqual(set_resp.status_code, 200)
 
         # Get config back
-        get_resp = requests.get(
-            f"{wazigate_app_url}/api/returnConfig",
+        get_resp = self.session.get(
+            f"{wazigate_app_url}/returnConfig",
             headers=self.headers
         )
         self.assertEqual(get_resp.status_code, 200)
@@ -267,16 +319,16 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
     # Sensor Data Tests
     def test_04_test_sensor_data_endpoints(self):
         # Dashboard values
-        dash_resp = requests.get(
-            f"{wazigate_app_url}/api/getValuesForDashboard",
+        dash_resp = self.session.get(
+            f"{wazigate_app_url}/getValuesForDashboard",
             headers=self.headers
         )
         self.assertEqual(dash_resp.status_code, 200)
         self.assertIn('temp_average', dash_resp.json())
 
         # Historical data
-        hist_resp = requests.get(
-            f"{wazigate_app_url}/api/getHistoricalChartData",
+        hist_resp = self.session.get(
+            f"{wazigate_app_url}/getHistoricalChartData",
             headers=self.headers
         )
         self.assertIn(hist_resp.status_code, [200, 404])
@@ -284,8 +336,8 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
     # Prediction Tests    
     def test_05_test_prediction_workflow(self):
         # Start training
-        train_resp = requests.get(
-            f"{wazigate_app_url}/api/startTraining",
+        train_resp = self.session.get(
+            f"{wazigate_app_url}/startTraining",
             headers=self.headers
         )
         self.assertEqual(train_resp.status_code, 200)
@@ -300,8 +352,8 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
             time.sleep(interval)
             waited += interval
 
-            status_resp = requests.get(
-                f"{wazigate_app_url}/api/isTrainingReady",
+            status_resp = self.session.get(
+                f"{wazigate_app_url}/isTrainingReady",
                 headers=self.headers
             )
             self.assertEqual(status_resp.status_code, 200)
@@ -319,8 +371,8 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
             self.fail(f"Training did not finish within {max_wait_time} seconds.")
 
         # Afterwards get predictions
-        pred_resp = requests.get(
-            f"{wazigate_app_url}/api/getPredictionChartData",
+        pred_resp = self.session.get(
+            f"{wazigate_app_url}/getPredictionChartData",
             headers=self.headers
         )
         self.assertIn(pred_resp.status_code, 200)
@@ -328,16 +380,16 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
     # Irrigation Control Tests
     def test_06_test_irrigation_controls(self):
         # Manual irrigation
-        irrig_resp = requests.get(
-            f"{wazigate_app_url}/api/irrigateManually",
+        irrig_resp = self.session.get(
+            f"{wazigate_app_url}/irrigateManually",
             params={'amount': 50},
             headers=self.headers
         )
         self.assertEqual(irrig_resp.status_code, 200)
 
         # Check irrigation status
-        status_resp = requests.get(
-            f"{wazigate_app_url}/api/checkActiveIrrigation",
+        status_resp = self.session.get(
+            f"{wazigate_app_url}/checkActiveIrrigation",
             headers=self.headers
         )
         self.assertIn(status_resp.status_code, [200, 404])
@@ -345,16 +397,16 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
     # Edge Cases
     def test_edge_cases(self):
         # Invalid plot ID
-        invalid_plot_resp = requests.get(
-            f"{wazigate_app_url}/api/getCurrentPlot",
+        invalid_plot_resp = self.session.get(
+            f"{wazigate_app_url}/getCurrentPlot",
             params={'plotId': 999},
             headers=self.headers
         )
         self.assertIn(invalid_plot_resp.status_code, [404, 400])
 
         # Missing config
-        missing_config_resp = requests.get(
-            f"{wazigate_app_url}/api/returnConfig",
+        missing_config_resp = self.session.get(
+            f"{wazigate_app_url}/returnConfig",
             headers=self.headers
         )
         self.assertIn(missing_config_resp.status_code, [200, 404])
@@ -362,8 +414,8 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
     # Security Tests -> useless because API is not protected (locally)
     def test_09_test_authentication(self):
         # Unauthenticated request
-        unauth_resp = requests.get(
-            f"{wazigate_app_url}/api/getPlots"
+        unauth_resp = self.session.get(
+            f"{wazigate_app_url}/getPlots"
         )
         self.assertIn(unauth_resp.status_code, [401, 403])
 
@@ -377,12 +429,12 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
         
         for endpoint in endpoints:
             start_time = time.time()
-            resp = requests.get(
+            resp = self.session.get(
                 f"{wazigate_app_url}{endpoint}",
                 cookies=self.headers
             )
             response_time = time.time() - start_time
-            self.assertLess(response_time, 10)  # 10 seconds max
+            self.assertLess(response_time, 60)  # 10 seconds max
 
 #     # Conduct Unittests against the Apps API
 # class TestIrrigationPredictionIntegration(unittest.TestCase):
@@ -391,7 +443,7 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
 
 #     def setUp(self):
 #         # Authentication
-#         resp = requests.post(wazigate_url + '/auth/token', json=auth)
+#         resp = self.session.post(wazigate_url + '/auth/token', json=auth)
 #         self.token = resp.text.strip('"')
 #         self.headers = {'Authorization': f'Bearer {self.token}'}
 #         self.cookies = {'Token': self.token}

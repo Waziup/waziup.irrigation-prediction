@@ -100,7 +100,7 @@ pipeline {
                             '
                         """
                     }
-                    echo "Successfully deployed ${dockerImage} to local gateway."
+                    echo "Successfully deployed ${dockerImage} to local gateway."   
                 }
             }
         }
