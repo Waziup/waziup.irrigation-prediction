@@ -84,44 +84,48 @@ pipeline {
 
         stage('Push to local Gateway & Restart') {
             steps {
-                script {
-                    def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}"
-                    echo "Pushing Docker image to local gateway..."
-                    withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
-                        sh "docker save ${dockerImage} | gzip | pv | sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} docker load"
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    script {
+                        def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}"
+                        echo "Pushing Docker image to local gateway..."
+                        withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
+                            sh "docker save ${dockerImage} | gzip | pv | sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} docker load"
+                        }
+                        echo "Deploying updated container on gateway..."
+                        withCredentials([string(credentialsId: 'SSH_PASSWORD', variable: 'SSH_PASSWORD')]) {
+                            sh """
+                                sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
+                                    cd /var/lib/wazigate/apps/${APP_NAME} && \
+                                    docker-compose down && \
+                                    docker-compose up -d
+                                '
+                            """
+                        }
+                        echo "Successfully deployed ${dockerImage} to local gateway."   
                     }
-                    echo "Deploying updated container on gateway..."
-                    withCredentials([string(credentialsId: 'SSH_PASSWORD', variable: 'SSH_PASSWORD')]) {
-                        sh """
-                            sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
-                                cd /var/lib/wazigate/apps/${APP_NAME} && \
-                                docker-compose down && \
-                                docker-compose up -d
-                            '
-                        """
-                    }
-                    echo "Successfully deployed ${dockerImage} to local gateway."   
                 }
             }
         }
 
         stage('Test Docker Image - Run Unit Tests') {
             steps {
-                script {
-                    def service_name = "wazi-app"
-                    echo "Running tests on locally deployed Docker image..."
-                    withCredentials([string(credentialsId: 'SSH_PASSWORD', variable: 'SSH_PASSWORD')]) {
-                        sh """
-                            sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
-                                cd /var/lib/wazigate/apps/${APP_NAME} && \
-                                docker-compose exec ${service_name} python3 -m unittest discover -s tests
-                            '
-                        """
-                    }
-                    echo "Successfully deployed ${dockerImage} to local gateway."
-                    catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                        echo "Exception during testing: ${e.getMessage()} \nFailed to test deployed image on local gateway."
-                        echo "One or more test did failed on local gateway."
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    script {
+                        def service_name = "wazi-app"
+                        echo "Running tests on locally deployed Docker image..."
+                        withCredentials([string(credentialsId: 'SSH_PASSWORD', variable: 'SSH_PASSWORD')]) {
+                            sh """
+                                sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
+                                    cd /var/lib/wazigate/apps/${APP_NAME} && \
+                                    docker-compose exec ${service_name} python3 -m unittest discover -s tests
+                                '
+                            """
+                        }
+                        echo "Successfully deployed ${dockerImage} to local gateway."
+                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                            echo "Exception during testing: ${e.getMessage()} \nFailed to test deployed image on local gateway."
+                            echo "One or more test did failed on local gateway."
+                        }
                     }
                 }
             }
@@ -129,21 +133,27 @@ pipeline {
 
         stage('Save Docker Image') {
             steps {
-                // sh 'rm -f irrigation_prediction_docker_image.tar'
-                sh "docker save ${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME} > irrigation_prediction_docker_image.tar"
-                archiveArtifacts artifacts: 'irrigation_prediction_docker_image.tar', fingerprint: true
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    script {
+                        // sh 'rm -f irrigation_prediction_docker_image.tar'
+                        sh "docker save ${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME} > irrigation_prediction_docker_image.tar"
+                        archiveArtifacts artifacts: 'irrigation_prediction_docker_image.tar', fingerprint: true
+                    }
+                }
             }
         }
 
         stage('Push to dockerhub'){
             when { expression { params.perform_push_duckerhub } }
             steps {
-                script {
-                    def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}" // Combines image name and tag
-                    retry(2) {
-                        sh "docker push ${dockerImage}"
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    script {
+                        def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}" // Combines image name and tag
+                        retry(2) {
+                            sh "docker push ${dockerImage}"
+                        }
+                        echo "Successfully pushed image ${dockerImage} to Docker Hub."
                     }
-                    echo "Successfully pushed image ${dockerImage} to Docker Hub."
                 }
             }
         }
