@@ -287,8 +287,10 @@ def setConfig(url, body):
     currentPlot.device_and_sensor_ids_moisture = parsed_data.get('selectedOptionsMoisture', [])
     currentPlot.device_and_sensor_ids_temp = parsed_data.get('selectedOptionsTemp', [])
     currentPlot.device_and_sensor_ids_flow = parsed_data.get('selectedOptionsFlow', [])
-    currentPlot.device_and_sensor_ids_flow_confirmation = [currentPlot.getConfirmationDeviceID(currentPlot.device_and_sensor_ids_flow)]# get confirmation sensors, part of the flow meter, always on xlpp channel 5
-
+    if len(currentPlot.device_and_sensor_ids_flow) != 0:
+        currentPlot.device_and_sensor_ids_flow_confirmation = [currentPlot.getConfirmationDeviceID(currentPlot.device_and_sensor_ids_flow)] # get confirmation sensors, part of the flow meter, always on xlpp channel 5
+    else:
+        currentPlot.device_and_sensor_ids_flow_confirmation = []
     # Parse JSON
 
     # Get data from forms

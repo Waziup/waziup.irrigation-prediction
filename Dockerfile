@@ -16,7 +16,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN  pip install requests==2.28.2 \
-     urllib3<2.0 \
+     "urllib3<2.0"  \
      requests-unixsocket==0.2.0 \
      pycaret \
      matplotlib \
