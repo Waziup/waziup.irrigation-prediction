@@ -162,7 +162,12 @@ def verify_irrigation(plot, amount):
     global Irrigation_retries
 
     # Get sensor id of confirmation device
-    sensor_id = plot.device_and_sensor_ids_flow_confirmation[0]
+    if len(plot.device_and_sensor_ids_flow_confirmation == 0):
+        print(f"No confirmation sensor configured for plot {plot.id}, cannot verify irrigation.")
+        update_irrigation_status(plot, "no_confirmation_sensor_configured")
+        return
+    else:
+        sensor_id = plot.device_and_sensor_ids_flow_confirmation[0]
 
     # Example API call: curl -X GET "http://192.168.188.29/devices/689dad2768f319076487e4c7/sensors/689db4b868f319076487e500/value" -H "accept: application/json"
 

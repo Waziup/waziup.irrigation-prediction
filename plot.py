@@ -164,7 +164,7 @@ class Plot:
             response = requests.get(url, headers=headers)
             if response.status_code != 200:
                 print(f"Failed to fetch sensors, status code: {response.status_code}")
-                return None
+                return ""
 
             data = response.json()
 
@@ -172,12 +172,12 @@ class Plot:
             sensor_id = next(
                 (sensor["id"] for sensor in data
                 if sensor.get("meta", {}).get("xlppChan") == 5),
-                None
+                ""
             )
         except requests.exceptions.RequestException as e:
             print("Request error:", e)
             print(f"Determining the confirmation sensor of the actuator falied for plot {self.id}.")
-            return None
+            return ""
         
         return device_id + "/" + sensor_id
 

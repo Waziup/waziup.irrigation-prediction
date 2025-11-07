@@ -92,7 +92,7 @@ pipeline {
                             sh "docker save ${dockerImage} | gzip | pv | sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} docker load"
                         }
                         echo "Deploying updated container on gateway..."
-                        withCredentials([string(credentialsId: 'SSH_PASSWORD', variable: 'SSH_PASSWORD')]) {
+                        withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
                             sh """
                                 sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
                                     cd /var/lib/wazigate/apps/${APP_NAME} && \
@@ -113,7 +113,7 @@ pipeline {
                     script {
                         def service_name = "wazi-app"
                         echo "Running tests on locally deployed Docker image..."
-                        withCredentials([string(credentialsId: 'SSH_PASSWORD', variable: 'SSH_PASSWORD')]) {
+                        withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: '	SSH_PASSWORD_WAZIGATE')]) {
                             sh """
                                 sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
                                     cd /var/lib/wazigate/apps/${APP_NAME} && \

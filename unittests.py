@@ -107,7 +107,7 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
         # Authentication
         self.session_wg = requests.Session()
 
-        token_url = "http://wazigate/" + "auth/token"
+        token_url = "http://wazigate/" + "auth/token" # to get out of the container to host, look docker-compose.yml
             
         # Parse the URL
         parsed_token_url = urllib.parse.urlsplit(token_url)

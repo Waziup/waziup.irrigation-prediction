@@ -108,6 +108,9 @@ SkipTraning = False                 # if true, load predictions from static file
 # Load variables of training from file, that had been saved from former training/predictions to debug actuation part: DEBUG
 Perform_training = True             # kind of redundant, but automatically saves and loads former results of predictions
 
+# Wait time for resources to be released (recheck after busy in training or prediction for other plots)
+Resource_wait_time_seconds = 300    # seconds
+
 # Restrict time to training
 class TimeLimitCallback(Callback):
     def __init__(self, max_time_seconds):
@@ -2182,7 +2185,7 @@ def predict_with_updated_data(plot):
     # Prevents multiple training or prediction at the same time
     while Currently_active:
         print(f"[{plot.user_given_name}] Waiting for resources to be released. Another training or prediction is already running.")
-        time.sleep(10)
+        time.sleep(Resource_wait_time_seconds)
     # Before training starts, lock the resource    
     Currently_active = True
     
@@ -2244,7 +2247,7 @@ def main(plot) -> int:
     # Prevents multiple training or prediction at the same time
     while Currently_active:
         print(f"[{plot.user_given_name}] Waiting for resources to be released. Another training or prediction is already running.")
-        time.sleep(10)
+        time.sleep(Resource_wait_time_seconds)
         
     # Before training starts, lock the resource    
     Currently_active = True
