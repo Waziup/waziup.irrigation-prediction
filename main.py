@@ -155,6 +155,10 @@ def delete_old_files(folder_path):
     # Traverse the directory, including subdirectories
     for root, _, files in os.walk(folder_path):
         for file_name in files:
+            # Skip .gitkeep, .gitignore and readme files
+            if file_name in {".gitkeep", ".gitignore", "README.md"}:
+                continue
+
             file_path = os.path.join(root, file_name)
             # Check if the file is older than the threshold
             if os.path.isfile(file_path) and os.path.getmtime(file_path) < threshold_time:

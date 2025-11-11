@@ -1,4 +1,5 @@
-FROM python:3.8-slim
+FROM python:3.9-slim-bullseye
+
 #later alpine to save even more filesize of container, but is it worth it? (Alpine uses musl instead of glibc)
 
 # Set environment variables to ensure non-interactive apt-get and prevent cache busting
@@ -15,24 +16,27 @@ RUN apt-get update \
     libhdf5-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN  pip install requests==2.28.2 \
-     "urllib3<2.0"  \
-     requests-unixsocket==0.2.0 \
-     pycaret \
-     matplotlib \
-     pytz \
-     geopy \
-     timezonefinder \
-     python-dotenv \
-     python-dateutil \
-     xgboost \
-     catboost \
-     tensorflow \
-     scikeras \
-     scikit-learn \
-     joblib==1.3 \
-     keras-tuner \
-     xmlrunner
+RUN pip install --upgrade pip setuptools wheel
+
+RUN pip install --retries 10 --timeout 120 \
+    requests==2.28.2 \
+    "urllib3<2.0"  \
+    requests-unixsocket==0.2.0 \
+    pycaret \
+    matplotlib \
+    pytz \
+    geopy \
+    timezonefinder \
+    python-dotenv \
+    python-dateutil \
+    xgboost \
+    catboost \
+    tensorflow \
+    scikeras \
+    scikit-learn \
+    joblib==1.3 \
+    keras-tuner \
+    xmlrunner
 # keras tuner check usage, also xmlrunner for testing, does not need to be included in the image
 
 COPY . /root/src/

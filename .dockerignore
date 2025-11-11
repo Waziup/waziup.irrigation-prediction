@@ -15,7 +15,7 @@ config/*
 /hyperband_dir
 notes.txt
 /test-reports/*
-**/data/debug/*
+**/data/debug/*.plk
 **/data/irrigations*.json
 /help
 models/**/**/*.pkl
