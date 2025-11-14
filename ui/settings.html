@@ -717,8 +717,8 @@
         $("#sensor_list")
           .html('<img src="./loading.gif" /> Loading...')
           .fadeIn();
-        loadStuff();
-        //loadStuff_remote() // DEBUG
+        //loadStuff();
+        loadStuff_remote() // DEBUG
       });
     </script>
   </head>
@@ -987,8 +987,8 @@
 
             <div class="form-group">
               <label for="gps_form">GPS coordinates
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="gpsTooltip">help
-                  <span class="tooltiptext" id="gpsTooltip"></span>
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="gpsCoordinates">help
+                  <span class="tooltiptext" id="gpsCoordinates"></span>
                 </span>
               </label>
               <p class="form-hint">Enter the GPS coordinates of your plot</p>
