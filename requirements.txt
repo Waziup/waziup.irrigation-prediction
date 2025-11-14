@@ -2,7 +2,6 @@ requests
 pycaret
 matplotlib
 pytz
-geopy
 timezonefinder
 python-dotenv
 xgboost

@@ -41,5 +41,27 @@ Keep in mind that this is a simple example, and you may need to adapt the model 
 
 General TODOs:
 - move irrigation logic to seperate thread, better if training/inference fails
-- fail save irrigation, work with timestamps or confirmations, implemented in sensor device but not in app
+
+
+- Exception in callAPI(): Only valid with DatetimeIndex, TimedeltaIndex or PeriodIndex, but got an instance of 'Index'
+Traceback (most recent call last):
+  File "/home/fx/Wazi/WaziGate/wazigate-edge/apps/waziup.irrigation-prediction/usock.py", line 76, in callAPI
+    resCode, resBody, resHeaders = routing[method][routPath](self.path, body)
+  File "main.py", line 802, in getHistoricalChartData
+    f_data_time, f_data_moisture = group_sensor_data(data_moisture)
+  File "main.py", line 582, in group_sensor_data
+    df = df.resample(resample_interval).mean().dropna()
+  File "/home/fx/.local/lib/python3.9/site-packages/pandas/core/frame.py", line 11392, in resample
+    return super().resample(
+  File "/home/fx/.local/lib/python3.9/site-packages/pandas/core/generic.py", line 8858, in resample
+    return get_resampler(
+  File "/home/fx/.local/lib/python3.9/site-packages/pandas/core/resample.py", line 1544, in get_resampler
+    return tg._get_resampler(obj, kind=kind)
+  File "/home/fx/.local/lib/python3.9/site-packages/pandas/core/resample.py", line 1725, in _get_resampler
+    raise TypeError(
+TypeError: Only valid with DatetimeIndex, TimedeltaIndex or PeriodIndex, but got an instance of 'Index'
+ - - [29/Oct/2025 11:05:04] "GET /api/getHistoricalChartData HTTP/1.1" 500 -
+--------------> Happens after a day of running, 
+
+
 - include gen-ai style models:Temporal Fusion Transformer (TFT), Informer or FEDformeryy
