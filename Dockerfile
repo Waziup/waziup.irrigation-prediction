@@ -18,26 +18,36 @@ RUN apt-get update \
 
 RUN pip install --upgrade pip setuptools wheel
 
+RUN pip install --retries 10 --timeout 120 tensorflow
+
+RUN pip install --retries 10 --timeout 120 \
+    scikit-learn \ 
+    xgboost \
+    catboost \
+    scikeras \
+    matplotlib
+
+RUN pip install --retries 10 --timeout 120 pycaret
+
 RUN pip install --retries 10 --timeout 120 \
     requests==2.28.2 \
     "urllib3<2.0"  \
     requests-unixsocket==0.2.0 \
-    pycaret \
-    matplotlib \
+    #pycaret \
+    #matplotlib \
     pytz \
-    geopy \
     timezonefinder \
     python-dotenv \
     python-dateutil \
-    xgboost \
-    catboost \
-    tensorflow \
-    scikeras \
-    scikit-learn \
+    #xgboost \
+    #catboost \
+    #tensorflow \
+    #scikeras \
+    #scikit-learn \
     joblib==1.3 \
     keras-tuner \
     xmlrunner
-# keras tuner check usage, also xmlrunner for testing, does not need to be included in the image
+# keras tuner check usage, also xmlrunner for unittests, does not need to be included in the image
 
 COPY . /root/src/
 

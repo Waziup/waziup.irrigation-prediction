@@ -2,7 +2,7 @@ import datetime
 import os
 from dotenv import load_dotenv
 import pytz
-from geopy.geocoders import Nominatim
+#from geopy.geocoders import Nominatim
 import requests
 from timezonefinder import TimezoneFinder
 import urllib.parse
@@ -30,8 +30,8 @@ class TimeUtils:
         longitude = float(longitude_str)
 
         # Get location data using geopy
-        geolocator = Nominatim(user_agent="timezone_finder")
-        location = geolocator.reverse((latitude, longitude), language="en")
+        #geolocator = Nominatim(user_agent="timezone_finder", timeout=5)
+        #location = geolocator.reverse((latitude, longitude), language="en")
         
         # Determine the timezone using TimezoneFinder
         timezone_finder = TimezoneFinder()
