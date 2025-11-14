@@ -28,8 +28,8 @@ RUN \
         xgboost \
         catboost \
         scikeras \
-        matplotlib && \
-        keras-tuner \
+        matplotlib \
+        keras-tuner && \
     \
     pip install --retries 10 --timeout 120 \
         requests==2.28.2 \
