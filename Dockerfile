@@ -19,7 +19,7 @@ RUN apt-get update \
 RUN \
     pip install --upgrade pip setuptools wheel && \
     \
-    pip install --retries 10 --timeout 120 tensorflow && \
+    pip install --retries 10 --timeout 120 tensorflow-cpu && \
     \
     pip install --retries 10 --timeout 120 pycaret && \
     \
