@@ -16,28 +16,32 @@ RUN apt-get update \
     libhdf5-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --upgrade pip setuptools wheel
-
-RUN pip install --retries 10 --timeout 120 \
-    requests==2.28.2 \
-    "urllib3<2.0"  \
-    requests-unixsocket==0.2.0 \
-    pycaret \
-    matplotlib \
-    pytz \
-    geopy \
-    timezonefinder \
-    python-dotenv \
-    python-dateutil \
-    xgboost \
-    catboost \
-    tensorflow \
-    scikeras \
-    scikit-learn \
-    joblib==1.3 \
-    keras-tuner \
-    xmlrunner
-# keras tuner check usage, also xmlrunner for testing, does not need to be included in the image
+RUN \
+    pip install --upgrade pip setuptools wheel && \
+    \
+    pip install --retries 10 --timeout 120 tensorflow && \
+    \
+    pip install --retries 10 --timeout 120 pycaret && \
+    \
+    pip install --retries 10 --timeout 120 \
+        scikit-learn \
+        xgboost \
+        catboost \
+        scikeras \
+        matplotlib && \
+        keras-tuner \
+    \
+    pip install --retries 10 --timeout 120 \
+        requests==2.28.2 \
+        "urllib3<2.0" \
+        requests-unixsocket==0.2.0 \
+        pytz \
+        timezonefinder \
+        python-dotenv \
+        python-dateutil \
+        joblib==1.3 \
+        xmlrunner
+# keras tuner check usage, also xmlrunner for unittests, does not need to be included in the image
 
 COPY . /root/src/
 
