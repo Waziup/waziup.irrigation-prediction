@@ -50,6 +50,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 # local
 import main
 from utils import NetworkUtils, TimeUtils
+from tune_grids import PYCARET_REGRESSION_TUNE_GRIDS
 
 # Rolling mean window
 RollingMeanWindowData = 15
@@ -1121,7 +1122,7 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        exclude=['lar']
+        exclude=['lar', 'dummy']
         #include=['xgboost', 'catboost'] #DEBUG
     )
 
@@ -1622,116 +1623,116 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Append for comparison
     nn_models.append(model_nn)
 
-    # Create conv neural network
+    # # Create conv neural network
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('num_conv_layers', 2)
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('num_conv_layers', 2)
 
-    # First conv layer
-    hp.Fixed('filters_0', 64)
-    hp.Fixed('kernel_size_0', 3)
+    # # First conv layer
+    # hp.Fixed('filters_0', 64)
+    # hp.Fixed('kernel_size_0', 3)
 
-    # Second conv layer
-    hp.Fixed('filters_1', 64)
-    hp.Fixed('kernel_size_1', 3)
+    # # Second conv layer
+    # hp.Fixed('filters_1', 64)
+    # hp.Fixed('kernel_size_1', 3)
 
-    # Dropout rate (shared across all layers in your model)
-    hp.Fixed('dropout_rate', 0.3)
+    # # Dropout rate (shared across all layers in your model)
+    # hp.Fixed('dropout_rate', 0.3)
 
-    # Dense layer
-    hp.Fixed('dense_units', 128)
+    # # Dense layer
+    # hp.Fixed('dense_units', 128)
 
-    # Optimizer and learning rate
-    hp.Fixed('optimizer', 'adam')
-    hp.Fixed('learning_rate', 0.001)
+    # # Optimizer and learning rate
+    # hp.Fixed('optimizer', 'adam')
+    # hp.Fixed('learning_rate', 0.001)
 
-    # Call the model function with the hp object and the input shape
-    input_shape = (X_train_cnn.shape[1], 1)
-    model_cnn = create_cnn_model(hp, shape=input_shape)
+    # # Call the model function with the hp object and the input shape
+    # input_shape = (X_train_cnn.shape[1], 1)
+    # model_cnn = create_cnn_model(hp, shape=input_shape)
     
-    # Train the model
-    print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
-    history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_cnn)
+    # # Train the model
+    # print('Will now train a Convolutional neural net (CNN), with the following hyperparameters: ' + str(hp.values))
+    # history_cnn = model_cnn.fit(X_train_cnn, y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_cnn)
 
-    # Create RNN model
+    # # Create RNN model
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    # Number of RNN layers
-    hp.Fixed('num_rnn_layers', 2)
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # # Number of RNN layers
+    # hp.Fixed('num_rnn_layers', 2)
 
-    # Layer 0
-    hp.Fixed('units_rnn_0', 64)
-    hp.Fixed('use_dropout_0', True)
-    hp.Fixed('dropout_rate_0', 0.3)
+    # # Layer 0
+    # hp.Fixed('units_rnn_0', 64)
+    # hp.Fixed('use_dropout_0', True)
+    # hp.Fixed('dropout_rate_0', 0.3)
 
-    # Layer 1
-    hp.Fixed('units_rnn_1', 32)
-    hp.Fixed('use_dropout_1', False)  # No dropout in the second layer
+    # # Layer 1
+    # hp.Fixed('units_rnn_1', 32)
+    # hp.Fixed('use_dropout_1', False)  # No dropout in the second layer
 
-    # Optimizer settings
-    hp.Fixed('optimizer', 'adam')
-    hp.Fixed('learning_rate', 0.001)
+    # # Optimizer settings
+    # hp.Fixed('optimizer', 'adam')
+    # hp.Fixed('learning_rate', 0.001)
 
-    input_shape = (X_train.shape[1], 1)
-    model_rnn = create_rnn_model(hp, shape=input_shape)
+    # input_shape = (X_train.shape[1], 1)
+    # model_rnn = create_rnn_model(hp, shape=input_shape)
 
-    # Train the model
-    print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
-    history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_rnn)
+    # # Train the model
+    # print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
+    # history_rnn = model_rnn.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_rnn)
 
-    # Create GRU model
+    # # Create GRU model
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('num_gru_layers', 2)
-    hp.Fixed('units_gru_0', 64)
-    hp.Fixed('dropout_rate_0', 0.2)
-    hp.Fixed('units_gru_1', 32)
-    hp.Fixed('dropout_rate_1', 0.2)
-    hp.Fixed('optimizer', 'adam')
-    hp.Fixed('learning_rate', 1e-3)
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('num_gru_layers', 2)
+    # hp.Fixed('units_gru_0', 64)
+    # hp.Fixed('dropout_rate_0', 0.2)
+    # hp.Fixed('units_gru_1', 32)
+    # hp.Fixed('dropout_rate_1', 0.2)
+    # hp.Fixed('optimizer', 'adam')
+    # hp.Fixed('learning_rate', 1e-3)
 
-    input_shape = (X_train.shape[1], 1)
-    model_gru = create_gru_model(hp, shape=input_shape)
-    # Train the model
-    print('Will now train a Gated Recurrent Unit neural network (GRU), with the following hyperparameters: ' + str(hp.values))
-    history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_gru)
+    # input_shape = (X_train.shape[1], 1)
+    # model_gru = create_gru_model(hp, shape=input_shape)
+    # # Train the model
+    # print('Will now train a Gated Recurrent Unit neural network (GRU), with the following hyperparameters: ' + str(hp.values))
+    # history_gru = model_gru.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_gru)
 
-    # LSTM architecture
+    # # LSTM architecture
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    # Architecture
-    hp.Fixed('num_lstm_layers', 2)
-    hp.Fixed('units_lstm_0', 64)
-    hp.Fixed('bidir_layer_0', True)
-    hp.Fixed('use_dropout_0', True)
-    hp.Fixed('dropout_rate_0', 0.2)
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # # Architecture
+    # hp.Fixed('num_lstm_layers', 2)
+    # hp.Fixed('units_lstm_0', 64)
+    # hp.Fixed('bidir_layer_0', True)
+    # hp.Fixed('use_dropout_0', True)
+    # hp.Fixed('dropout_rate_0', 0.2)
 
-    hp.Fixed('units_lstm_1', 32)
-    hp.Fixed('bidir_layer_1', False)
-    hp.Fixed('use_dropout_1', True)
-    hp.Fixed('dropout_rate_1', 0.2)
+    # hp.Fixed('units_lstm_1', 32)
+    # hp.Fixed('bidir_layer_1', False)
+    # hp.Fixed('use_dropout_1', True)
+    # hp.Fixed('dropout_rate_1', 0.2)
 
-    # Optimizer and learning rate
-    hp.Fixed('optimizer', 'adam')
-    hp.Fixed('learning_rate', 0.001)
+    # # Optimizer and learning rate
+    # hp.Fixed('optimizer', 'adam')
+    # hp.Fixed('learning_rate', 0.001)
 
-    input_shape = (X_train.shape[1], 1)
-    model_lstm = create_lstm_model(hp, shape=input_shape)
-    # Train the model
-    print('Will now train a Long short-term memory neural network (LSTM), with the following hyperparameters: ' + str(hp.values))
-    history_bilstm = model_lstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
-    # Append for comparison
-    nn_models.append(model_lstm)
+    # input_shape = (X_train.shape[1], 1)
+    # model_lstm = create_lstm_model(hp, shape=input_shape)
+    # # Train the model
+    # print('Will now train a Long short-term memory neural network (LSTM), with the following hyperparameters: ' + str(hp.values))
+    # history_bilstm = model_lstm.fit(X_train_scaled[..., np.newaxis], y_train, epochs=50, batch_size=32, validation_split=0.2)
+    # # Append for comparison
+    # nn_models.append(model_lstm)
 
     # # Keras regressor and grid search -> TODO: Kerastuner does not work, package conflict, try optuna hyperopt
     # # Param grid to big -> not supported
@@ -2021,11 +2022,26 @@ def analyze_performance_old(exp, best):
         exp[i].plot_model(best[i], plot = 'forecast', data_kwargs = {'fh' : 500}, save = True)
         #before.save("Plot_after_testset_"+str(i)+".png", format='png')
 
-# Tune hyperparameters of one models
+# Tune hyperparameters of one model
 def tune_model(exp, best):
-    try:        
+    try:
+        # fallback: infer from class name
+        model_id = Model_mapping[best.__class__.__name__]
+
+        grid = PYCARET_REGRESSION_TUNE_GRIDS.get(model_id)
+
+        if not grid:
+            print(f"No grid for model_id='{model_id}', skipping tuning.")
+            return best
+    
+        # grid  = {
+        #     'n_estimators': [100, 300],
+        #     'max_depth': [None, 5, 10],
+        #     'min_samples_split': [2, 5],
+        #     'min_samples_leaf': [1, 2],
+        # }    
         #print(f"Tuning grid for {best}: {exp.get_tuning_grid(best)}")
-        best = exp.tune_model(best, choose_better = True)
+        best = exp.tune_model(best, choose_better = True, custom_grid=grid) # Throws ERROR: grid missing
         return best
     except Exception as e:
         print(f"There was an error tuning the model. {e}")
@@ -2303,7 +2319,7 @@ def main(plot) -> int:
     index, plot.use_pycaret = eval_approach(results, results_nn, 'mae')
 
     # TODO: Debug mode
-    #plot.use_pycaret = False
+    plot.use_pycaret = True
 
     # Train best model on whole dataset (without skipping "test-set")
     if plot.use_pycaret:
