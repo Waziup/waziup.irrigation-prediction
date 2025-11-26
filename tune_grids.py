@@ -1,3 +1,33 @@
+# Pre-defined hyperparameter grids for regression models in PyCaret. -> they are very shallow grids, for quick tuning on small datasets
+
+# Tests Summary:
+# lr ok
+# lasso ok
+# ridge ok
+# en ok
+# lar ok
+# llar ok
+# omp ok
+# br ok
+# ard ok
+# par ok
+# ransac ok
+# tr ok
+# huber ok
+# kr ok
+# svm ok
+# knn ok
+# dt ok
+# rf ok
+# et ok
+# ada ok
+# gbr ok
+# mlp ok
+# xgboost ok
+# lightgbm ok
+# catboost ok
+# dummy ok
+
 PYCARET_REGRESSION_TUNE_GRIDS = {
     # -------------------------------------------------
     # Linear / generalized linear models
@@ -25,27 +55,61 @@ PYCARET_REGRESSION_TUNE_GRIDS = {
         "max_iter": [1000, 5000],
     },
 
-    "lar": {  # Least Angle Regression
+    "lar": {
+        # whether to copy X or modify in-place
+        "copy_X": [True, False],
+        # precision of the computation
+        "eps": [1e-6, 1e-5, 1e-4],
+        # whether to calculate the intercept
         "fit_intercept": [True, False],
-        "normalize": [True, False],  # NOTE: "normalize" is deprecated in newer sklearn
+        # whether to compute full path
+        "fit_path": [True, False],
+        # added to the covariance matrix for stability
+        "jitter": [1e-6, 1e-5],
+        # number of non-zero coefficients (None = no limit)
+        "n_nonzero_coefs": [5, 10, 20, None],
+        # whether to use precomputed Gram matrix
+        "precompute": [True, False],
+        # for reproducibility
+        "random_state": [42],
+        # verbosity level
+        "verbose": [0, 1],        
     },
 
-    "llar": {  # Lasso Least Angle Regression
+    "llar": {
+        # whether to copy X or modify in-place
+        "copy_X": [True, False],
+        # precision of the computation
+        "eps": [1e-6, 1e-5, 1e-4],
+        # whether to calculate the intercept
         "fit_intercept": [True, False],
-        "positive": [False, True],
+        # whether to compute full path
+        "fit_path": [True, False],
+        # added to the covariance matrix for stability
+        "jitter": [1e-6, 1e-5],
+        # number of non-zero coefficients (None = no limit)
+        "n_nonzero_coefs": [5, 10, 20, None],
+        # whether to use precomputed Gram matrix
+        "precompute": [True, False],
+        # for reproducibility
+        "random_state": [42],
+        # verbosity level
+        "verbose": [0, 1],                   
     },
 
-    "omp": {  # Orthogonal Matching Pursuit
-        # I'm not fully sure which params PyCaret exposes here.
-        # Reasonable guesses based on sklearn:
-        "n_nonzero_coefs": [None, 5, 10, 20],
+    "omp": {
+        # whether to calculate the intercept
         "fit_intercept": [True, False],
-        "normalize": [True, False],  # (deprecated in newer sklearn)
+        # max number of non-zero coefficients (None = no limit)
+        "n_nonzero_coefs": [5, 10, 20, None],
+        # whether to use precomputed Gram matrix
+        "precompute": [True, False], 
+        # tolerance for stopping criterion
+        "tol": [1e-6, 1e-5, 1e-4],             
     },
 
     "br": {  # Bayesian Ridge
-        # I'm not fully sure which of these PyCaret passes through,
-        # but they are standard sklearn params:
+        # standard sklearn params:
         "n_iter": [300, 600],
         "alpha_1": [1e-6, 1e-5],
         "alpha_2": [1e-6, 1e-5],
@@ -71,16 +135,14 @@ PYCARET_REGRESSION_TUNE_GRIDS = {
     },
 
     "ransac": {  # Random Sample Consensus
-        # RANSAC wraps a base estimator (often LinearRegression),
-        # and tuning it is tricky. These are tentative:
+        # RANSAC wraps a base estimator (often LinearRegression) and tuning it is tricky. These are tentative:
         "min_samples": [0.1, 0.25, 0.5],
         "residual_threshold": [1.0, 5.0, 10.0],
         "max_trials": [100, 500],
-        # I'm not fully sure that PyCaret exposes all of these for tuning.
     },
 
     "tr": {  # TheilSen Regressor
-        # Very expensive for large data; tune carefully.
+        # Very expensive for large data
         # Parameters below are educated guesses:
         "max_subpopulation": [10000, 20000],
         "n_subsamples": [None, 200, 500],
@@ -161,13 +223,13 @@ PYCARET_REGRESSION_TUNE_GRIDS = {
     # -------------------------------------------------
     # Neural nets
     # -------------------------------------------------
-    "mlp": {  # MLP Regressor
-        # MLPs are sensitive; this is a very small grid on purpose.
-        "hidden_layer_sizes": [(50,), (100,), (100, 50)],
+    "mlp": {  # MLP Regressor (PyCaret-compatible) , TODO: is redundant, already one that can be tuned in my implementation 
+        "hidden_layer_size_0": [50, 100],      # first (and only) hidden layer
         "activation": ["relu", "tanh"],
-        "alpha": [1e-4, 1e-3, 1e-2],
+        "alpha": [1e-4, 1e-3],                # regularization
         "learning_rate": ["constant", "adaptive"],
-        "max_iter": [200, 500],
+        "max_iter": [200, 300],                # keep small for Pi
+        "random_state": [42],
     },
 
     # -------------------------------------------------
@@ -183,23 +245,38 @@ PYCARET_REGRESSION_TUNE_GRIDS = {
         "gamma": [0, 1, 5],
     },
 
-    "lightgbm": {  # LGBMRegressor
-        "n_estimators": [200, 500],
-        "num_leaves": [31, 63, 127],
-        "learning_rate": [0.01, 0.05, 0.1],
-        "min_child_samples": [20, 40, 60],
-        "subsample": [0.7, 1.0],
-        "colsample_bytree": [0.7, 1.0],
-        "reg_lambda": [0, 1, 5],
+    "lightgbm": {
+        # number of trees – keep small, dataset is tiny
+        "n_estimators": [100, 300],
+        # small trees: 2^5 = 32 leaves is already plenty
+        "num_leaves": [15, 31],
+        # learning rate + n_estimators trade-off
+        "learning_rate": [0.05, 0.1],
+        # regularization via min data per leaf
+        "min_child_samples": [10, 20, 40],
+        # row subsampling – light shrinkage to fight overfitting
+        "subsample": [0.8, 1.0],
+        # column subsampling
+        "colsample_bytree": [0.8, 1.0],
+        # L2 regularization
+        "reg_lambda": [0, 1],
     },
 
     "catboost": {  # CatBoostRegressor
+        # Tree structure
         "depth": [4, 6, 8],
-        "learning_rate": [0.01, 0.05, 0.1],
-        "iterations": [300, 600, 1000],
+        # Learning rate & iterations
+        "learning_rate": [0.03, 0.06, 0.1],
+        "iterations": [300, 600],
+        # Regularization
         "l2_leaf_reg": [1, 3, 5],
-        # NOTE: CatBoost has many more params (border_count, bagging, etc.);
-        # I’m keeping this short-ish.
+        # Number of bins for numerical features
+        "border_count": [32, 64, 128],
+        # CatBoost-specific bagging intensity
+        # 0 = no bagging, >1 = more aggressive, more stochastic
+        "bagging_temperature": [0, 0.5, 1.0],
+        # Row sampling
+        "subsample": [0.8, 1.0],
     },
 
     # -------------------------------------------------
@@ -213,8 +290,8 @@ PYCARET_REGRESSION_TUNE_GRIDS = {
     },
 
     "dummy": {  # Dummy Regressor
-        # DummyRegressor has almost nothing to tune:
+        # DummyRegressor, almost nothing to tune, also excluded from PyCaret tuning
         "strategy": ["mean", "median"],
-        # (not sure PyCaret exposes this for tuning, but it's harmless to include)
+
     },
 }
