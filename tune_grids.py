@@ -1,5 +1,7 @@
 # Pre-defined hyperparameter grids for regression models in PyCaret. -> they are very shallow grids, for quick tuning on small datasets
 
+# TODO: move this to a json!?
+
 # Tests Summary:
 # lr ok
 # lasso ok

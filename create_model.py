@@ -1030,7 +1030,7 @@ def prepare_data(plot):
     
     return data#, data_plot, df_comb, cut_sub_dfs
 
-# Create model in pycaret (time series)
+# Create model in pycaret (time series) -> currently that approach is not used, TODO: investigate again?
 def create_and_compare_model_ts(cut_sub_dfs):    
     # call setup of pycaret
     exp=[]
@@ -1099,6 +1099,8 @@ def create_and_compare_model_reg(train):
     train.rename(columns={'index': 'Timestamp'}, inplace=True)
 
     # old: to_be_dropped = ['minute', 'Timestamp','gradient','grouped_soil','grouped_resistance','grouped_soil_temp']
+
+    print("Those are the remaining features after dropping:", list(set(train.columns.tolist()) - set(To_be_dropped)))
 
     # Run the following code with a custom exception hook
     sys.excepthook = custom_exception_hook
@@ -1178,7 +1180,7 @@ def evaluate_target_variable(series1, series2, model_name):
     mpe = np.mean(diff[non_zero_mask] / values1.values[non_zero_mask]) * 100 if np.any(non_zero_mask) else np.nan
 
 
-    # R2
+    # calculate R2 score
     mean_series1 = np.mean(series1)
     ss_total = np.sum((series1 - mean_series1) ** 2)
     ss_residual = np.sum((series1 - series2) ** 2)
@@ -1200,7 +1202,6 @@ def evaluate_target_variable(series1, series2, model_name):
     return results
 
 # Sort models in new dataframe according to performance on testset 
-# -> TODO: for ensemble/stacking model return the 3 best models 
 def evaluate_results_and_choose_best(results_for_one_df, best_for_one_df):
     # sort according to R2 score -> hence [3]
     max_r2_value = max((df['results'][3].max(), idx) for idx, df in enumerate(results_for_one_df))
@@ -1216,6 +1217,45 @@ def evaluate_results_and_choose_best(results_for_one_df, best_for_one_df):
     print("Index of Maximum R2 Value:", max_index,"\n")
 
     return best_model_for_df
+
+# for ensemble/stacking model return the 3 best models based on R2 score
+def evaluate_results_and_choose_top_n(results_for_one_df, best_for_one_df, top_k=3):
+    """
+    results_for_one_df: list of dicts, each with key 'results' -> sequence [MAE, RMSE, MPE, R2, ...]
+    best_for_one_df: list of fitted models corresponding 1:1 to results_for_one_df
+    top_k: how many top models to return (default 3)
+    """
+    # collect (R2, index) pairs
+    r2_with_index = []
+    for idx, df in enumerate(results_for_one_df):
+        r2_value = df["results"][3].max()
+        r2_with_index.append((r2_value, idx))
+
+    # sort by R2 descending
+    r2_with_index.sort(key=lambda x: x[0], reverse=True)
+
+    # take top_k (or fewer if not enough models)
+    top_k = min(top_k, len(r2_with_index))
+    top_indices = r2_with_index[:top_k]
+
+    best_models = []
+    print(f"Top {top_k} models by R2:\n")
+
+    for rank, (r2_value, idx) in enumerate(top_indices, start=1):
+        model = best_for_one_df[idx]
+        res = results_for_one_df[idx]["results"]
+
+        print(f"Rank {rank}:")
+        print("  Model:", model.__module__)
+        print("  R2:  ", r2_value)
+        print("  MAE: ", res[0])
+        print("  RMSE:", res[1])
+        print("  MPE: ", res[2])
+        print("  Index in lists:", idx, "\n")
+
+        best_models.append(model)
+
+    return best_models
 
 # Create future value testset for prediction
 def create_future_values(data, plot):
@@ -1265,7 +1305,7 @@ def create_future_values(data, plot):
     return new_data
 
 # eval model against formerly split testset -> TODO: test has duplicates because of irrigation added formerly
-def evaluate_against_testset(test, exp, best):
+def evaluate_against_testset(currentPlot, test, exp, best):
     print("This is the evaluation against the split testset")
     ground_truth = test['rolling_mean_grouped_soil']
     #ground_truth.reset_index(drop=True, inplace=True)
@@ -1289,8 +1329,12 @@ def evaluate_against_testset(test, exp, best):
         # evaluate predictions against testset 
         results_for_model.append(evaluate_target_variable(ground_truth, predictions[i]['prediction_label'], model_name))
     
-    # Sort models in new dataframe according to performance on testset
-    best_eval = evaluate_results_and_choose_best(results_for_model, best)
+    if currentPlot.ensemble == True:
+        # For ensemble/stacking return top 3 models
+        best_eval = evaluate_results_and_choose_top_n(results_for_model, best, 3)
+    else:
+        # Sort models in new dataframe according to performance on testset
+        best_eval = evaluate_results_and_choose_best(results_for_model, best)
     
     return best_eval, results_for_model
 
@@ -1305,7 +1349,9 @@ def train_best(best_model, data):
 
     # old: to_be_dropped = ['minute', 'Timestamp','gradient','grouped_soil','grouped_resistance','grouped_soil_temp']
 
-    # Run the following code with a custom exception hook => maybe only relevant in VSCode
+    print("Those are the remaining features after dropping:", list(set(data.columns.tolist()) - set(To_be_dropped)))
+
+    # Run the following code with a custom exception hook => maybe only relevant in VSCode => TODO: test without in production
     sys.excepthook = custom_exception_hook
 
     # Run pycarets setup
@@ -1316,12 +1362,21 @@ def train_best(best_model, data):
               ignore_features = To_be_dropped, 
               train_size = 0.8,
               n_jobs = None
-              )
- 
-    # Create model 
-    model = re_exp.create_model(Model_mapping[best_model.__class__.__name__])
-
-    return model, re_exp
+    )
+    
+    if not isinstance(best_model, list):   
+        # Create one model 
+        model = re_exp.create_model(Model_mapping[best_model.__class__.__name__])
+        
+        return model, re_exp
+    else:
+        # Create multiple models, for ensemble
+        model = []
+        for m in best_model:
+            # Create model 
+            model.append(re_exp.create_model(Model_mapping[m.__class__.__name__]))
+        
+        return model, re_exp
 
 # Create NN
 def create_nn_model(hp, shape):
@@ -1734,33 +1789,33 @@ def train_models(X_train, y_train, X_train_scaled, X_train_cnn):
     # Append for comparison
     nn_models.append(model_lstm)
 
-    # Keras regressor and grid search -> TODO: Kerastuner does not work, package conflict, try optuna hyperopt
-    # Param grid to big -> not supported
-    param_grid = {
-        'units_hidden1': [32, 64],  # Number of units in the first hidden layer
-        'units_hidden2': [16, 32],  # Number of units in the second hidden layer
-        'batch_size': [32, 64],  # Batch size for training
-        'epochs': [50, 100],  # Number of epochs for training
-        'optimizer': ['adam', 'rmsprop'],  # Optimizer algorithm
-        'loss': ['mean_squared_error', 'binary_crossentropy'],  # Loss function
-    }
-    # Define parameter grid => works and improves the result!
-    param_grid = {
-        'epochs': [50, 100],
-        'batch_size': [32, 64],
-    }
-    # Wrap the Keras model in a scikit-learn estimator => TODO: !!!!!!!!!!!!!!!!!!!!!!!!!!!!tune (bi)LSTM or gru instead!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    keras_estimator = KerasRegressor(build_fn=create_nn_model)
-    # Create GridSearchCV
-    grid = GridSearchCV(estimator=keras_estimator, param_grid=param_grid, cv=3)
-    # Fit the model
-    grid_result = grid.fit(X_train_cnn, y_train)
-    # Print best parameters
-    print("Best parameters:", grid_result.best_params_)
-    # Get the best model
-    best_model = grid_result.best_estimator_
-    # Append best model for comparision
-    nn_models.append(best_model)
+    # # Keras regressor and grid search -> TODO: Kerastuner does not work, package conflict, try optuna hyperopt
+    # # Param grid to big -> not supported
+    # param_grid = {
+    #     'units_hidden1': [32, 64],  # Number of units in the first hidden layer
+    #     'units_hidden2': [16, 32],  # Number of units in the second hidden layer
+    #     'batch_size': [32, 64],  # Batch size for training
+    #     'epochs': [50, 100],  # Number of epochs for training
+    #     'optimizer': ['adam', 'rmsprop'],  # Optimizer algorithm
+    #     'loss': ['mean_squared_error', 'binary_crossentropy'],  # Loss function
+    # }
+    # # Define parameter grid => works and improves the result!
+    # param_grid = {
+    #     'epochs': [50, 100],
+    #     'batch_size': [32, 64],
+    # }
+    # # Wrap the Keras model in a scikit-learn estimator => TODO: !!!!!!!!!!!!!!!!!!!!!!!!!!!!tune (bi)LSTM or gru instead!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # keras_estimator = KerasRegressor(build_fn=create_nn_model)
+    # # Create GridSearchCV
+    # grid = GridSearchCV(estimator=keras_estimator, param_grid=param_grid, cv=3)
+    # # Fit the model
+    # grid_result = grid.fit(X_train_cnn, y_train)
+    # # Print best parameters
+    # print("Best parameters:", grid_result.best_params_)
+    # # Get the best model
+    # best_model = grid_result.best_estimator_
+    # # Append best model for comparision
+    # nn_models.append(best_model)
 
     return nn_models
 
@@ -2052,8 +2107,12 @@ def tune_models(exp, best):
     # tune hyperparameters of dt
     tuned_best_models = []
     for i in range(len(best)):
-        print("This is for the",i,"model:",best[i])
-        tuned_best_models.append(exp.tune_model(best[i], choose_better = True))
+        print("This is for the",i+1,"model:",best[i])
+        # get model id and grid
+        model_id = Model_mapping[best[i].__class__.__name__]
+        grid = PYCARET_REGRESSION_TUNE_GRIDS.get(model_id)
+        # tune model and append
+        tuned_best_models.append(exp.tune_model(best[i], choose_better = True, custom_grid=grid)) # check grid again
         
     return tuned_best_models
 
@@ -2104,6 +2163,77 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
     #final_model = evaluate_against_testset_nn(best_model_nn, X_train_scaled, y_train)
 
     return final_model
+
+# Helper to get R2 from evaluate_model
+def get_r2(exp, model):
+    df = exp.evaluate_model(model)
+    return df.loc["R2", "Mean"] if "R2" in df.index else float("-inf")
+
+# Create and compare different ensemble model techniques
+def create_and_compare_ensemble(exp, tuned_best_models):
+    try:
+        # Base model is the tuned one
+        if isinstance(tuned_best_models, list):
+            base_models = tuned_best_models
+        else:
+            base_models = [tuned_best_models]
+
+        # Safety: keep only models that have a fit() method
+        base_models = [m for m in base_models if hasattr(m, "fit")]
+        if not base_models:
+            raise ValueError("No valid base models with a .fit() method were provided.")
+
+        # Build ensemble techniques independently
+        stacked_model = exp.stack_models(
+            estimator_list=base_models,         # or a list of several models if you have them
+            choose_better=False                 # don't overwrite anything yet
+        )
+
+        blended_model = exp.blend_models(
+            estimator_list=base_models,
+            choose_better=False
+        )
+
+        bagged_model = exp.ensemble_model(
+            base_models[0],
+            method="Bagging",
+            choose_better=False
+        )
+
+        boosted_model = exp.ensemble_model(
+            base_models[0],
+            method="Boosting",
+            choose_better=False
+        )
+
+        # Evaluate all candidates
+        # tuned: just take the *best* single base model by R2 as baseline
+        r2_base = [(get_r2(exp, m), m) for m in base_models]
+        r2_tuned, best_single_tuned = max(r2_base, key=lambda x: x[0])
+
+        r2_stacked = get_r2(exp, stacked_model)
+        r2_blended = get_r2(exp, blended_model)
+        r2_bagged  = get_r2(exp, bagged_model)
+        r2_boosted = get_r2(exp, boosted_model)
+
+        # Pick the best by R2
+        scores = {
+            "tuned":   (r2_tuned,   best_single_tuned),
+            "stacked": (r2_stacked, stacked_model),
+            "blended": (r2_blended, blended_model),
+            "bagged":  (r2_bagged,  bagged_model),
+            "boosted": (r2_boosted, boosted_model),
+        }
+
+        best_name, (best_r2, best_model) = max(scores.items(), key=lambda x: x[1][0])
+
+        print(f"Best ensemble strategy: {best_name} with R2 = {best_r2:.4f}")
+
+        return best_model
+    
+    except Exception as e:
+        print(f"There was an error creating ensemble models. {e}")
+        return tuned_best_models[0]
 
 # Generate prediction with best_model and impute generated future_values
 def generate_predictions(best, exp, features):
@@ -2214,9 +2344,9 @@ def predict_with_updated_data(plot):
     # NN
     if not plot.use_pycaret:
         Z, Z_scaled, Z_cnn = prepare_future_values(scaler, future_features, X_train.columns)
-        plot.predictions = generate_predictions_nn(plot.tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])
+        plot.predictions = generate_predictions_nn(plot.best_model, Z_scaled, future_features.index[0], future_features.index[-1])
     else:
-        plot.predictions = generate_predictions(plot.tuned_best, plot.best_exp, future_features)
+        plot.predictions = generate_predictions(plot.best_model, plot.best_exp, future_features)
     
     # Cut passed time from predictions
     plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]
@@ -2311,7 +2441,7 @@ def main(plot) -> int:
 
     # Evaluate with testset
     # Classical regression
-    best_eval, results = evaluate_against_testset(test, exp, best)
+    best_eval, results = evaluate_against_testset(plot, test, exp, best)
     # NN
     best_eval_nn, results_nn = evaluate_against_testset_nn(nn_models, X_test_scaled, y_test)
 
@@ -2319,14 +2449,14 @@ def main(plot) -> int:
     index, plot.use_pycaret = eval_approach(results, results_nn, 'mae')
 
     # TODO: Debug mode
-    plot.use_pycaret = False
+    plot.use_pycaret = True
 
     # Train best model on whole dataset (without skipping "test-set")
     if plot.use_pycaret:
         # Classical regression
         best_model, plot.best_exp = train_best(best_eval, plot.data)
     else:
-        # NN -> TODO: eval properly -> still error in r2 calc, fallback to mae
+        # NN -> TODO: eval properly -> still error in r2 calc, fallback to mae(BAD)
         best_model_nn, X_train_scaled, X_val_scaled, y_train, y_val= train_best_nn(best_eval_nn, plot.data, scaler)
 
     
@@ -2343,12 +2473,15 @@ def main(plot) -> int:
         # Before tuning
         #best_model_before_tuning = plot.best_exp.compare_models()
         
-        # Tune hyperparameters of the 3 best models, see notebook
+        # Tune hyperparameters of one or the 3 best models
         try:
-            plot.tuned_best = tune_model(plot.best_exp, best_model)
+            if plot.ensemble:
+                plot.best_model = tune_models(plot.best_exp, best_model)
+            else:
+                plot.best_model = tune_model(plot.best_exp, best_model)
         except Exception as e:
             print(f"Error during tuning: {e}, using the original model.")
-            plot.tuned_best = best_model  # Keep original model if tuning fails
+            plot.best_model = best_model  # Keep original model if tuning fails
 
         
         # After tuning
@@ -2367,28 +2500,28 @@ def main(plot) -> int:
 
         # print(compare_df)
         
-        # Ensemble, Stacking & ... not implemented yet, see notebook
-
+        # Ensemble, Stacking & Blending
+        if plot.ensemble:
+            plot.best_model = create_and_compare_ensemble(plot.best_exp, plot.best_model)
         # Save best pycaret model
-        model_names = save_models(plot.user_given_name, exp, [plot.tuned_best], 'models/best_models/pycaret/best_soil_tension_prediction_pycaret_model_')
+        model_names = save_models(plot.user_given_name, plot.best_exp, [plot.best_model], 'models/best_models/pycaret/best_soil_tension_prediction_pycaret_model_')
 
         # Create predictions to forecast values
-        # Classical regression
         future_features_without_index = future_features.reset_index(drop=True, inplace=False)
         future_features_without_index = future_features_without_index.rename(columns={'index': 'Timestamp'}, inplace=False)
-        plot.predictions = generate_predictions(plot.tuned_best, plot.best_exp, future_features_without_index)
+        plot.predictions = generate_predictions(plot.best_model, plot.best_exp, future_features_without_index)
         plot.predictions['Timestamp'] = future_features.index  # Copy index to column
         plot.predictions = plot.predictions.set_index("Timestamp")  # Set Timestamp as index
-        #plot.predictions = generate_predictions(plot.tuned_best, plot.best_exp, future_features)
+        #plot.predictions = generate_predictions(plot.best_model, plot.best_exp, future_features)
     else:
         # Tune best model
-        plot.tuned_best = tune_model_nn(X_train_scaled, y_train, best_model_nn)
+        plot.best_model = tune_model_nn(X_train_scaled, y_train, best_model_nn)
 
         # Save best model
-        save_models_nn(plot.user_given_name, [plot.tuned_best], 'models/best_models/nn/best_soil_tension_prediction_nn_model_')
+        save_models_nn(plot.user_given_name, [plot.best_model], 'models/best_models/nn/best_soil_tension_prediction_nn_model_')
 
         # Generate predictions with NN model
-        plot.predictions = generate_predictions_nn(plot.tuned_best, Z_scaled, future_features.index[0], future_features.index[-1])
+        plot.predictions = generate_predictions_nn(plot.best_model, Z_scaled, future_features.index[0], future_features.index[-1])
 
     # Cut passed time from predictions
     # Ensure the index of plot.predictions is datetime with the same timezone

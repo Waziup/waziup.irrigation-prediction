@@ -76,12 +76,13 @@ class Plot:
         self.threshold_timestamp = ""                       # Threshold timestamp when soil will be to dry
 
         # Model
-        self.tuned_best = None                              # Stores the currently best model
+        self.best_model = None                              # Stores the currently best model
         self.best_exp = None                                # Stores the pycarets experiment object
 
         # Debug
         self.use_pycaret = True                             # Flag can be switched to decide on model usage
         self.load_data_from_csv = False                     # Flag can be switched to decide on data source
+        self.ensemble = True                                # Flag to use ensemble/stacking model
         self.data_from_csv = "data/debug/binned_removed_new_for_app.csv"
         # Load former irrigations from file "data/irrigations.json" DEBUG
         self.load_irrigations_from_file = False
