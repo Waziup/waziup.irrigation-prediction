@@ -1124,7 +1124,7 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = 1,
-        exclude=['lar', 'dummy']
+        exclude=['lar', 'dummy', 'lightgbm']
         #include=['xgboost', 'catboost'] #DEBUG
     )
 
@@ -2232,7 +2232,7 @@ def create_and_compare_ensemble(exp, tuned_best_models):
         return best_model
     
     except Exception as e:
-        print(f"There was an error creating ensemble models. {e}")
+        print(f"There was an error creating ensemble models. {e} Fallback to best tuned model and perform prediction.")
         return tuned_best_models[0]
 
 # Generate prediction with best_model and impute generated future_values
@@ -2449,7 +2449,7 @@ def main(plot) -> int:
     index, plot.use_pycaret = eval_approach(results, results_nn, 'mae')
 
     # TODO: Debug mode
-    plot.use_pycaret = True
+    #plot.use_pycaret = False
 
     # Train best model on whole dataset (without skipping "test-set")
     if plot.use_pycaret:

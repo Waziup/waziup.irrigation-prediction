@@ -91,6 +91,17 @@ pipeline {
                         withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
                             sh "docker save ${dockerImage} | gzip | pv | sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} docker load"
                         }
+                        echo "Successfully pushed image ${dockerImage} to local gateway."
+
+                        echo "Copy docker-compose and package.json files to local gateway..."
+                        withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
+                            sh """
+                                sshpass -p '${SSH_PASSWORD_WAZIGATE}' scp -o StrictHostKeyChecking=no docker-compose.yml pi@${LOCAL_WAZIGATE_IP}:/var/lib/wazigate/apps/${APP_NAME}/docker-compose.yml
+                                sshpass -p '${SSH_PASSWORD_WAZIGATE}' scp -o StrictHostKeyChecking=no package.json pi@${LOCAL_WAZIGATE_IP}:/var/lib/wazigate/apps/${APP_NAME}/package.json
+                            """
+                        }
+                        echo "Successfully copied docker-compose and package.json files to local gateway."
+                        
                         echo "Deploying updated container on gateway..."
                         withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
                             sh """
@@ -102,7 +113,7 @@ pipeline {
                                 '
                             """
                         }
-                        echo "Successfully deployed ${dockerImage} to local gateway."   
+                        echo "Successfully deployed ${dockerImage} to local gateway and cleaned up."   
                     }
                 }
             }
