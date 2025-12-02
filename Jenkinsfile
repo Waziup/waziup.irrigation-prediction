@@ -96,8 +96,16 @@ pipeline {
                         echo "Copy docker-compose and package.json files to local gateway..."
                         withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
                             sh """
-                                sshpass -p '${SSH_PASSWORD_WAZIGATE}' scp -o StrictHostKeyChecking=no docker-compose.yml pi@${LOCAL_WAZIGATE_IP}:/var/lib/wazigate/apps/${APP_NAME}/docker-compose.yml
-                                sshpass -p '${SSH_PASSWORD_WAZIGATE}' scp -o StrictHostKeyChecking=no package.json pi@${LOCAL_WAZIGATE_IP}:/var/lib/wazigate/apps/${APP_NAME}/package.json
+                                # Copy to a temp directory
+                                sshpass -p '${SSH_PASSWORD_WAZIGATE}' scp -o StrictHostKeyChecking=no docker-compose.yml pi@${LOCAL_WAZIGATE_IP}:/tmp/docker-compose.yml
+                                sshpass -p '${SSH_PASSWORD_WAZIGATE}' scp -o StrictHostKeyChecking=no package.json pi@${LOCAL_WAZIGATE_IP}:/tmp/package.json
+
+                                # Move with sudo on the remote host
+                                sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
+                                    sudo -S mkdir -p /var/lib/wazigate/apps/${APP_NAME} && \
+                                    sudo -S mv /tmp/docker-compose.yml /var/lib/wazigate/apps/${APP_NAME}/docker-compose.yml && \
+                                    sudo -S mv /tmp/package.json /var/lib/wazigate/apps/${APP_NAME}/package.json"
+                                '
                             """
                         }
                         echo "Successfully copied docker-compose and package.json files to local gateway."
