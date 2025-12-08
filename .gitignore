@@ -180,3 +180,6 @@ test-reports/
 !models/.gitkeep
 models/**/**/*.pkl
 models/**/**/*.h5
+# exclude saved metrics
+models/**/**/*.png
+models/**/**/*.json
