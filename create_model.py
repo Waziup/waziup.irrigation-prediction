@@ -1135,24 +1135,28 @@ def create_and_compare_model_reg(train):
 
 # Save the best models
 def save_models(plot_name, exp, best, path_to_save):
-    # save pipeline
-    model_names = []
+    try:
+        # save pipeline
+        model_names = []
 
-    # Ensure the directory exists
-    os.makedirs(os.path.dirname(path_to_save), exist_ok=True)
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(path_to_save), exist_ok=True)
 
-    # type check for array -> convert
-    if not isinstance(best, list):
-        best = [best]
+        # type check for array -> convert
+        if not isinstance(best, list):
+            best = [best]
 
-    for i in range(len(best)):
-        full_path = path_to_save + str(i) + "_" + best[i].__module__ + "_" + plot_name
-        exp.save_model(best[i], full_path)
-        model_names.append(full_path)
+        for i in range(len(best)):
+            full_path = path_to_save + str(i) + "_" + best[i].__module__ + "_" + plot_name
+            exp.save_model(best[i], full_path)
+            model_names.append(full_path)
+            
+        return model_names
+    except Exception as e:
+        print("An error occurred while saving the models:", str(e))
+        return []
         
-    return model_names
-        
-# TODO: model_names will not work if it was not saved before        
+# TODO: model_names will not work if it was not saved before, adjust paths accordingly        
 # Load the best models        
 def load_models(model_names):
     # load pipeline
@@ -2296,8 +2300,8 @@ def analyze_performance_old(exp, best):
         #before.save("Plot_after_testset_"+str(i)+".png", format='png')
 
 # Tune hyperparameters of one model
-def tune_model(exp, best):
-    try:
+def tune_one_model(exp, best):
+    try: # double try, except
         # fallback: infer from class name
         model_id = Model_mapping[best.__class__.__name__]
         # Load grid
@@ -2324,10 +2328,11 @@ def tune_models(exp, best):
         # Load grid
         grid = PYCARET_REGRESSION_TUNE_GRIDS.get(model_id)
         # tune model and append
-        tuned_best_models.append(exp.tune_model(best[i], choose_better = True, custom_grid=grid)) # check grid again
+        tuned_best_models.append(
+            exp.tune_model(best[i], choose_better = True)#, custom_grid=grid)
+        ) # check grid again: xgboost, !!!catboost!!! is VERY SLOW
         
     return tuned_best_models
-
 
 def tune_model_nn(X_train_scaled, y_train, best_model_nn):
     try:
@@ -2375,7 +2380,7 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
         # Compare with formerly best model -> since it is trained 
         #final_model = evaluate_against_testset_nn(best_model_nn, X_train_scaled, y_train)
 
-        return final_model
+        return final_model, best_hps
     
     except Exception as e:
         print(f"There was an error tuning the NN model. {e}")
@@ -2389,6 +2394,7 @@ def get_r2(exp, model):
 # Create and compare different ensemble model techniques
 def create_and_compare_ensemble(exp, tuned_best_models):
     try:
+        print(f"Creating ensemble models from {len(tuned_best_models)} tuned base models.")
         # Base model is the tuned one
         if isinstance(tuned_best_models, list):
             base_models = tuned_best_models
@@ -2458,7 +2464,7 @@ def create_and_compare_ensemble_nn(tuned_best_models, X, y):
         full_models = []
         for i, model_fn in enumerate(tuned_best_models):
             m = model_fn()
-            m.fit(X, y, epochs=best_epochs[i], verbose=0)
+            m.fit(X, y, epochs=best_epochs[i], verbose=Verbose_logging)
             full_models.append(m)
 
         # ===== 2) OOF predictions =====
@@ -2473,7 +2479,7 @@ def create_and_compare_ensemble_nn(tuned_best_models, X, y):
 
             for i, model_fn in enumerate(X):
                 m = model_fn()
-                m.fit(X_train, y_train, epochs=best_epochs[i], verbose=0)
+                m.fit(X_train, y_train, epochs=best_epochs[i], verbose=Verbose_logging)
                 oof[va, i] = m.predict(X_val).flatten()
 
         # ===== 3) train meta-learner =====
@@ -2692,7 +2698,7 @@ def main(plot) -> int:
     # NN: (print eval(on X_test) and save to disk)
     save_models_nn(plot.user_given_name, nn_models, f'models/{plot.user_given_name}/intermediate_models/nn/soil_tension_prediction_nn_model_')
     
-    # Load regression model from disk, if there was a magical error => TODO: useless, because it would stop before, surround more with try except
+    # Load regression model from disk, if there was a magical error => TODO: useless, omit, because it would stop before, surround more with try except
     try:
         best
     except NameError:
@@ -2711,7 +2717,7 @@ def main(plot) -> int:
     index, plot.use_pycaret = eval_approach_mix(results, results_nn, weights=None)
 
     # TODO: Debug mode
-    # plot.use_pycaret = False
+    # plot.use_pycaret = True
 
     # Train best model on whole dataset (without skipping "test-set")
     if plot.use_pycaret:
@@ -2740,7 +2746,7 @@ def main(plot) -> int:
             if plot.ensemble:
                 plot.best_model = tune_models(plot.best_exp, best_model)
             else:
-                plot.best_model = tune_model(plot.best_exp, best_model)
+                plot.best_model = tune_one_model(plot.best_exp, best_model)
         except Exception as e:
             print(f"Error during tuning: {e}, using the original model.")
             plot.best_model = best_model  # Keep original model if tuning fails
@@ -2780,11 +2786,14 @@ def main(plot) -> int:
         # Tune best model -> TODO
         if plot.ensemble:
             tuned_best_models = []
+            tuned_best_hps = []
             for i in range(len(best_model_nn)):
-                tuned_best_models.append(tune_model_nn(X_train_scaled, y_train, best_model_nn[i]))
+                tuned_best, best_hp = tune_model_nn(X_train_scaled, y_train, best_model_nn[i])
+                tuned_best_models.append(tuned_best)
+                tuned_best_hps.append(best_hp)
                 #plot.best_model = create_and_compare_ensemble_nn(tuned_best_models, X_train_scaled, y_train)
         else:
-            plot.best_model = tune_model_nn(X_train_scaled, y_train, best_model_nn)
+            plot.best_model, _ = tune_model_nn(X_train_scaled, y_train, best_model_nn)
 
         # Save best model
         save_models_nn(plot.user_given_name, [plot.best_model], f'models/{plot.user_given_name}/best_models/nn/best_soil_tension_prediction_nn_model_') # TODO:introduce plots and multiple models
