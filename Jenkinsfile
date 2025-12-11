@@ -121,9 +121,9 @@ pipeline {
                                 sshpass -p "$SSH_PASSWORD_WAZIGATE" ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
                                     cd /var/lib/wazigate/apps/${APP_NAME} &&
                                     echo "$SSH_PASSWORD_WAZIGATE" | sudo -S sh -e -c "
-                                        docker compose stop;
-                                        docker compose rm -f;
-                                        docker compose up -d;
+                                        docker-compose stop;
+                                        docker-compose rm -f;
+                                        docker-compose up -d;
                                         docker image prune -f;
                                     "
                                 '

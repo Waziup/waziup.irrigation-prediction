@@ -7,6 +7,7 @@ Created on Wed May  3 10:54:49 2023
 
 #TODO: clear imports
 
+import csv
 from datetime import timedelta, datetime
 import datetime
 import json
@@ -23,6 +24,7 @@ import matplotlib.pyplot as plt
 #import missingno as msno 
 import sys
 import pytz
+import traceback
 
 # new imports nn
 import tensorflow
@@ -124,10 +126,11 @@ class TimeLimitCallback(Callback):
 
     def on_epoch_end(self, epoch, logs=None):  # Changed to on_epoch_end
         elapsed_time = time.time() - self.start_time
-        print(f"Epoch {epoch}: Elapsed time {elapsed_time:.2f} seconds")
+        if Verbose_logging:
+            print(f"\nEpoch {epoch}: Elapsed time {elapsed_time:.2f} seconds\n")
         if elapsed_time > self.max_time_seconds:
             self.model.stop_training = True
-            print(f"Training stopped after {self.max_time_seconds} seconds")
+            print(f"\nTraining stopped after {self.max_time_seconds} seconds")
 
 # Resample and interpolate
 def check_gaps(data):
@@ -143,12 +146,14 @@ def check_gaps(data):
 # Impute missing data & apply rolling mean (imputation & cleaning)
 def fill_gaps(data):
     # Show if there are any missing values inside the data
-    print("This is before: \n",data.isna().any())
+    if Verbose_logging:
+        print("This is before interpolate: \n",data.isna().any())
 
     data = data.interpolate(method='linear')
 
     # Show if there are any missing values inside the data
-    print("This is afterwards: \n",data.isna().any())
+    if Verbose_logging:
+        print("This is afterwards interpolate: \n",data.isna().any())
 
     return data
     
@@ -817,7 +822,7 @@ def split_dataframe(df, index_ranges):
             
     return dfs
 
-# Main function to split dataframes
+# Main function to split dataframes -> Obsolete
 def split_sub_dfs(data, data_plot):
     # calculate slope of "rolling_mean_grouped_soil"
     f = data.rolling_mean_grouped_soil
@@ -1255,13 +1260,14 @@ def evaluate_results_and_choose_top_n(results_for_one_df, best_for_one_df, top_n
         model = best_for_one_df[idx]
         res = results_for_one_df[idx]["results"]
 
-        print(f"Rank {rank}:")
-        print("  Model:", model.__module__ if pycaret_format else model.model_name)
-        print("  R2:  ", r2_value)
-        print("  MAE: ", res[0])
-        print("  RMSE:", res[1])
-        print("  MPE: ", res[2])
-        print("  Index in lists:", idx, "\n")
+        if Verbose_logging:
+            print(f"Rank {rank}:")
+            print("  Model:", model.__module__ if pycaret_format else model.model_name)
+            print("  R2:  ", r2_value)
+            print("  MAE: ", res[0])
+            print("  RMSE:", res[1])
+            print("  MPE: ", res[2])
+            print("  Index in lists:", idx, "\n")
 
         best_models.append(model)
 
@@ -1422,6 +1428,9 @@ def create_nn_model(hp, shape):
     else:
         optimizer = RMSprop(learning_rate=learning_rate)
 
+    # Tune the batch size
+    hp.Choice("batch_size", [16, 32, 64, 128])
+
     # Compile the model
     model.compile(
         optimizer=optimizer,
@@ -1474,6 +1483,9 @@ def create_cnn_model(hp, shape):
     else:
         optimizer = RMSprop(learning_rate=learning_rate)
 
+    # Tune the batch size
+    hp.Choice("batch_size", [16, 32, 64, 128])
+
     # Compile the model
     model.compile(
         optimizer=optimizer,
@@ -1519,6 +1531,9 @@ def create_rnn_model(hp, shape):
     else:
         optimizer = RMSprop(learning_rate=learning_rate)
 
+    # Tune the batch size
+    hp.Choice("batch_size", [16, 32, 64, 128])
+
     # Compile the model
     model.compile(
         optimizer=optimizer,
@@ -1562,6 +1577,9 @@ def create_gru_model(hp, shape):
         optimizer = Adam(learning_rate=learning_rate)
     else:
         optimizer = SGD(learning_rate=learning_rate)
+
+    # Tune the batch size
+    hp.Choice("batch_size", [16, 32, 64, 128])
 
     # Compile the model
     model.compile(
@@ -1615,6 +1633,9 @@ def create_lstm_model(hp, shape):
     else:
         optimizer = RMSprop(learning_rate=learning_rate)
 
+    # Tune the batch size
+    hp.Choice("batch_size", [16, 32, 64, 128])
+
     # Compile the model
     model.compile(
         optimizer=optimizer,
@@ -1628,7 +1649,7 @@ def create_lstm_model(hp, shape):
 
     return model
 
-# prepare data for (conv) neural nets and other model architechtures
+# prepare data for (conv) neural nets and other model architechtures -> OBSOLETE: use prepare_data_for_cnn2 instead
 def prepare_data_for_cnn(data, target_variable):
     # to rangeindex => do not use timestamps!
     data = data.reset_index(drop=False, inplace=False)
@@ -2184,7 +2205,8 @@ def compare_models_on_test(nn_models, ZZ, Z_cnn):
 
     return best_model_index
 
-def eval_approach(results, results_nn, metrics):
+# Obsolete: use eval_approach_mix instead
+def eval_approach(results, results_nn, metrics = 'mae'):
     use_pycaret = True
     index = -1
     if metrics == 'mae':
@@ -2334,18 +2356,18 @@ def tune_models(exp, best):
         
     return tuned_best_models
 
-def tune_model_nn(X_train_scaled, y_train, best_model_nn):
+def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
     try:
         print("Tuning best NN model (", best_model_nn.model_name, ") after evaluation.")
 
         # quick workaround for adjusting train shape for tuning a lstm
         if best_model_nn.model_name == 'lstm_model': # TODO: check
             X_train_scaled = X_train_scaled.reshape((X_train_scaled.shape[0], 1, X_train_scaled.shape[1]))
+            X_val_scaled = X_val_scaled.reshape((X_val_scaled.shape[0], 1, X_val_scaled.shape[1]))
 
-        hp = HyperParameters()
-
+        # Initialize the Hyperband tuner
         tuner = Hyperband(
-            model_builder_with_shape(Model_functions[best_model_nn.model_name], best_model_nn.shape),
+            model_builder_with_shape(Model_functions[best_model_nn.model_name], best_model_nn.shape, use_batch_hp=True),
             objective='val_mae',
             max_epochs=80,              # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
             factor=3,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
@@ -2361,9 +2383,10 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
 
         tuner.search(X_train_scaled, 
                         y_train, 
-                        epochs=hp.Int('epochs', 10, 80), #10 50 DEBUG
-                        batch_size=hp.Choice('batch_size', [16, 32, 64, 128]),
-                        validation_split=0.2,
+                        #epochs=hp.Int('epochs', 10, 80), #10 50 DEBUG
+                        #batch_size=hp.Choice('batch_size', [16, 32, 64, 128]),
+                        #validation_split=0.2,
+                        validation_data=(X_val_scaled, y_val),
                         callbacks=[time_limit_callback]  # Add the time limit callback here TODO: fix: it is not working
         )
 
@@ -2375,7 +2398,12 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
         final_model = Model_functions[best_model_nn.model_name](best_hps, best_model_nn.shape)
 
         # Train the final model with the best hyperparameters on the full training data
-        final_model.fit(X_train_scaled, y_train, epochs=best_hps.values.get('tuner/epochs', 50), batch_size=32)#, validation_split=0.2)
+        final_model.fit(X_train_scaled, 
+                        y_train, 
+                        epochs=best_hps.values.get('tuner/epochs', 50), 
+                        batch_size=best_hps.values.get('batch_size', 32),
+                        validation_data=(X_val_scaled, y_val)
+                        )
 
         # Compare with formerly best model -> since it is trained 
         #final_model = evaluate_against_testset_nn(best_model_nn, X_train_scaled, y_train)
@@ -2386,13 +2414,61 @@ def tune_model_nn(X_train_scaled, y_train, best_model_nn):
         print(f"There was an error tuning the NN model. {e}")
         return best_model_nn
 
-# Helper to get R2 from evaluate_model
+# Helper to get R2 from evaluate_model->pycaret eval model is not stable across all models
 def get_r2(exp, model):
+    if model is None:
+        return -9999  # automatically worst
     df = exp.evaluate_model(model)
-    return df.loc["R2", "Mean"] if "R2" in df.index else float("-inf")
+    if df is None:
+        print(f"Warning: evaluate_model returned None for {model}")
+        return -9999
+    return df.loc["R2", "Mean"] if "R2" in df.index else -9999
+
+def get_r2_manual(model, X_test, y_test):
+    try:
+        y_pred = model.predict(X_test)
+        return r2_score(y_test, y_pred)
+    except Exception as e:
+        print(f"Warning: failed to compute R2 for {model}: {e}")
+        return -9999
+
+def safe_make(label: str, fn):
+    """
+    Safely executes a function (fn). 
+    If it fails, prints an error with the given label and returns None.
+    """
+    try:
+        result = fn()  # IMPORTANT: fn must be callable
+        if result is None:
+            raise ValueError(f"{label} returned None")
+        return result
+    except Exception as e:
+        print(f"{label} failed: {e}")
+        traceback.print_exc()
+        return None
+
+def log_scores_csv(scores, filename="model_scores.csv"):
+
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+    # Check if file exists to write header
+    file_exists = os.path.isfile(filename)
+
+    with open(filename, "a", newline="") as f:
+        writer = csv.writer(f)
+
+        # Header only once
+        if not file_exists:
+            writer.writerow(["timestamp", "type", "r2", "model"])
+        
+        ts = datetime.now().isoformat()
+
+        for key, (r2, model) in scores.items():
+            writer.writerow([ts, key, r2, type(model).__name__ if model else "None"])
 
 # Create and compare different ensemble model techniques
-def create_and_compare_ensemble(exp, tuned_best_models):
+def create_and_compare_ensemble(plot_name, exp, tuned_best_models):
     try:
         print(f"Creating ensemble models from {len(tuned_best_models)} tuned base models.")
         # Base model is the tuned one
@@ -2407,37 +2483,49 @@ def create_and_compare_ensemble(exp, tuned_best_models):
             raise ValueError("No valid base models with a .fit() method were provided.")
 
         # Build ensemble techniques independently
-        stacked_model = exp.stack_models(
-            estimator_list=base_models,         # or a list of several models if you have them
-            choose_better=False                 # don't overwrite anything yet
+        stacked_model = safe_make(
+            "stacked_model",
+            lambda: exp.stack_models(
+                estimator_list=base_models,
+                choose_better=False
+            )
         )
 
-        blended_model = exp.blend_models(
-            estimator_list=base_models,
-            choose_better=False
+        blended_model = safe_make(
+            "blended_model",
+            lambda: exp.blend_models(
+                estimator_list=base_models,
+                choose_better=False
+            )
         )
 
-        bagged_model = exp.ensemble_model(
-            base_models[0],
-            method="Bagging",
-            choose_better=False
+        bagged_model = safe_make(
+            "bagged_model",
+            lambda: exp.ensemble_model(
+                base_models[0],
+                method="Bagging",
+                choose_better=False
+            )
         )
 
-        boosted_model = exp.ensemble_model(
-            base_models[0],
-            method="Boosting",
-            choose_better=False
+        boosted_model = safe_make(
+            "boosted_model",
+            lambda: exp.ensemble_model(
+                base_models[0],
+                method="Boosting",
+                choose_better=False
+            )
         )
 
         # Evaluate all candidates
         # tuned: just take the *best* single base model by R2 as baseline
-        r2_base = [(get_r2(exp, m), m) for m in base_models]
+        r2_base = [(get_r2_manual(m, exp.X_test, exp.y_test), m) for m in base_models]
         r2_tuned, best_single_tuned = max(r2_base, key=lambda x: x[0])
 
-        r2_stacked = get_r2(exp, stacked_model)
-        r2_blended = get_r2(exp, blended_model)
-        r2_bagged  = get_r2(exp, bagged_model)
-        r2_boosted = get_r2(exp, boosted_model)
+        r2_stacked = get_r2_manual(exp, stacked_model)
+        r2_blended = get_r2_manual(exp, blended_model)
+        r2_bagged  = get_r2_manual(exp, bagged_model)
+        r2_boosted = get_r2_manual(exp, boosted_model)
 
         # Pick the best by R2
         scores = {
@@ -2452,22 +2540,19 @@ def create_and_compare_ensemble(exp, tuned_best_models):
 
         print(f"Best ensemble strategy: {best_name} with R2 = {best_r2:.4f}")
 
+        if Verbose_logging:
+            log_scores_csv(scores, filename=f"models/{plot_name}/best_models/pycaret/ensemble_scores_{datetime.datetime.now()}.csv")
+
         return best_model
     
     except Exception as e:
-        print(f"There was an error creating ensemble models. {e} Fallback to best tuned model and perform prediction.")
+        print(f"There was an error creating ensemble models. {e} "
+              f"Fallback to best tuned model and perform prediction.")
         return tuned_best_models[0]
     
-def create_and_compare_ensemble_nn(tuned_best_models, X, y):
+def create_and_compare_ensemble_nn(tuned_best_models, tuned_best_hps, X, y):
     try:
-        # ===== 1) Train full models =====
-        full_models = []
-        for i, model_fn in enumerate(tuned_best_models):
-            m = model_fn()
-            m.fit(X, y, epochs=best_epochs[i], verbose=Verbose_logging)
-            full_models.append(m)
-
-        # ===== 2) OOF predictions =====
+        # ===== 1) OOF predictions =====
         from sklearn.model_selection import KFold
         kf = KFold(n_splits=5, shuffle=True, random_state=123)
 
@@ -2479,15 +2564,15 @@ def create_and_compare_ensemble_nn(tuned_best_models, X, y):
 
             for i, model_fn in enumerate(X):
                 m = model_fn()
-                m.fit(X_train, y_train, epochs=best_epochs[i], verbose=Verbose_logging)
+                m.fit(X_train, y_train, epochs=tuned_best_hps[i].get, verbose=Verbose_logging)
                 oof[va, i] = m.predict(X_val).flatten()
 
-        # ===== 3) train meta-learner =====
+        # ===== 2) train meta-learner =====
         from sklearn.linear_model import Ridge
         meta = Ridge(alpha=1.0)
         meta.fit(oof, y)
 
-        # ===== 4) return final stacked predictor =====
+        # ===== 3) return final stacked predictor =====
         def stacked_predict(X_new):
             preds = np.column_stack([m.predict(X_new).flatten()
                                     for m in full_models])
@@ -2717,7 +2802,7 @@ def main(plot) -> int:
     index, plot.use_pycaret = eval_approach_mix(results, results_nn, weights=None)
 
     # TODO: Debug mode
-    # plot.use_pycaret = True
+    plot.use_pycaret = False
 
     # Train best model on whole dataset (without skipping "test-set")
     if plot.use_pycaret:
@@ -2770,7 +2855,7 @@ def main(plot) -> int:
         
         # Ensemble, Stacking & Blending
         if plot.ensemble:
-            plot.best_model = create_and_compare_ensemble(plot.best_exp, plot.best_model)
+            plot.best_model = create_and_compare_ensemble(plot.user_given_name, plot.best_exp, plot.best_model)
         # Save best pycaret model
         model_names = save_models(plot.user_given_name, plot.best_exp, [plot.best_model], f'models/{plot.user_given_name}/best_models/pycaret/best_soil_tension_prediction_pycaret_model_')
 
@@ -2780,7 +2865,6 @@ def main(plot) -> int:
         plot.predictions = generate_predictions(plot.best_model, plot.best_exp, future_features_without_index)
         plot.predictions['Timestamp'] = future_features.index  # Copy index to column
         plot.predictions = plot.predictions.set_index("Timestamp")  # Set Timestamp as index
-        #plot.predictions = generate_predictions(plot.best_model, plot.best_exp, future_features)
     # Neural Networks
     else:
         # Tune best model -> TODO
@@ -2788,10 +2872,10 @@ def main(plot) -> int:
             tuned_best_models = []
             tuned_best_hps = []
             for i in range(len(best_model_nn)):
-                tuned_best, best_hp = tune_model_nn(X_train_scaled, y_train, best_model_nn[i])
+                tuned_best, best_hp = tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn[i])
                 tuned_best_models.append(tuned_best)
                 tuned_best_hps.append(best_hp)
-                #plot.best_model = create_and_compare_ensemble_nn(tuned_best_models, X_train_scaled, y_train)
+            plot.best_model = create_and_compare_ensemble_nn(tuned_best_models, tuned_best_hps, X_train_scaled, y_train)
         else:
             plot.best_model, _ = tune_model_nn(X_train_scaled, y_train, best_model_nn)
 
