@@ -142,23 +142,32 @@ pipeline {
                     script {
                         def service_name = "wazi-app"
                         echo "Running tests on locally deployed Docker image..."
-                        withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: '	SSH_PASSWORD_WAZIGATE')]) {
-                            sh """
-                                sshpass -p '${SSH_PASSWORD_WAZIGATE}' ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
-                                    cd /var/lib/wazigate/apps/${APP_NAME} && \
-                                    docker-compose exec ${service_name} python3 -m unittest discover -s tests
-                                '
-                            """
-                        }
-                        echo "Successfully deployed ${dockerImage} to local gateway."
-                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                            echo "Exception during testing: ${e.getMessage()} \nFailed to test deployed image on local gateway."
-                            echo "One or more test did failed on local gateway."
+
+                        withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
+
+                            // Run tests remotely
+                            def result = sh (
+                                script: """
+                                    sshpass -p "${SSH_PASSWORD_WAZIGATE}" ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} "
+                                        cd /var/lib/wazigate/apps/${APP_NAME} && \
+                                        docker-compose exec ${service_name} python3 -m unittest discover -s tests
+                                    "
+                                """,
+                                returnStatus: true
+                            )
+
+                            if (result != 0) {
+                                echo "Unit tests FAILED on the local gateway."
+                                error("Unit tests failed.")
+                            } else {
+                                echo "Unit tests passed on local gateway."
+                            }
                         }
                     }
                 }
             }
         }
+
 
         stage('Save Docker Image') {
             steps {
