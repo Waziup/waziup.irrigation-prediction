@@ -141,18 +141,25 @@ pipeline {
                 catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
                     script {
                         def service_name = "wazi-app"
-                        echo "Running tests on locally deployed Docker image..."
+                        // Make sure this matches the filename you renamed 'unittest.py' to!
+                        def test_filename = "unittest_irrigation.py" 
+                        
+                        echo "Preparing and running tests on locally deployed Docker image..."
 
                         withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
 
-                            // Run tests remotely
                             def result = sh (
-                                script: """
-                                    sshpass -p "${SSH_PASSWORD_WAZIGATE}" ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} "
+                                script: '''
+                                    sshpass -p "$SSH_PASSWORD_WAZIGATE" ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} "
                                         cd /var/lib/wazigate/apps/${APP_NAME} && \
-                                        docker-compose exec ${service_name} python3 -m unittest discover -s tests
+                                        
+                                        # 1. Setup: Ensure tests folder and __init__.py exist inside the container
+                                        docker-compose exec -T ${service_name} sh -c 'mkdir -p tests && touch tests/__init__.py' && \
+                                        
+                                        # 2. Execution: Run the specific test file so XMLTestRunner is used
+                                        docker-compose exec -T ${service_name} python3 tests/${test_filename}
                                     "
-                                """,
+                                ''',
                                 returnStatus: true
                             )
 

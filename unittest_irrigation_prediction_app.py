@@ -450,6 +450,10 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    # Ensure the directories exists
+    os.makedirs("/root/src/tests", exist_ok=True)
+    os.makedirs("/root/src/test-reports", exist_ok=True)
+    # Run the tests with XML output
     unittest.main(
         testRunner=xmlrunner.XMLTestRunner(output='test-reports', verbosity=2),
         failfast=False,

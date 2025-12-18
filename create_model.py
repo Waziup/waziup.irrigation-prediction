@@ -28,26 +28,28 @@ import traceback
 
 # new imports nn
 import tensorflow
-from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.models import Sequential, Model, clone_model
 from tensorflow.keras.layers import Dense, Conv1D, MaxPooling1D, Flatten, Dense, SimpleRNN, LSTM, GRU, Bidirectional, Dropout
-from tensorflow.keras.optimizers import Adam, SGD, RMSprop
+from tensorflow.keras.optimizers import Adam, SGD, RMSprop, get as get_optimizer
 from tensorflow.keras.callbacks import Callback
 from tensorflow.keras.backend import floatx
 #from transformers import TFAutoModel, AutoTokenizer
 from scikeras.wrappers import KerasRegressor
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import KNNImputer
 from scipy.interpolate import CubicSpline
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from sklearn.linear_model import Ridge
 #import kerastuner as kt
 from keras_tuner import Hyperband, HyperParameters
 import time
 from keras.callbacks import Callback
 from tensorflow.keras.callbacks import EarlyStopping
+import tensorflow.keras.models as keras_models
 
 # local
 import main
@@ -127,7 +129,7 @@ class TimeLimitCallback(Callback):
     def on_epoch_end(self, epoch, logs=None):  # Changed to on_epoch_end
         elapsed_time = time.time() - self.start_time
         if Verbose_logging:
-            print(f"\nEpoch {epoch}: Elapsed time {elapsed_time:.2f} seconds\n")
+            print(f"\nEpoch {epoch}: Elapsed time {elapsed_time:.2f} seconds")
         if elapsed_time > self.max_time_seconds:
             self.model.stop_training = True
             print(f"\nTraining stopped after {self.max_time_seconds} seconds")
@@ -1132,8 +1134,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = Verbose_logging,
-        #exclude=['lar', 'dummy', 'lightgbm']
-        include=['xgboost', 'catboost'] #DEBUG
+        exclude=['lar', 'dummy', 'lightgbm']
+        #include=['xgboost', 'catboost'] #DEBUG
     )
 
     return re_exp, best_re
@@ -1447,52 +1449,36 @@ def create_nn_model(hp, shape):
 # Create CNN
 def create_cnn_model(hp, shape):
     model = Sequential()
-
-    # Tune number of convolutional layers: 1 to 3
     num_conv_layers = hp.Int('num_conv_layers', 1, 3)
 
     for i in range(num_conv_layers):
         filters = hp.Int(f'filters_{i}', min_value=32, max_value=256, step=32)
-        kernel_size = hp.Choice(f'kernel_size_{i}', values=[2, 3, 5])
+        max_kernel_size = min(5, shape[0])
+        kernel_size = hp.Choice(f'kernel_size_{i}', values=[k for k in [1,2,3,5] if k <= max_kernel_size])
+        
         if i == 0:
-            model.add(Conv1D(filters=filters, kernel_size=kernel_size, activation='relu', input_shape=shape))
+            model.add(Conv1D(filters=filters, kernel_size=kernel_size, padding='same', activation='relu', input_shape=shape))
         else:
-            model.add(Conv1D(filters=filters, kernel_size=kernel_size, activation='relu'))
-
-        model.add(MaxPooling1D(pool_size=2))
-
-        # Optional: Add dropout for regularization
+            model.add(Conv1D(filters=filters, kernel_size=kernel_size, padding='same', activation='relu'))
+        
+        if shape[0] > 1:
+            model.add(MaxPooling1D(pool_size=2))
+        
         dropout_rate = hp.Float('dropout_rate', min_value=0.1, max_value=0.5, step=0.1)
         model.add(Dropout(dropout_rate))
-
+    
     model.add(Flatten())
-
-    # Dense layer
+    
     dense_units = hp.Int('dense_units', min_value=64, max_value=512, step=64)
     model.add(Dense(dense_units, activation='relu'))
-
-    # Output layer
+    
     model.add(Dense(1))
-
-    # Tune the optimizer and learning rate
+    
     optimizer_choice = hp.Choice('optimizer', ['adam', 'rmsprop'])
     learning_rate = hp.Float('learning_rate', min_value=1e-4, max_value=1e-2, sampling='log')
-
-    if optimizer_choice == 'adam':
-        optimizer = Adam(learning_rate=learning_rate)
-    else:
-        optimizer = RMSprop(learning_rate=learning_rate)
-
-    # Tune the batch size
-    hp.Choice("batch_size", [16, 32, 64, 128])
-
-    # Compile the model
-    model.compile(
-        optimizer=optimizer,
-        loss='mean_squared_error',
-        metrics=['mae'])
-
-    # Add a custom attribute to identify the model
+    optimizer = Adam(learning_rate) if optimizer_choice == 'adam' else RMSprop(learning_rate)
+    
+    model.compile(optimizer=optimizer, loss='mean_squared_error', metrics=['mae'])
     model.model_name = "cnn_model"
     model.hp = hp
     model.shape = shape
@@ -1727,7 +1713,7 @@ def prepare_data_for_cnn2(data, target_variable, test_size=0.2, val_size=0.2, ra
     )
 
 # Models being trained on different architectures
-def train_models(X_train, X_val, y_train, y_val, X_train_scaled, X_val_scaled, X_train_cnn, X_val_cnn, plot_name):
+def train_nn_models(X_train, X_val, y_train, y_val, X_train_scaled, X_val_scaled, X_train_cnn, X_val_cnn, plot_name):
     
     # Create an array to store all the models
     nn_models = []
@@ -1951,14 +1937,61 @@ def model_builder_with_shape(model_func, shape):
     return build_model
 
 
-# Perform evaluation, create predictions on testset (X_test) and save models
-def save_models_nn(plot_name, nn_models, path_to_save):
+# Save NN models
+def save_models_nn(plot_name, nn_models, path_to_save, nn_hps = None):
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(path_to_save), exist_ok=True)
+
     for i in range(len(nn_models)):     
         # Save the trained model for future use
         try:
             nn_models[i].save(path_to_save + str(i) + '_' + nn_models[i].model_name + '_' + plot_name + '.h5')
         except Exception as e:
             print(f"Save is not available for the model: {nn_models[i].model_name} Situated on plot: {plot_name} Error: {e}")
+
+        if nn_hps is not None:
+            try:
+                if nn_hps is not None and nn_hps[i] is not None:
+                    with open(path_to_save + str(i) + '_' + nn_models[i].model_name + '_' + plot_name + "_hps.json", "w") as f:
+                        json.dump(nn_hps[i].values, f, indent=2)
+            except Exception as e:
+                print(f"HP save failed ({nn_models[i].model_name}): {e}")
+
+
+
+def load_models_nn(folder_path):
+    models = []
+    best_hps = []
+
+    # Sort to ensure model i matches hyperparameter i
+    for file in sorted(os.listdir(folder_path)):
+        if file.endswith(".h5"):
+            path = os.path.join(folder_path, file)
+            model = keras_models.load_model(path)
+
+            # Parse name: index_modelname_plot.h5
+            parts = file.replace(".h5", "").split("_", 2)
+            if len(parts) >= 2:
+                model.model_name = parts[1]
+
+            models.append(model)
+            print(f"Loaded NN model: {file}")
+
+            # Attempt to load corresponding hyperparameters JSON
+            hp_file = file.replace(".h5", "_hps.json")
+            hp_path = os.path.join(folder_path, hp_file)
+            if os.path.exists(hp_path):
+                try:
+                    with open(hp_path, "r") as f:
+                        hps = json.load(f)
+                    best_hps.append(hps)
+                except Exception as e:
+                    print(f"Failed to load hyperparameters for {file}: {e}")
+                    best_hps.append(None)
+            else:
+                best_hps.append(None)
+
+    return models, best_hps
 
 # Perform a evaluation of the models against the testset(X_test), slit before 
 def evaluate_against_testset_nn(currentPlot, nn_models, X_test_scaled, y_test):
@@ -2079,7 +2112,7 @@ def train_best_nn(best_eval, data, plot_name):
             if function_name in Model_functions:
                 # Create each model in the ensemble
                 temp_model = Model_functions[function_name](m.hp, m.shape)
-                i =+ 1
+                i += 1
                 print(f"Will train the '{temp_model.model_name}' as part of the {i}/3 ensemble for neural nets.")
 
                 # Train the model
@@ -2089,7 +2122,7 @@ def train_best_nn(best_eval, data, plot_name):
                     epochs=50,
                     batch_size=32,
                     validation_data=(X_val_cnn, y_val),
-                    callbacks=[early_stopping], # TODO: Evaluate early stopping
+                    callbacks=[early_stopping], # TODO: Evaluate early stopping, stops to early?
                 )
                 model.append(temp_model)
                 if Verbose_logging:
@@ -2361,13 +2394,18 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
         print("Tuning best NN model (", best_model_nn.model_name, ") after evaluation.")
 
         # quick workaround for adjusting train shape for tuning a lstm
-        if best_model_nn.model_name == 'lstm_model': # TODO: check
+        if best_model_nn.model_name in ['lstm_model']:
             X_train_scaled = X_train_scaled.reshape((X_train_scaled.shape[0], 1, X_train_scaled.shape[1]))
             X_val_scaled = X_val_scaled.reshape((X_val_scaled.shape[0], 1, X_val_scaled.shape[1]))
 
+        builder = model_builder_with_shape(
+            Model_functions[best_model_nn.model_name],
+            best_model_nn.shape
+        )
+
         # Initialize the Hyperband tuner
         tuner = Hyperband(
-            model_builder_with_shape(Model_functions[best_model_nn.model_name], best_model_nn.shape, use_batch_hp=True),
+            builder,
             objective='val_mae',
             max_epochs=80,              # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
             factor=3,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
@@ -2382,10 +2420,7 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
         time_limit_callback = TimeLimitCallback(max_time_seconds)
 
         tuner.search(X_train_scaled, 
-                        y_train, 
-                        #epochs=hp.Int('epochs', 10, 80), #10 50 DEBUG
-                        #batch_size=hp.Choice('batch_size', [16, 32, 64, 128]),
-                        #validation_split=0.2,
+                        y_train,
                         validation_data=(X_val_scaled, y_val),
                         callbacks=[time_limit_callback]  # Add the time limit callback here TODO: fix: it is not working
         )
@@ -2403,7 +2438,7 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
                         epochs=best_hps.values.get('tuner/epochs', 50), 
                         batch_size=best_hps.values.get('batch_size', 32),
                         validation_data=(X_val_scaled, y_val)
-                        )
+        )
 
         # Compare with formerly best model -> since it is trained 
         #final_model = evaluate_against_testset_nn(best_model_nn, X_train_scaled, y_train)
@@ -2549,40 +2584,256 @@ def create_and_compare_ensemble(plot_name, exp, tuned_best_models):
         print(f"There was an error creating ensemble models. {e} "
               f"Fallback to best tuned model and perform prediction.")
         return tuned_best_models[0]
-    
-def create_and_compare_ensemble_nn(tuned_best_models, tuned_best_hps, X, y):
+
+# helper in case hp is dict or keras tuner object
+def hp_get(hp, key, default):
+    if hp is None:
+        return default
+    if isinstance(hp, dict):
+        return hp.get(key, default)
+    return hp.values.get(key, default)
+
+# helper to rebuild optimizer from config, if model was saved and loaded
+def build_optimizer(hp):
+    opt = hp.get("optimizer", "adam")
+    lr = hp.get("learning_rate", 1e-3)
+
+    if opt == "adam":
+        return Adam(learning_rate=lr)
+    elif opt == "rmsprop":
+        return RMSprop(learning_rate=lr)
+    elif opt == "sgd":
+        return SGD(learning_rate=lr)
+    else:
+        raise ValueError(f"Unknown optimizer: {opt}")
+
+def fresh_optimizer_from_model_or_hp(base_model, hp):
     try:
-        # ===== 1) OOF predictions =====
-        from sklearn.model_selection import KFold
-        kf = KFold(n_splits=5, shuffle=True, random_state=123)
+        return get_optimizer(base_model.optimizer.get_config())
+    except Exception:
+        return build_optimizer(hp)
 
-        oof = np.zeros((len(X), len(tuned_best_models)))
+# Predictor object (NO lambdas) for stacking
+class StackingPredictor:
+    def __init__(self, stack_models, meta):
+        self.stack_models = stack_models
+        self.meta = meta
 
-        for fold, (tr, va) in enumerate(kf.split(X)):
-            X_train, X_val = X[tr], X[va]
-            y_train = y[tr]
+    def predict(self, X):
+        base_preds = []
+        for models in self.stack_models:
+            preds = [m.predict(X, verbose=0).ravel() for m in models]
+            base_preds.append(np.mean(preds, axis=0))
+        return self.meta.predict(np.column_stack(base_preds))
 
-            for i, model_fn in enumerate(X):
-                m = model_fn()
-                m.fit(X_train, y_train, epochs=tuned_best_hps[i].get, verbose=Verbose_logging)
-                oof[va, i] = m.predict(X_val).flatten()
+# Predictor object (NO lambdas) for stacking
+class EnsemblePredictor:
+    def __init__(self, predict_fn, name):
+        self._predict_fn = predict_fn
+        self.model_name = name
 
-        # ===== 2) train meta-learner =====
-        from sklearn.linear_model import Ridge
+    def predict(self, X):
+        return self._predict_fn(X)
+
+# create and compare different nn ensemble techniques
+def compare_nn_ensembles(
+    tuned_models,
+    tuned_hps,
+    X_train,
+    y_train,
+    X_val,
+    y_val,
+    metric="r2",
+    bagging_rounds=5,
+    stacking_folds=5,
+    verbose=True
+):
+    """
+    Compare:
+    - best single model
+    - averaging
+    - bagging
+    - stacking
+
+    Returns best predictor + diagnostics
+    """
+    try:
+        X_train = np.asarray(X_train)
+        y_train = np.asarray(y_train)
+        X_val   = np.asarray(X_val)
+        y_val   = np.asarray(y_val)
+
+        def score(y_true, y_pred):
+            if metric == "r2":
+                return r2_score(y_true, y_pred)
+            elif metric == "mae":
+                return -mean_absolute_error(y_true, y_pred)
+            else:
+                raise ValueError("Unsupported metric")
+
+        results = {}
+
+        # SINGLE BEST MODEL
+        print("Evaluating single best models...")
+        single_scores = []
+        for i, m in enumerate(tuned_models):
+            pred = m.predict(X_val, verbose=Verbose_logging).ravel()
+            s = score(y_val, pred)
+            single_scores.append((s, i))
+
+        best_single_score, best_single_idx = max(single_scores)
+        results["single"] = (best_single_score, tuned_models[best_single_idx])
+
+        # SIMPLE AVERAGING
+        print("Evaluating averaging ensemble...")
+        avg_preds = np.column_stack([
+            m.predict(X_val, verbose=Verbose_logging).ravel()
+            for m in tuned_models
+        ]).mean(axis=1)
+
+        results["average"] = (
+            score(y_val, avg_preds),
+            EnsemblePredictor(
+                lambda X: np.column_stack([
+                    m.predict(X, verbose=0).ravel()
+                    for m in tuned_models
+                ]).mean(axis=1),
+                name="average_ensemble"
+            )
+        )
+
+
+        # BAGGING
+        print("Evaluating bagging ensemble...")
+        bagged_models = []
+
+        for i, base_model in enumerate(tuned_models):
+            for b in range(bagging_rounds):
+                idx = np.random.choice(len(X_train), len(X_train), replace=True)
+
+                model = clone_model(base_model)
+                model.set_weights(base_model.get_weights())
+
+                model.compile(
+                    optimizer=fresh_optimizer_from_model_or_hp(base_model, tuned_hps[i]),
+                    loss=base_model.loss
+                )
+
+                model.fit(
+                    X_train[idx],
+                    y_train[idx],
+                    epochs=hp_get(tuned_hps[i], "tuner/epochs", 50),
+                    batch_size=hp_get(tuned_hps[i], "batch_size", 32),
+                    verbose=Verbose_logging
+                )
+
+                bagged_models.append(model)
+
+        bag_preds = np.column_stack([
+            m.predict(X_val, verbose=Verbose_logging).ravel()
+            for m in bagged_models
+        ]).mean(axis=1)
+
+        results["bagging"] = (
+            score(y_val, bag_preds),
+            EnsemblePredictor(
+                lambda X: np.column_stack([
+                    m.predict(X, verbose=0).ravel()
+                    for m in bagged_models
+                ]).mean(axis=1),
+                name="bagging_ensemble"
+            )
+        )
+
+
+        # STACKING
+        kf = KFold(n_splits=stacking_folds, shuffle=True, random_state=123)
+
+        n_models = len(tuned_models)
+        oof = np.zeros((len(X_train), n_models))
+
+        # Store trained fold models per base model
+        stack_models = [[] for _ in range(n_models)]
+
+        for fold, (tr, va) in enumerate(kf.split(X_train)):
+            if verbose:
+                print(f"  Fold {fold+1}/{stacking_folds}")
+
+            for i, base_model in enumerate(tuned_models):
+                model = clone_model(base_model)
+                model.set_weights(base_model.get_weights())
+
+                model.compile(
+                    optimizer=fresh_optimizer_from_model_or_hp(base_model, tuned_hps[i]),
+                    loss=base_model.loss
+                )
+
+                model.fit(
+                    X_train[tr],
+                    y_train[tr],
+                    epochs=hp_get(tuned_hps[i], "tuner/epochs", 50),
+                    batch_size=hp_get(tuned_hps[i], "batch_size", 32),
+                    verbose=Verbose_logging
+                )
+
+                # Out-of-fold prediction
+                oof[va, i] = model.predict(
+                    X_train[va], verbose=Verbose_logging
+                ).ravel()
+
+                # Save model for inference-time stacking
+                model.trainable = False
+                stack_models[i].append(model)
+
+        # Tain meta-learner Ridge
         meta = Ridge(alpha=1.0)
-        meta.fit(oof, y)
+        meta.fit(oof, y_train)
 
-        # ===== 3) return final stacked predictor =====
-        def stacked_predict(X_new):
-            preds = np.column_stack([m.predict(X_new).flatten()
-                                    for m in full_models])
-            return meta.predict(preds)
+        # Validation prediction
+        stack_val_base_preds = []
 
-        return full_models, meta, stacked_predict
-    
+        for i in range(n_models):
+            preds = [
+                m.predict(X_val, verbose=Verbose_logging).ravel()
+                for m in stack_models[i]
+            ]
+            stack_val_base_preds.append(np.mean(preds, axis=0))
+
+        stack_val_preds = meta.predict(np.column_stack(stack_val_base_preds))
+
+        results["stacking"] = (
+            score(y_val, stack_val_preds),
+            EnsemblePredictor(
+                StackingPredictor(stack_models, meta).predict,
+                name="stacking_ensemble"
+            )
+        )
+
+        # SELECT BEST
+        best_name, (best_score, best_predictor) = max(
+            results.items(), key=lambda x: x[1][0]
+        )
+
+        if verbose:
+            print("\n=== Ensemble comparison ===")
+            for k, (s, _) in results.items():
+                print(f"{k:10s}: {s:.4f}")
+            print(f"\nBest approach: {best_name} ({metric}={best_score:.4f})")
+            best_predictor.model_name = best_name
+
+        return {
+            "best_name": best_name,
+            "best_predictor": best_predictor,
+            "scores": {k: v[0] for k, v in results.items()}
+        }
+
     except Exception as e:
         print(f"There was an error creating ensemble NN models. {e} Fallback to best tuned model and perform prediction.")
-        return tuned_best_models[0]
+        return {
+            "best_name": tuned_models[0].model_name,
+            "best_predictor": tuned_models[0],
+            "scores": {"single": get_r2_manual(tuned_models[0], X_val, y_val)}
+        }
 
 # Generate prediction with best_model and impute generated future_values
 def generate_predictions(best, exp, features):
@@ -2595,12 +2846,14 @@ def generate_predictions(best, exp, features):
     return predictions
 
 def generate_predictions_nn(best_model_nn, features, start, end):
-    # quick workaround for adjusting train shape for tuning a lstm
-    if best_model_nn.model_name == 'lstm_model': # TODO: check
-        features = features.reshape((features.shape[0], 1, features.shape[1]))
+    # Only reshape if it's a real LSTM model
+    if hasattr(best_model_nn, "layers"):
+        if any("LSTM" in layer.__class__.__name__ for layer in best_model_nn.layers):
+            features = features.reshape((features.shape[0], 1, features.shape[1]))
 
-    # Generate predictions
-    predictions = best_model_nn.predict(features[..., np.newaxis])
+    # Generate predictions TODO: check all/other models
+    predictions = best_model_nn.predict(features)
+    #predictions = best_model_nn.predict(features[..., np.newaxis])
     
     # Clip neg predictions to zero
     predictions = np.maximum(predictions, 0)
@@ -2775,15 +3028,15 @@ def main(plot) -> int:
     #exp, best = create_and_compare_model_ts(cut_sub_dfs)
     exp, best = create_and_compare_model_reg(train)
     # NN
-    nn_models = train_models(X_train, X_val, y_train, y_val, X_train_scaled, X_val_scaled, X_train_cnn, X_val_cnn, plot.user_given_name)
+    nn_models = train_nn_models(X_train, X_val, y_train, y_val, X_train_scaled, X_val_scaled, X_train_cnn, X_val_cnn, plot.user_given_name)
     
-    # Save the best models for further evaluation
+    # Save the best models for further evaluation -> could be also omitted, since best_models are more important TODO
     # Classical regression:
     model_names = save_models(plot.user_given_name, exp, best, f'models/{plot.user_given_name}/intermediate_models/pycaret/soil_tension_prediction_pycaret_model_')
     # NN: (print eval(on X_test) and save to disk)
-    save_models_nn(plot.user_given_name, nn_models, f'models/{plot.user_given_name}/intermediate_models/nn/soil_tension_prediction_nn_model_')
+    save_models_nn(plot.user_given_name, nn_models, f'models/{plot.user_given_name}/intermediate_models/nn/soil_tension_prediction_nn_model_', None)
     
-    # Load regression model from disk, if there was a magical error => TODO: useless, omit, because it would stop before, surround more with try except
+    # Load regression model from disk, if there was a magical error => TODO: nn not implemented yet, but also useless, omit, because it would stop before, surround more with try except
     try:
         best
     except NameError:
@@ -2793,16 +3046,19 @@ def main(plot) -> int:
     # Classical regression
     best_eval, results = evaluate_against_testset(plot, test, exp, best)
     # NN
+    # Force ensemble or single usage for DEBUG purposes
+    #plot.ensemble = False
     best_eval_nn, results_nn = evaluate_against_testset_nn(plot, nn_models, X_test_scaled, y_test)
 
-    # Decide which approach is best according to evaluation metric of one metric
+    # Decide which approach is best according to evaluation metric of one metric (old approach)
     # index, plot.use_pycaret = eval_approach(results, results_nn, 'r2')
     
     # Decide which approach is best according to evaluation metric mix of mae, mpe, r2
     index, plot.use_pycaret = eval_approach_mix(results, results_nn, weights=None)
 
-    # TODO: Debug mode
-    plot.use_pycaret = False
+    # TODO FROM HERE ON THIS COULD BE ALSO CAPSULATED IN SEPARATE FUNCTION
+    # Force pycaret or nn usage for DEBUG purposes
+    #plot.use_pycaret = False
 
     # Train best model on whole dataset (without skipping "test-set")
     if plot.use_pycaret:
@@ -2833,7 +3089,7 @@ def main(plot) -> int:
             else:
                 plot.best_model = tune_one_model(plot.best_exp, best_model)
         except Exception as e:
-            print(f"Error during tuning: {e}, using the original model.")
+            print(f"[{plot.user_given_name}] Error during tuning: {e}, using the original model.")
             plot.best_model = best_model  # Keep original model if tuning fails
 
         
@@ -2867,20 +3123,36 @@ def main(plot) -> int:
         plot.predictions = plot.predictions.set_index("Timestamp")  # Set Timestamp as index
     # Neural Networks
     else:
-        # Tune best model -> TODO
+        # Tune and create ensemble model
         if plot.ensemble:
             tuned_best_models = []
             tuned_best_hps = []
+
+            # Tune top3 models first
             for i in range(len(best_model_nn)):
                 tuned_best, best_hp = tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn[i])
                 tuned_best_models.append(tuned_best)
                 tuned_best_hps.append(best_hp)
-            plot.best_model = create_and_compare_ensemble_nn(tuned_best_models, tuned_best_hps, X_train_scaled, y_train)
-        else:
-            plot.best_model, _ = tune_model_nn(X_train_scaled, y_train, best_model_nn)
+            plot.best_model = tuned_best_models
 
-        # Save best model
-        save_models_nn(plot.user_given_name, [plot.best_model], f'models/{plot.user_given_name}/best_models/nn/best_soil_tension_prediction_nn_model_') # TODO:introduce plots and multiple models
+            # Save tuned best models
+            save_models_nn(plot.user_given_name, plot.best_model, f'models/{plot.user_given_name}/tuned/nn/best_soil_tension_prediction_nn_model_', tuned_best_hps)
+
+            # Create and compare ensemble techniques
+            results_ensemble = compare_nn_ensembles(plot.best_model, tuned_best_hps, X_train_scaled, y_train, X_val_scaled, y_val, metric="r2", bagging_rounds=5, stacking_folds=5, verbose=Verbose_logging)
+            plot.best_model = results_ensemble["best_predictor"]
+            print(f"[{plot.user_given_name}] Selected NN ensemble method: {results_ensemble['best_name']} with scores: {results_ensemble['scores']}")
+
+            # Save best ensemble model -> Fallback->crash!!!!
+            save_models_nn(plot.user_given_name, [plot.best_model], f'models/{plot.user_given_name}/ensemble/nn/best_tuned_soil_tension_ensemble_prediction_nn_model_', tuned_best_hps)
+        else:
+            # Only tune best model
+            plot.best_model, _ = tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn)
+            # Save tuned best model
+            save_models_nn(plot.user_given_name, [plot.best_model], f'models/{plot.user_given_name}/tuned/nn/best_soil_tension_prediction_nn_model_', None)
+
+        #DEBUG: load best model from disk->only for debug reasons to avoid tuning training
+        #plot.best_model, tuned_best_hps = load_models_nn(f'models/{plot.user_given_name}/best_models/nn/')
 
         # Generate predictions with NN model
         plot.predictions = generate_predictions_nn(plot.best_model, Z_scaled, future_features.index[0], future_features.index[-1])
@@ -2898,7 +3170,7 @@ def main(plot) -> int:
         plot.predictions = plot.predictions.loc[current_time:]
         #plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]    
     
-    # Align predictions with historical data
+    # Align predictions with historical data -> TODO: dodgy fix, only trigger in case of bad performance?
     align_with_latest_sensor_values(plot)
 
     # Calculate when threshold will be meet
