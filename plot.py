@@ -1,6 +1,5 @@
 # global:
-from datetime import timedelta
-import datetime
+from datetime import timedelta, datetime
 import json
 import os
 import re
@@ -330,7 +329,7 @@ class Plot:
                 self.config["Gps_info"]["lattitude"], self.config["Gps_info"]["longitude"])
 
         # Correct timestamp for timezone => TODO: here is an ERROR, timezone var is not available in first start
-        from_timestamp = (datetime.datetime.strptime(from_timestamp, "%Y-%m-%dT%H:%M:%S.%fZ") -
+        from_timestamp = (datetime.strptime(from_timestamp, "%Y-%m-%dT%H:%M:%S.%fZ") -
                           timedelta(hours=TimeUtils.get_timezone_offset(TimeUtils.Timezone))).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
         if apiUrl.startswith('http://wazigate/'):
