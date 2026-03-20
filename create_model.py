@@ -9,6 +9,7 @@ Created on Wed May  3 10:54:49 2023
 
 import csv
 from datetime import timedelta, datetime
+import gc
 import json
 import logging
 import os
@@ -24,6 +25,7 @@ import matplotlib.pyplot as plt
 import sys
 import pytz
 import traceback
+import psutil
 
 # new imports nn
 import tensorflow
@@ -32,7 +34,9 @@ from tensorflow.keras.layers import Dense, Conv1D, MaxPooling1D, Flatten, Dense,
 from tensorflow.keras.optimizers import Adam, SGD, RMSprop, get as get_optimizer
 from tensorflow.keras.callbacks import Callback
 from tensorflow.keras.backend import floatx
-#from transformers import TFAutoModel, AutoTokenizer
+from keras.callbacks import Callback
+from tensorflow.keras.callbacks import EarlyStopping
+import tensorflow.keras.models as keras_models
 from scikeras.wrappers import KerasRegressor
 import numpy as np
 import matplotlib.pyplot as plt
@@ -43,12 +47,9 @@ from scipy.interpolate import CubicSpline
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.linear_model import Ridge
-#import kerastuner as kt
 from keras_tuner import Hyperband, HyperParameters
 import time
-from keras.callbacks import Callback
-from tensorflow.keras.callbacks import EarlyStopping
-import tensorflow.keras.models as keras_models
+
 
 # local
 import main
@@ -132,6 +133,13 @@ class TimeLimitCallback(Callback):
         if elapsed_time > self.max_time_seconds:
             self.model.stop_training = True
             print(f"\nTraining stopped after {self.max_time_seconds} seconds") # will continue after epoch
+
+# Restrict memory usage, if more than 80% is used, stop training to prevent crashing of the device
+class MemoryLimitCallback(tensorflow.keras.callbacks.Callback):
+    def on_epoch_end(self, epoch, logs=None):
+        if psutil.virtual_memory().percent > 80:
+            print("Memory limit reached, stopping training")
+            self.model.stop_training = True
 
 # Resample and interpolate
 def check_gaps(data):
@@ -1133,8 +1141,8 @@ def create_and_compare_model_reg(train):
         fold = 10, 
         sort = 'R2',
         verbose = Verbose_logging,
-        #exclude=['lar', 'dummy', 'lightgbm', 'lr', 'par'], # excluded those that do not perform well (bad R2 on testset)
-        include=['xgboost', 'catboost'] #DEBUG
+        exclude=['lar', 'dummy', 'lightgbm', 'lr', 'par'], # excluded those that do not perform well (bad R2 on testset)
+        #include=['xgboost', 'catboost'] #DEBUG
     )
 
     return re_exp, best_re
@@ -1167,7 +1175,7 @@ def save_models(plot_name, exp, best, path_to_save):
 def load_models(model_names):
     # load pipeline
     loaded_best_pipeline = []
-    for i in range(model_names): # TODO: model_names will not work if it was not saved before
+    for i in range(len(model_names)): # TODO: model_names will not work if it was not saved before
         loaded_best_pipeline.append(load_model(model_names[i]))
     
     return loaded_best_pipeline
@@ -1744,33 +1752,33 @@ def train_nn_models(X_train, X_val, y_train, y_val, X_train_scaled, X_val_scaled
 
     # Create neural network
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # hp.Fixed('activation', 'relu')
-    # hp.Fixed('units_hidden1', 128)
-    # hp.Fixed('use_second_layer', True)
-    # hp.Fixed('units_hidden2', 64)
-    # hp.Fixed('use_third_layer', True)
-    # hp.Fixed('units_hidden3', 32)
-    # hp.Fixed('optimizer', 'adam')
-    # hp.Fixed('learning_rate', 0.001)
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('activation', 'relu')
+    hp.Fixed('units_hidden1', 128)
+    hp.Fixed('use_second_layer', True)
+    hp.Fixed('units_hidden2', 64)
+    hp.Fixed('use_third_layer', True)
+    hp.Fixed('units_hidden3', 32)
+    hp.Fixed('optimizer', 'adam')
+    hp.Fixed('learning_rate', 0.001)
 
 
-    # # Call the model function with the hp object and the input shape
-    # input_shape = (X_train.shape[1],)
-    # model_nn = create_nn_model(hp, shape=input_shape)
+    # Call the model function with the hp object and the input shape
+    input_shape = (X_train.shape[1],)
+    model_nn = create_nn_model(hp, shape=input_shape)
 
-    # # Train the model
-    # print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
-    # history_nn = model_nn.fit(
-    #     X_train_scaled, 
-    #     y_train, 
-    #     epochs=50, 
-    #     batch_size=32, 
-    #     validation_data=(X_val_scaled, y_val)
-    # )
-    # # Append for comparison
-    # nn_models.append(model_nn)
+    # Train the model
+    print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
+    history_nn = model_nn.fit(
+        X_train_scaled, 
+        y_train, 
+        epochs=50, 
+        batch_size=32, 
+        validation_data=(X_val_scaled, y_val)
+    )
+    # Append for comparison
+    nn_models.append(model_nn)
 
     # Create conv neural network
 
@@ -1873,56 +1881,56 @@ def train_nn_models(X_train, X_val, y_train, y_val, X_train_scaled, X_val_scaled
     # Append for comparison
     nn_models.append(model_gru)
 
-    # # LSTM architecture
+    # LSTM architecture
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # # Architecture
-    # hp.Fixed('num_lstm_layers', 2)
-    # hp.Fixed('units_lstm_0', 64)
-    # hp.Fixed('bidir_layer_0', True)
-    # hp.Fixed('use_dropout_0', True)
-    # hp.Fixed('dropout_rate_0', 0.2)
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    # Architecture
+    hp.Fixed('num_lstm_layers', 2)
+    hp.Fixed('units_lstm_0', 64)
+    hp.Fixed('bidir_layer_0', True)
+    hp.Fixed('use_dropout_0', True)
+    hp.Fixed('dropout_rate_0', 0.2)
 
-    # hp.Fixed('units_lstm_1', 32)
-    # hp.Fixed('bidir_layer_1', False)
-    # hp.Fixed('use_dropout_1', True)
-    # hp.Fixed('dropout_rate_1', 0.2)
+    hp.Fixed('units_lstm_1', 32)
+    hp.Fixed('bidir_layer_1', False)
+    hp.Fixed('use_dropout_1', True)
+    hp.Fixed('dropout_rate_1', 0.2)
 
-    # # Optimizer and learning rate
-    # hp.Fixed('optimizer', 'adam')
-    # hp.Fixed('learning_rate', 0.001)
+    # Optimizer and learning rate
+    hp.Fixed('optimizer', 'adam')
+    hp.Fixed('learning_rate', 0.001)
 
-    # # Prepare model shape
-    # input_shape = (1, X_train.shape[1])
+    # Prepare model shape
+    input_shape = (1, X_train.shape[1])
 
-    # # Create model architecture
-    # model_lstm = create_lstm_model(hp, shape=input_shape)
+    # Create model architecture
+    model_lstm = create_lstm_model(hp, shape=input_shape)
 
-    # # Prepare data for LSTM input explicitly
-    # X_train_lstm = prepare_lstm_data(X_train_scaled)
-    # X_val_lstm = prepare_lstm_data(X_val_scaled)
+    # Prepare data for LSTM input explicitly
+    X_train_lstm = prepare_lstm_data(X_train_scaled)
+    X_val_lstm = prepare_lstm_data(X_val_scaled)
 
-    # # Train the model
-    # print('Will now train a Long short-term memory neural network (LSTM), with the following hyperparameters: ' + str(hp.values))
-    # history_bilstm = model_lstm.fit(X_train_lstm, 
-    #                                 y_train, 
-    #                                 epochs=50, 
-    #                                 batch_size=32, 
-    #                                 validation_data=(X_val_lstm, y_val)
-    # )
+    # Train the model
+    print('Will now train a Long short-term memory neural network (LSTM), with the following hyperparameters: ' + str(hp.values))
+    history_bilstm = model_lstm.fit(X_train_lstm, 
+                                    y_train, 
+                                    epochs=50, 
+                                    batch_size=32, 
+                                    validation_data=(X_val_lstm, y_val)
+    )
     
-    # # Append for comparison
-    # nn_models.append(model_lstm)
+    # Append for comparison
+    nn_models.append(model_lstm)
     
-    # # Save training history plots and jsons
-    # if Verbose_logging:
-    #     for history, name in zip(
-    #         [history_nn, history_cnn, history_rnn, history_gru, history_bilstm],
-    #         ['nn_model', 'cnn_model', 'rnn_model', 'gru_model', 'lstm_model']
-    #     ):
-    #         plot_history_png(history, filename=f'models/{plot_name}/intermediate_models/nn/soil_tension_prediction_{name}_{datetime.now()}.png')
-    #         save_history_json(history, filename=f'models/{plot_name}/intermediate_models/nn/soil_tension_prediction_{name}_{datetime.now()}.json')
+    # Save training history plots and jsons
+    if Verbose_logging:
+        for history, name in zip(
+            [history_nn, history_cnn, history_rnn, history_gru, history_bilstm],
+            ['nn_model', 'cnn_model', 'rnn_model', 'gru_model', 'lstm_model']
+        ):
+            plot_history_png(history, filename=f'models/{plot_name}/intermediate_models/nn/soil_tension_prediction_{name}_{datetime.now()}.png')
+            save_history_json(history, filename=f'models/{plot_name}/intermediate_models/nn/soil_tension_prediction_{name}_{datetime.now()}.json')
 
     return nn_models
 
@@ -1938,6 +1946,7 @@ Model_functions = {
 # Builds model for keras tuner
 def model_builder_with_shape(model_func, shape):
     def build_model(hp):
+        tensorflow.keras.backend.clear_session()
         return model_func(hp, shape)
     return build_model
 
@@ -2479,8 +2488,8 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
         tuner = Hyperband(
             builder,
             objective='val_mae',
-            max_epochs=10,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
-            factor=4,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
+            max_epochs=80,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
+            factor=3,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
             hyperband_iterations=1,     # Limits the number full hyperband runs
             directory='hyperband_dir',
             project_name='hyperband_' + best_model_nn.model_name,
@@ -2497,8 +2506,11 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
             X_train_scaled,
             y_train,
             validation_data=(X_val_scaled, y_val),
-            callbacks=[time_limit_callback, early_stopping]  # Add the time limit callback here TODO: fix: it is not working
+            callbacks=[time_limit_callback, early_stopping, MemoryLimitCallback()]  # Add the time limit callback here TODO: fix: it is not working
         )
+
+        gc.collect()
+        tensorflow.keras.backend.clear_session()
 
         # Print the best hyperparameters
         best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
@@ -2719,7 +2731,7 @@ def adapt_X_for_model(model, X):
 
     return X
 
-# # Predictor object (NO lambdas) for stacking
+# # Predictor object for stacking
 # class StackingPredictor:
 #     def __init__(self, stack_models, meta):
 #         self.stack_models = stack_models
@@ -2732,7 +2744,7 @@ def adapt_X_for_model(model, X):
 #             base_preds.append(np.mean(preds, axis=0))
 #         return self.meta.predict(np.column_stack(base_preds))
 
-# Predictor object (NO lambdas) for ensemble models
+# Predictor object for ensemble models
 class EnsemblePredictor:
     def __init__(self, base_models, meta_model=None, method="stacking", name=None):
         self.base_models = base_models   # list[list[model]] for stacking
@@ -3196,7 +3208,7 @@ def main(plot) -> int:
 
     # TODO FROM HERE ON THIS COULD BE ALSO CAPSULATED IN SEPARATE FUNCTION
     # Force pycaret or nn usage for DEBUG purposes
-    plot.use_pycaret = False
+    #plot.use_pycaret = False
 
     # Train best model on whole dataset (without skipping "test-set")
     if plot.use_pycaret:
@@ -3228,7 +3240,7 @@ def main(plot) -> int:
                 plot.best_model = tune_one_model(plot.best_exp, best_model)
             
             # Save best tuned pycaret model
-            model_names = save_models(plot.user_given_name, plot.best_exp, [plot.best_model], f'models/{plot.user_given_name}/tuned_models/pycaret/best_soil_tension_prediction_')
+            model_names = save_models(plot.user_given_name, plot.best_exp, plot.best_model, f'models/{plot.user_given_name}/tuned_models/pycaret/best_soil_tension_prediction_')
         except Exception as e:
             print(f"[{plot.user_given_name}] Error during tuning: {e}, using the original model.")
             plot.best_model = best_model  # Keep original model if tuning fails
@@ -3302,18 +3314,24 @@ def main(plot) -> int:
     # Cut passed time from predictions
     # Ensure the index of plot.predictions is datetime with the same timezone
     if plot.predictions.index.tz is None:
-        plot.predictions.index = pd.to_datetime(plot.predictions.index).tz_localize('UTC').tz_convert(TimeUtils.Timezone)
+        #plot.predictions.index = pd.to_datetime(plot.predictions.index).tz_localize('UTC').tz_convert(TimeUtils.Timezone)
+        plot.predictions.index = pd.to_datetime(plot.predictions.index).tz_localize(TimeUtils.Timezone)
+    else:
+        plot.predictions.index = plot.predictions.index.tz_convert(TimeUtils.Timezone)
 
     # Create a Timestamp from the current date and time (without microseconds, seconds, and minutes)
-    current_time = pd.Timestamp(datetime.now().replace(microsecond=0, second=0, minute=0))
+    #current_time = pd.Timestamp(datetime.now().replace(microsecond=0, second=0, minute=0))
+    current_time = pd.Timestamp.now(tz=TimeUtils.Timezone).floor('H')
 
     # Now, slice the predictions DataFrame based on the timestamp
+
     if not plot.load_data_from_csv:
         plot.predictions = plot.predictions.loc[current_time:]
         #plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]    
     
-    # Align predictions with historical data -> TODO: dodgy fix, only trigger in case of bad performance?
-    align_with_latest_sensor_values(plot)
+    # Align predictions with historical data -> TODO: dodgy fix, only trigger in case of bad performance? DEBUG
+    #align_with_latest_sensor_values(plot)
+    plot.predictions['smoothed_values'] = plot.predictions['prediction_label']
 
     # Calculate when threshold will be meet
     plot.threshold_timestamp = calc_threshold(plot.predictions, 'smoothed_values', plot)

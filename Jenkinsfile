@@ -149,7 +149,7 @@ pipeline {
                         withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
 
                             def result = sh (
-                                script: '''
+                                script: """
                                     sshpass -p "$SSH_PASSWORD_WAZIGATE" ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} "
                                         cd /var/lib/wazigate/apps/${APP_NAME} && \
                                         
@@ -159,7 +159,7 @@ pipeline {
                                         # 2. Execution: Run the specific test file so XMLTestRunner is used
                                         docker-compose exec -T ${service_name} python3 tests/${test_filename}
                                     "
-                                ''',
+                                """,
                                 returnStatus: true
                             )
 

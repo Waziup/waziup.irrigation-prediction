@@ -6,6 +6,8 @@ services:
     container_name: waziup.irrigation-prediction
     build:
       context: ./
+    mem_limit: 3100m
+    memswap_limit: 3100m
     volumes:
       #- ./:/root/src/  # Uncomment for development
       - ./:/var/lib/waziapp/ # The unix socket has to have this name and be in ./ : proxy.sock
