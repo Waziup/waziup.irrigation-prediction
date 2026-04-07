@@ -13,11 +13,14 @@ import gc
 import json
 import logging
 import os
+import pickle
+import shutil
 from dateutil import parser
 import subprocess
 import pycaret 
 #from pycaret.time_series import *
 from pycaret.regression import *
+from pycaret.internal.pipeline import Pipeline
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,6 +29,7 @@ import sys
 import pytz
 import traceback
 import psutil
+from pathlib import Path
 
 # new imports nn
 import tensorflow
@@ -50,11 +54,13 @@ from sklearn.linear_model import Ridge
 from keras_tuner import Hyperband, HyperParameters
 import time
 
-
 # local
 import main
 from utils import NetworkUtils, TimeUtils
 from tune_grids import PYCARET_REGRESSION_TUNE_GRIDS
+from subprocess_manager import run_tuning_and_ensemble_nn_with_subprocess, run_tuning_and_ensemble_with_subprocess, run_tuning_with_subprocess, run_ensemble_with_subprocess
+
+
 
 # Rolling mean window
 RollingMeanWindowData = 15
@@ -72,6 +78,8 @@ To_be_dropped = ['minute', 'Timestamp', 'gradient',
                  'Winddirection', 'month', 'day_of_year', 
                  'date']
 
+# Pycaret regression setup config
+Config = {}
 
 # Mapping to identify models
 Model_mapping = {
@@ -112,6 +120,7 @@ SkipDataPreprocessing = False       # if true, load dataset from static file
 SkipTraning = False                 # if true, load predictions from static file
 # Load variables of training from file, that had been saved from former training/predictions to debug actuation part: DEBUG
 Perform_training = True             # kind of redundant, but automatically saves and loads former results of predictions
+Use_subprocess = True               # if true, parts of training is performed in subprocess, to prevent memory leaks and to ensure that resources are released after training
 
 # Wait time for resources to be released (recheck after busy in training or prediction for other plots)
 Resource_wait_time_seconds = 300    # seconds
@@ -1084,9 +1093,9 @@ def create_and_compare_model_ts(cut_sub_dfs):
             fold = 3, 
             sort = 'R2',
             verbose = Verbose_logging, 
-            #exclude=['lar_cds_dt','auto_arima','arima'],
-            include=['lr_cds_dt', 'br_cds_dt', 'ridge_cds_dt', 
-                     'huber_cds_dt', 'knn_cds_dt', 'catboost_cds_dt']
+            exclude=['lar_cds_dt','auto_arima','arima'],
+            #include=['lr_cds_dt', 'br_cds_dt', 'ridge_cds_dt', 
+            #        'huber_cds_dt', 'knn_cds_dt', 'catboost_cds_dt']
         ))
     
     with open('output.txt', 'a') as f:       
@@ -1138,11 +1147,11 @@ def create_and_compare_model_reg(train):
     # Run compare_models function TODO: configure setup accordingly
     best_re = re_exp.compare_models(
         n_select = 19, 
-        fold = 10, 
+        fold = 3, # DEBUG was 10
         sort = 'R2',
         verbose = Verbose_logging,
-        exclude=['lar', 'dummy', 'lightgbm', 'lr', 'par'], # excluded those that do not perform well (bad R2 on testset)
-        #include=['xgboost', 'catboost'] #DEBUG
+        #exclude=['lar', 'dummy', 'lightgbm', 'lr', 'par'], # excluded those that do not perform well (bad R2 on testset)
+        include=['xgboost', 'catboost'] #DEBUG
     )
 
     return re_exp, best_re
@@ -1365,6 +1374,8 @@ def evaluate_against_testset(currentPlot, test, exp, best):
 
 # train the best model after eval with fulln dataset
 def train_best(best_model, data):
+    global Config
+
     # create regression exp
     re_exp = pycaret.regression.RegressionExperiment()
 
@@ -1373,7 +1384,6 @@ def train_best(best_model, data):
     data = data.rename(columns={'index': 'Timestamp'}, inplace=False)
 
     # old: to_be_dropped = ['minute', 'Timestamp','gradient','grouped_soil','grouped_resistance','grouped_soil_temp']
-
     print("Those are the remaining features after dropping:", list(set(data.columns.tolist()) - set(To_be_dropped)))
 
     # Run the following code with a custom exception hook => maybe only relevant in VSCode => TODO: test without in production
@@ -1388,6 +1398,17 @@ def train_best(best_model, data):
               train_size = 0.8,
               n_jobs = None
     )
+
+    # Save pycarets setup Config to be persistant
+    Config = {
+        "target": re_exp.target_param,
+        "session_id": 123,
+        "ignore_features": re_exp._fxs.get("Ignore", []),
+        "numeric_features": re_exp._fxs.get("Numeric", []),
+        "categorical_features": re_exp._fxs.get("Categorical", []),
+        "train_size": re_exp.train_size_param if hasattr(re_exp, "train_size_param") else 0.8,
+        "verbose": Verbose_logging
+    }
     
     if not isinstance(best_model, list):   
         # Create one model 
@@ -1750,35 +1771,35 @@ def train_nn_models(X_train, X_val, y_train, y_val, X_train_scaled, X_val_scaled
     # Create an array to store all the models
     nn_models = []
 
-    # Create neural network
+    # # Create neural network
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    hp.Fixed('activation', 'relu')
-    hp.Fixed('units_hidden1', 128)
-    hp.Fixed('use_second_layer', True)
-    hp.Fixed('units_hidden2', 64)
-    hp.Fixed('use_third_layer', True)
-    hp.Fixed('units_hidden3', 32)
-    hp.Fixed('optimizer', 'adam')
-    hp.Fixed('learning_rate', 0.001)
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # hp.Fixed('activation', 'relu')
+    # hp.Fixed('units_hidden1', 128)
+    # hp.Fixed('use_second_layer', True)
+    # hp.Fixed('units_hidden2', 64)
+    # hp.Fixed('use_third_layer', True)
+    # hp.Fixed('units_hidden3', 32)
+    # hp.Fixed('optimizer', 'adam')
+    # hp.Fixed('learning_rate', 0.001)
 
 
-    # Call the model function with the hp object and the input shape
-    input_shape = (X_train.shape[1],)
-    model_nn = create_nn_model(hp, shape=input_shape)
+    # # Call the model function with the hp object and the input shape
+    # input_shape = (X_train.shape[1],)
+    # model_nn = create_nn_model(hp, shape=input_shape)
 
-    # Train the model
-    print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
-    history_nn = model_nn.fit(
-        X_train_scaled, 
-        y_train, 
-        epochs=50, 
-        batch_size=32, 
-        validation_data=(X_val_scaled, y_val)
-    )
-    # Append for comparison
-    nn_models.append(model_nn)
+    # # Train the model
+    # print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
+    # history_nn = model_nn.fit(
+    #     X_train_scaled, 
+    #     y_train, 
+    #     epochs=50, 
+    #     batch_size=32, 
+    #     validation_data=(X_val_scaled, y_val)
+    # )
+    # # Append for comparison
+    # nn_models.append(model_nn)
 
     # Create conv neural network
 
@@ -1820,40 +1841,40 @@ def train_nn_models(X_train, X_val, y_train, y_val, X_train_scaled, X_val_scaled
     # Append for comparison
     nn_models.append(model_cnn)
 
-    # Create RNN model
+    # # Create RNN model
 
-    # Create a dummy HyperParameters object with fixed values
-    hp = HyperParameters()
-    # Number of RNN layers
-    hp.Fixed('num_rnn_layers', 2)
+    # # Create a dummy HyperParameters object with fixed values
+    # hp = HyperParameters()
+    # # Number of RNN layers
+    # hp.Fixed('num_rnn_layers', 2)
 
-    # Layer 0
-    hp.Fixed('units_rnn_0', 64)
-    hp.Fixed('use_dropout_0', True)
-    hp.Fixed('dropout_rate_0', 0.3)
+    # # Layer 0
+    # hp.Fixed('units_rnn_0', 64)
+    # hp.Fixed('use_dropout_0', True)
+    # hp.Fixed('dropout_rate_0', 0.3)
 
-    # Layer 1
-    hp.Fixed('units_rnn_1', 32)
-    hp.Fixed('use_dropout_1', False)  # No dropout in the second layer
+    # # Layer 1
+    # hp.Fixed('units_rnn_1', 32)
+    # hp.Fixed('use_dropout_1', False)  # No dropout in the second layer
 
-    # Optimizer settings
-    hp.Fixed('optimizer', 'adam')
-    hp.Fixed('learning_rate', 0.001)
+    # # Optimizer settings
+    # hp.Fixed('optimizer', 'adam')
+    # hp.Fixed('learning_rate', 0.001)
 
-    input_shape = (1, X_train.shape[1])
-    model_rnn = create_rnn_model(hp, shape=input_shape)
+    # input_shape = (1, X_train.shape[1])
+    # model_rnn = create_rnn_model(hp, shape=input_shape)
 
-    # Train the model
-    print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
-    history_rnn = model_rnn.fit(X_train_scaled[:, np.newaxis, :], 
-                                y_train, 
-                                epochs=50, 
-                                batch_size=32, 
-                                validation_data=(X_val_scaled[:, np.newaxis, :], y_val)
-    )
+    # # Train the model
+    # print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
+    # history_rnn = model_rnn.fit(X_train_scaled[:, np.newaxis, :], 
+    #                             y_train, 
+    #                             epochs=50, 
+    #                             batch_size=32, 
+    #                             validation_data=(X_val_scaled[:, np.newaxis, :], y_val)
+    # )
 
-    # Append for comparison
-    nn_models.append(model_rnn)
+    # # Append for comparison
+    # nn_models.append(model_rnn)
 
     # Create GRU model
 
@@ -1923,14 +1944,14 @@ def train_nn_models(X_train, X_val, y_train, y_val, X_train_scaled, X_val_scaled
     # Append for comparison
     nn_models.append(model_lstm)
     
-    # Save training history plots and jsons
-    if Verbose_logging:
-        for history, name in zip(
-            [history_nn, history_cnn, history_rnn, history_gru, history_bilstm],
-            ['nn_model', 'cnn_model', 'rnn_model', 'gru_model', 'lstm_model']
-        ):
-            plot_history_png(history, filename=f'models/{plot_name}/intermediate_models/nn/soil_tension_prediction_{name}_{datetime.now()}.png')
-            save_history_json(history, filename=f'models/{plot_name}/intermediate_models/nn/soil_tension_prediction_{name}_{datetime.now()}.json')
+    # # Save training history plots and jsons
+    # if Verbose_logging:
+    #     for history, name in zip(
+    #         [history_nn, history_cnn, history_rnn, history_gru, history_bilstm],
+    #         ['nn_model', 'cnn_model', 'rnn_model', 'gru_model', 'lstm_model']
+    #     ):
+    #         plot_history_png(history, filename=f'models/{plot_name}/intermediate_models/nn/soil_tension_prediction_{name}_{datetime.now()}.png')
+    #         save_history_json(history, filename=f'models/{plot_name}/intermediate_models/nn/soil_tension_prediction_{name}_{datetime.now()}.json')
 
     return nn_models
 
@@ -2425,6 +2446,75 @@ def analyze_performance_old(exp, best):
         exp[i].plot_model(best[i], plot = 'forecast', data_kwargs = {'fh' : 500}, save = True)
         #before.save("Plot_after_testset_"+str(i)+".png", format='png')
 
+# Extract model from pipeline
+def unwrap_model(m):
+    if isinstance(m, Pipeline):
+        return m.steps[-1][1]
+    return m
+
+def init_pycaret_subprocess_tuning(plot_name, exp, best_models):
+    #global Config
+
+    try:
+        # save data, model and exp to disk TODO: evaluate tmp folder-> overflow
+        temp_dir = Path("./tmp") / f"tuning_{plot_name}_{datetime.now().timestamp()}" #TODO: later cleanup old temp folders
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save full dataset
+        exp.dataset.to_csv(temp_dir / "data.csv", index=False)
+        # Save test set (optional but precise)
+        #plot.best_exp.X_test.to_csv(temp_dir / "X_test.csv", index=False)
+        #plot.best_exp.y_test.to_csv(temp_dir / "y_test.csv", index=False)
+        #plot.best_exp.save_experiment(str(temp_dir / "experiment.pkl")) # does not work
+
+        # # Save config -> TODO: init later globally 
+        # Config = {
+        #     "target": exp.target_param,
+        #     "session_id": 123,  # you defined this manually
+        #     "ignore_features": exp._fxs.get("Ignore", []),
+        #     "numeric_features": exp._fxs.get("Numeric", []),
+        #     "categorical_features": exp._fxs.get("Categorical", []),
+        #     "train_size": exp.train_size_param if hasattr(exp, "train_size_param") else 0.8,
+        # }
+        with open(temp_dir / "config.pkl", "wb") as f:
+            pickle.dump(Config, f)
+
+        # Save models to be available in subprocess   
+        list_of_model_names = save_models(plot_name, exp, best_models, str(temp_dir / "best_model_before_tuning_"))
+        best_tuned_models = []
+        for name in list_of_model_names:
+            print(f"Saved model {name} for tuning in {temp_dir / 'best_model.pkl'}")
+            # Run tuning in subprocess
+            best_model_path = run_tuning_with_subprocess(
+                str(temp_dir), 
+                name,
+                plot_name
+            )
+            # Load models from disk after tuning
+            m = load_model(best_model_path)
+            # Make sure to load the actual model if it was wrapped in a pipeline
+            m = unwrap_model(m)
+            # Add to list of best tuned models
+            best_tuned_models.append(m)
+        # If only one model, return it directly instead of a list
+        best_tuned_models = best_tuned_models if len(best_tuned_models) > 1 else best_tuned_models[0]
+
+        # Save best tuned pycaret model
+        model_names = save_models(plot_name, exp, best_models, f'models/{plot_name}/tuned_models/pycaret/best_soil_tension_prediction_')
+
+        return best_tuned_models
+
+    except Exception as e:
+        print(f"[{plot_name}] Error during tuning: {e}, using the original model.")
+        return best_models
+
+    finally:
+        # Cleanup method
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+            print(f"Deleted temp dir after successful tuning: {temp_dir}")         
+
+
 # Tune hyperparameters of one model
 def tune_one_model(exp, best):
     try: # double try, except
@@ -2589,6 +2679,84 @@ def log_scores_csv(scores, filename="model_scores.csv"):
         for key, (r2, model) in scores.items():
             writer.writerow([ts, key, r2, type(model).__name__ if model else "None"])
 
+def init_pycaret_subprocess_ensemble(plot_name, exp, tuned_best_models):
+    try:
+        # save data, model and exp to disk TODO: evaluate tmp folder-> overflow
+        temp_dir = Path("./tmp") / f"tuning_{plot_name}_{datetime.now().timestamp()}" #TODO: later cleanup old temp folders
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save full dataset
+        exp.dataset.to_csv(temp_dir / "data.csv", index=False)
+
+        # Save config to file
+        with open(temp_dir / "config.pkl", "wb") as f:
+            pickle.dump(Config, f)
+        
+        # Save models to be available in subprocess   
+        list_of_model_names = save_models(plot_name, exp, tuned_best_models, str(temp_dir / "best_model_before_ensemble_"))
+
+        # Extract model
+        tuned_best_models = [unwrap_model(m) for m in tuned_best_models]
+    
+        # Run ensemble creation in subprocess
+        best_ensemble_model_path = run_ensemble_with_subprocess(
+            str(temp_dir),
+            list_of_model_names,
+            plot_name
+        )
+
+        # Load ensemble model from disk after creation
+        best_ensemble_model = load_model(best_ensemble_model_path)
+
+         # Save best tuned pycaret model
+        model_names = save_models(plot_name, exp, best_ensemble_model, f'models/{plot_name}/ensemble_models/pycaret/best_soil_tension_prediction_')
+
+        return best_ensemble_model
+
+    except Exception as e:
+        print(f"[{plot_name}] Error during tuning: {e}, using the original model.")
+        return tuned_best_models
+    
+
+def init_pycaret_subprocess_tuning_and_ensemble(plot_name, exp, tuned_best_models):
+    try:
+        # save data, model and exp to disk TODO: evaluate tmp folder-> overflow
+        temp_dir = Path("./tmp") / f"tuning_{plot_name}_{datetime.now().timestamp()}" #TODO: later cleanup old temp folders
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save full dataset
+        exp.dataset.to_csv(temp_dir / "data.csv", index=False)
+
+        # Save config to file
+        with open(temp_dir / "config.pkl", "wb") as f:
+            pickle.dump(Config, f)
+        
+        # Save models to be available in subprocess   
+        list_of_model_names = save_models(plot_name, exp, tuned_best_models, str(temp_dir / "best_model_before_tuning and_ensemble_"))
+
+        # Extract model
+        tuned_best_models = [unwrap_model(m) for m in tuned_best_models]
+    
+        # Run ensemble creation in subprocess
+        best_ensemble_model_path = run_tuning_and_ensemble_with_subprocess(
+            str(temp_dir),
+            list_of_model_names,
+            plot_name
+        )
+
+        # Load ensemble model from disk after creation
+        best_ensemble_model = load_model(best_ensemble_model_path)
+
+         # Save best ensemble pycaret model
+        model_names = save_models(plot_name, exp, best_ensemble_model, f'models/{plot_name}/ensemble_models/pycaret/best_soil_tension_prediction_')
+
+        return best_ensemble_model
+
+    except Exception as e:
+        print(f"[{plot_name}] Error during tuning: {e}, using the original model.")
+        return tuned_best_models
+    
+
 # Create and compare different ensemble model techniques for pycaret models
 def create_and_compare_ensemble(plot_name, exp, tuned_best_models):
     try:
@@ -2671,6 +2839,92 @@ def create_and_compare_ensemble(plot_name, exp, tuned_best_models):
         print(f"There was an error creating ensemble models. {e} "
               f"Fallback to best tuned model and perform prediction.")
         return tuned_best_models[0]
+
+def save_weights(model, temp_dir=None):
+    """
+    Save Keras model weights to disk and return path.
+
+    Args:
+        model: Keras model
+        temp_dir: Optional directory (Path or str)
+
+    Returns:
+        str: path to saved weights file
+    """
+    from pathlib import Path
+    import uuid
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Ensure temp_dir exists
+        if temp_dir is None:
+            temp_dir = Path("./tmp_weights")
+        else:
+            temp_dir = Path(temp_dir) / "weights"
+
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Unique filename (VERY important for parallel runs)
+        unique_id = uuid.uuid4().hex[:8]
+        model_name = getattr(model, "model_name", "model")
+
+        weight_path = temp_dir / f"{model_name}_{unique_id}.weights.h5"
+
+        # Ensure model is built (important for some TF models)
+        if not model.built:
+            try:
+                model.build(model.input_shape)
+            except Exception:
+                logger.warning(f"Could not explicitly build model {model_name}")
+
+        # Save weights
+        model.save_weights(weight_path)
+
+        return str(weight_path)
+
+    except Exception as e:
+        logger.error(f"Failed to save weights: {e}")
+        raise
+
+def init_nn_subprocess_tuning_and_ensemble(plot_name, X_train, y_train, X_val, y_val, models):
+    """
+    Orchestration wrapper to tune and create ensemble for neural networks in subprocess, 
+    since it is very resource intensive and can cause memory leaks, crashes, etc. 
+    It also allows to use different libraries and versions for tuning and ensemble creation, 
+    without affecting the main process. 
+    It saves data and models to disk, runs the tuning and ensemble creation in a separate process, 
+    and loads the final model back into the main process. 
+    It also handles exceptions and fallbacks gracefully. 
+    """
+    model_configs = []
+    
+    temp_dir = Path("./tmp") / f"nn_{plot_name}_{datetime.now().timestamp()}"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Extract config to file
+    for m in models:
+        model_configs.append({
+            "model_name": m.model_name,
+            "shape": m.shape,
+            "weights_path": save_weights(m, temp_dir),
+            "hp_values": m.hp.values if hasattr(m, "hp") and m.hp is not None else None
+        })
+        
+    # Save model configs (NOT models)
+    with open(temp_dir / "model_configs.json", "w") as f:
+        json.dump(model_configs, f)
+    
+    # Save data
+    np.save(temp_dir / "X_train.npy", X_train)
+    np.save(temp_dir / "y_train.npy", y_train)
+    np.save(temp_dir / "X_val.npy", X_val)
+    np.save(temp_dir / "y_val.npy", y_val)
+
+    result_path = run_tuning_and_ensemble_nn_with_subprocess(temp_dir, model_configs, plot_name)
+
+    return keras_models.load_model(result_path)
 
 # helper in case hp is dict or keras tuner object
 def hp_get(hp, key, default):
@@ -3208,16 +3462,17 @@ def main(plot) -> int:
 
     # TODO FROM HERE ON THIS COULD BE ALSO CAPSULATED IN SEPARATE FUNCTION
     # Force pycaret or nn usage for DEBUG purposes
-    #plot.use_pycaret = False
+    plot.use_pycaret = False
 
     # Train best model on whole dataset (without skipping "test-set")
     if plot.use_pycaret:
         # Classical regression
-        best_model, plot.best_exp = train_best(best_eval, plot.data)
+        plot.best_model, plot.best_exp = train_best(best_eval, plot.data)
     else:
         # NN
         best_model_nn, X_train_scaled, X_val_scaled, y_train, y_val = train_best_nn(best_eval_nn, plot.data, plot.user_given_name)
 
+    # TODO: Save "best" models here?
     
     # Create future value set to feed new data to model
     future_features = create_future_values(plot.data, plot)
@@ -3229,21 +3484,27 @@ def main(plot) -> int:
 
 
     if plot.use_pycaret:
-        # Before tuning
-        #best_model_before_tuning = plot.best_exp.compare_models()
-        
         # Tune hyperparameters of one or the 3 best models
         try:
-            if plot.ensemble:
-                plot.best_model = tune_models(plot.best_exp, best_model)
+            gc.collect()
+            # Store original best model before tuning, to fallback in case of error
+            best_model_before_tuning = plot.best_model
+        
+            if Use_subprocess:
+                # Perform entire tuning pipeline in subprocess
+                plot.best_model = init_pycaret_subprocess_tuning_and_ensemble(plot.user_given_name, plot.best_exp, plot.best_model, plot.ensemble)
             else:
-                plot.best_model = tune_one_model(plot.best_exp, best_model)
-            
-            # Save best tuned pycaret model
-            model_names = save_models(plot.user_given_name, plot.best_exp, plot.best_model, f'models/{plot.user_given_name}/tuned_models/pycaret/best_soil_tension_prediction_')
+                # Perform tuning in the main process
+                if plot.ensemble:
+                    plot.best_model = tune_models(plot.best_exp, plot.best_model)
+                else:
+                    plot.best_model = tune_one_model(plot.best_exp, plot.best_model)
+                
+                # Save best tuned pycaret model
+                model_names = save_models(plot.user_given_name, plot.best_exp, plot.best_model, f'models/{plot.user_given_name}/tuned_models/pycaret/best_soil_tension_prediction_')
         except Exception as e:
             print(f"[{plot.user_given_name}] Error during tuning: {e}, using the original model.")
-            plot.best_model = best_model  # Keep original model if tuning fails
+            plot.best_model = best_model_before_tuning  # Keep original model if tuning fails
 
         
         # After tuning
@@ -3263,11 +3524,12 @@ def main(plot) -> int:
         # print(compare_df)
         
         # Ensemble, Stacking & Blending
-        if plot.ensemble:
+        if plot.ensemble and not Use_subprocess:  # If ensemble is enabled and not using subprocess, create ensemble in main process
+            gc.collect()
             plot.best_model = create_and_compare_ensemble(plot.user_given_name, plot.best_exp, plot.best_model)
-
             # Save best pycaret ensemble model
             model_names = save_models(plot.user_given_name, plot.best_exp, plot.best_model, f'models/{plot.user_given_name}/ensemble_models/pycaret/best_soil_tension_prediction_')
+
 
         # Create predictions to forecast values
         future_features_without_index = future_features.reset_index(drop=True, inplace=False)
@@ -3278,7 +3540,12 @@ def main(plot) -> int:
     # Neural Networks
     else:
         # Tune and create ensemble model
-        if plot.ensemble:
+        if Use_subprocess and plot.ensemble:
+            # Perform entire tuning and ensemble pipeline in subprocess
+            plot.best_model = init_nn_subprocess_tuning_and_ensemble(plot.user_given_name, X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn)
+            # Save best ensemble model
+            save_models_nn(plot.user_given_name, plot.best_model, f'models/{plot.user_given_name}/ensemble_models/nn/best_tuned_soil_tension_ensemble_prediction_nn_model_', tuned_best_hps)
+        elif plot.ensemble and not Use_subprocess:
             tuned_best_models = []
             tuned_best_hps = []
 

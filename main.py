@@ -1055,15 +1055,18 @@ if __name__ == "__main__":
     # Clean logs
     schedule_log_cleanup()
 
-    # Former Start serving
+    # Former Start serving -> obsolete, now start in thread with recovery mechanism
     # usock.sockAddr = NetworkUtils.Proxy
     # usock.start() # will be "stuck" in here, code afterwards is not executed
 
-        # Start serving in a dedicated thread
+    # Start serving in a dedicated thread -> no blocking, always 
     server_thread = threading.Thread(target=usock.start_with_recovery, name="HTTP_Server")
     server_thread.daemon = False  # Keep alive until shutdown
     server_thread.start()
     print("Server started and running in thread:", server_thread.name)
+
+    # DEBUG: directly start training for testing purposes, if production check confifiguration is present
+    #training_thread.start(plot_manager.getCurrentPlot())
 
     # Keep main thread alive
     try:

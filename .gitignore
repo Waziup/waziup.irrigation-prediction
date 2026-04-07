@@ -184,3 +184,6 @@ models/**/**/*.h5
 models/**/**/*.png
 models/**/**/*.json
 models/**/**/*.csv
+
+# Exclude tmp models
+tmp/*
