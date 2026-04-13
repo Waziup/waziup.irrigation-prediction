@@ -17,7 +17,7 @@
 ---
 
 ## Introduction
-The **Irrigation Prediction Application** is designed to predict soil moisture levels, supporting efficient water management by integrating with **WaziGate** and connected soil moisture sensors.
+The **Irrigation Prediction Application** optimizes agricultural water management by leveraging real-time data from soil moisture sensors via the **WaziGate IoT platform**, employing **predictive analytics** to **minimize water waste** and **enhance crop yields.**
 
 The Wazigate is a **LoRa Gateway.** It is the connecting link between your **sensor devices and the WaziCloud platform**. It merges and stores all the sensor values and also can **run custom applications**. 
 
@@ -26,9 +26,9 @@ The Wazigate is a **LoRa Gateway.** It is the connecting link between your **sen
 ## System Requirements
 - **Supported OS:** WaziGateOS
 - **Required Hardware:** WaziGate, soil moisture sensor(s), temperature sensor(s)
-- **Optional Hardware:** Flow meter and a pump actuated with relay, to conduct the actuation
+- **Optional Hardware:** Actuation with a **flow meter and a pump actuated with relay** or **flow meter coupled with a  solenoid valve**, to conduct the automatic irrigation
 - **Software Dependencies:** None, comes as docker container with all dependencies included
-- **Internet Connection:** Required for retriving weather data, model updates and remote maintenance.
+- **Internet Connection:** **Required** for retrieving weather data, model updates and remote maintenance.
 
 
 ## Setup and Installation of the WaziGate
@@ -48,7 +48,7 @@ For this application to work properly, an internet connection is needed
 5. Next step is to connect to a local Wifi with internet access: Go to Settings -> Wifi. The WaziGate will now scan for local networks nearby. ![Connect to a Wifi](./media/connect_wifi_ui.png)
 6. To connect to your Wifi, you have to issue the password of your network.
 7. After connecting, the UI is not any more responsive and the access point of the WaziGate will be closed. Now connect your device (smartphone, pc or tablet) to the same network like you formerly connected your WaziGate.
-8. Now you can access the WaziGate via the IP-address, via the alias [http://wazigate.local](http://wazigate.local) or scan this QR code. ![http://wazigate.local](./media/qr_wazigate_local_low.png) 
+8. Now you can access the WaziGate via the IP-address (`http://<ip address>`) , via the alias [http://wazigate.local](http://wazigate.local) or scan just this QR code. ![http://wazigate.local](./media/qr_wazigate_local_low.png) 
 
 The last two options are only available if there is only one WaziGate connected to the same Wifi network.
 
@@ -60,7 +60,7 @@ It is suggested to run the setup and installation of apps via wifi or via the pr
 
 ### Install the irrigation prediction application
 
-The application needs to be manually installed on the wazigate, in order to use it. In the following, the process of app installation is explained, on how to download/install the application from dockerhub.
+The application needs to be manually installed on the WaziGate, in order to use it. In the following, the process of app installation is explained, on how to download/install the application from dockerhub.
 
 1. Access the GW: http://wazigate.local or if you are aware of the assigned ip address, type: `http://<ipaddress>`, afterwards login with the given credentails.
 2. In the side menu, go to the App section.
@@ -74,6 +74,25 @@ The application needs to be manually installed on the wazigate, in order to use 
 select here the option: `Always`.
 
 All dependencies are included in the docker image, so no further actions are required.
+
+### Change LoRa frequency of the WaziGate
+
+In this section we are covering the steps involved of changing the LoRa frequency of the WaziGate, it is possible in a range of 433-915Mhz, keep in mind that you always have to have the compatible antenna as otherwise you will experience bad reception and poor range.
+
+**Steps:**
+1. Connect to the Wazigate via ssh (**user:** `pi@wazigate.local`, **pw:** `loragateway`) 
+2. Navigate to:
+`cd /var/lib/wazigate/apps/waziup.wazigate-lora/chirpstack-network-server`
+3. Open the file with the editor of your choice, we
+going to use `nano` in this example:
+`sudo nano chirpstack-network-server.toml`
+4. Change the following line as you desire:
+```
+[network_server.band]
+name=”EU868”
+```
+5. Reboot the gateway, issue `sudo wazi-config`
+and select `“Reboot Wazigate”`
 
 ## Soil Sensor
 The soil sensors are LoRa enabled arduino microcontrollers with attached sensors housed in a waterproof case, powered by a solar panel. 
@@ -95,15 +114,19 @@ The WaziSense V2 can support different types of sensors and actuators. In the ir
 
 The following the needed hardware is presented that is required in order build a soil device:
 
-#### Parts: ####
-- WaziSense Board
-- 868 Mhz Coil Antenna
+![WaziSense](./media/20241217_141231.jpg)
+
+**Components:**
+- WaziSense V2 Board
+- 868 Mhz dipole Antenna
 - Wires and jumpers
 - Irrometer Watermark Sensor 200SS
 - DS18B20 temperature sensor 
 - 10 kOhm resistor, for the Watermark
 - 4.7 kOhm resistor, for the DS18B20
 - Waterproof WaziSense casing (contact us) or custom case
+    - cable glands
+    - seals
 - FTDI connector + USB cable
 - Power:
     - Solar panel 6 V, 1 W 
@@ -112,11 +135,58 @@ The following the needed hardware is presented that is required in order build a
 
 We created an in depth guide on how to build a sensor device on [WaziLab.](https://app.wazilab.io/courses/9imspUTdc--?topic=2NV8AmAstXa)
 
+### How to connect soil sensor devices to the WaziGate
+
+The connection between the sensor devices and the WaziGate is being realized via LoRa. The activation procedure is done via Activation By Personalization (ABP). When using ABP to connect sensor devices to a WaziGate via LoRa, you must hardcode specific keys and addresses like:
+- `Device Addresses`
+- `Network Session Keys`
+- `App Key` 
+
+directly into the microcontroller's firmware. Unlike OTAA, ABP does not require a join procedure, so the device assumes it is already connected upon startup.
+
+To facilitate this, download the latest Arduino IDE, how to do so is explained in a course on [WaziLab.](https://app.wazilab.io/courses/5_5hHxJIBIk?topic=4PpntYd_qSm)
+
+We provide the code for the soil moisture sensors on [github](https://github.com/Waziup/OSIRRIS/tree/main/Arduino).
+
+In the `Osirris_Soil_Sensor.ino` located in `OSIRRIS/Arduino/Osirris_Soil_Sensor
+/Osirris_Soil_Sensor.ino` you can adjust the keys before flashing the firmware to your sensor device.
+It can be found at line 242-248.
+
+```
+//if you need another address for tensiometer sensor device, use B1, B2, B3,..., BF
+unsigned char DevAddr[4] = {0x26, 0x01, 0x1D, 0xD1};
+#else
+//default device address for WaziGate configuration, mainly for SEN0308 capacitive soil sensor device
+//26011DAA
+//if you need another address for capacitive sensor device, use AA, AB, AC,..., AF
+unsigned char DevAddr[4] = {0x26, 0x01, 0x1D, 0xD1};
+```
+
+If you intend to use a different frequency for LoRa transmission, it can be also changed in line 55 of the same script:
+
+```
+////////////////////////////////////////////////////////////////////
+// Frequency band - do not change in SX12XX_RadioSettings.h anymore
+// if using a native LoRaWAN module such as RAK3172, also select band in RadioSettings.h
+#define EU868
+//#define AU915 
+//#define EU433
+//#define AS923-2
+```
+
+Keep in mind that in this case you also have to make changes to the file located in `OSIRRIS/Arduino/Osirris_Soil_Sensor/SX127X_RadioSettings.h` in line 148.
+
+```
+const uint32_t DEFAULT_CHANNEL=CH_18_868;
+```
+
+To perform those frequency change also on the WaziGate, follow the instructions here. 
+
 ### How to prepare and deploy the Watermark SS200 sensor
 
 To deploy the WaziSense in the field you will need some tools, they are named here:
 
-- **DN75 PVC sewage pipe**: 1.5 m - 2 m
+- **DN75 PVC sewage pipe**: 1.5 m - 2 m in length
     - is used as pole and case to house the micro-controller, protective cover for cables
 - **Drill**: to drill in the PVC pipe
     - is not mandatory, but makes routing cables more convenient
@@ -169,12 +239,10 @@ After one week to two weeks time you can obtain accurate sensor readings.
 
 Do not forget to read the official guide of the [Watermark 200SS installation guide](https://www.irrometer.com/pdf/701.pdf).
 
-### How to connect soil sensor devices to the WaziGate
+## Actuator
+In the following it is being explained how an actuator can be used to perform automatic irrigations.
 
-The connection between the sensor devices and the WaziGate is being realized via LoRa. The activation procedure is done via Activation By Personalization (ABP). 
-
-When using ABP to connect sensor devices to a WaziGate via LoRa, you must hardcode specific `network session keys` and `device addresses` directly into the microcontroller's firmware. Unlike OTAA, ABP does not require a join procedure, so the device assumes it is already connected upon startup.
-## Utilizing the automatic irrigation feature
+### Different modes of operation 
 
 The application can be used with two different goals in mind.
 
@@ -182,11 +250,92 @@ The application can be used with two different goals in mind.
 
 **Automatic Irrigation System:** The automatic irrigation feature will automatically irrigate a plot when a certain (user set) threshold was met.
 
-The different modes can be switched by setting an irrigation actuator in the `Settings` menu.
+The different modes can be switched by defining an irrigation actuator device in the `Settings` menu.
 
-## Using the Application
+### How to build an actuator
+
+For the actuator you can use the WaziAct board or any LoRa enabled arduino board.
+
+**Components:**
+- **WaziAct** Board or any **LoRa** enabled Arduino board
+- 868 Mhz dipole Antenna
+- Wires and jumpers
+- Waterproof WaziSense casing (contact us) or custom case
+- FTDI connector + USB cable
+- Powered via the grid: 
+    - preferably via power outlet of the pump
+- Powered via solar:
+    - Solar panel 6 V, 1 W 
+    - 18650 3,7V Li-Ion battery
+    - 18650 battery holder
+
+With those components the actuator can be assembled, in the following it is being indicated on how to do so.
+
+**PIN configuration:**
+
+The following section is related to the WaziAct board, it can also be used with any LoRa enabled Arduino board.
+Connect the flow meter sensor cable, usually yellow, to the `D5` pin, the red positive power cable to `D6` pin and the black ground cable to `GND` pin. If you use an WaziAct, there is a LED included, internally wired to `D8` If you use a dedicated LED you can connect the positive lead to an arbitrary digital pin and the negative pin to ground. The battery voltage can be read on WaziAct with pin `A0`, research it if you use a different MCU. In terms of power supply we suggest using a [Hi-Link HLK-PM01 AC-DC 220 V to 5 V stepdown converter](), as it is cost effective and convenient to use. Be sure you know what you are doing, handling high voltages like 220V can be dangerous. It is also possible to power the WaziAct with a 5V USB power supply.
+
+TODO: how to connect pump to relay? how to connect power to mcu?
+
+### How to flash the firmware of an actuator
+
+In this section the prerequisites and steps of flashing the automatic irrigation actuator are being explained.  
+
+[Make sure you read this section first, because it covers the basics of flashing a firmware to an arduino mcu.](#how-to-connect-soil-sensor-devices-to-the-wazigate)
+
+The firmware of the actuator is already prepared and just needs to be flashed to the arduino device, you can find it in the [WaziDev git repository.](https://github.com/Waziup/WaziDev/tree/master/examples/LoRaWAN/Irrigation) If you want to flash a WaziAct it is suggested to use: `WaziDev/examples/LoRaWAN/Irrigation/Pump_with_flow_meter_production_waziact
+/Pump_with_flow_meter_production_waziact.ino`.
+
+It can be flashed with the ArduinoIDE
+
+Here you have to adjust the LoRa specific ABP information (in HEX format) like `LoRaWANkeys`and `devAddr`:
+
+```
+unsigned char LoRaWANKeys[16] = {0x23, 0x15, 0x8D, 0x3B, 0xBC, 0x31, 0xE6, 0xAF, 0x67, 0x0D, 0x19, 0x5B, 0x5A, 0xED, 0x55, 0x25};
+unsigned char devAddr[4] = {0x26, 0x01, 0x1D, 0xE1};
+```
+
+Additionally it is needed to provide the PINs that the connection of the sensors was made to:
+
+```
+const int FlowMeterSensorDataPin = 5;
+const int FlowMeterSensorPowerPin = 6;
+const int ledPin = 8;
+const int batt_pin = A0;
+```
+
+After all necessary modifications had been done you can flash the firmware and check whether the relay switches on after an downlink was send. Afterwards it is advised to confirm whether the relay switches the pump off after the flow amount was reached. The device logs the current and anticipated quantities in the serial monitor.
+
+
+## Using the application
 
 You can observe the application by clicking on the apps name in the side bar of the user interface.
+
+### Setting up the application
+
+The first step after [installing the application](#install-the-irrigation-prediction-application) is to run the setup, press the gear icon (`⚙`) in the top right corner. The settings menu is separated in three section:
+
+- Soil
+- Device
+- Prediction and Scheduling
+
+***Soil section:***
+
+The soil section covers all soil related aspects of the application. Below there is a screenshot of this section:
+
+![settings_soil](media/settings.png)
+
+In the first option it can decided on the sensor type, volumetric water content sensors (returns the humidity in %) or soil tension sensors (returns humidity in kPa or cBar) are supported.
+
+The next option includes presets for soil types, here you can choose between different soil types, which automatically fills the remaining sections on this page.
+
+Settings those aspects manually is also possible:
+ - Permanent Wilting Point: describes a upper bound at which plants can no longer extract water from the soil
+ - Field Capacity Upper: maximum soil moisture content that your soil can retain
+ - Field Capacity Lower: minimum soil moisture content that your soil can hold
+ - Saturation: moisture content level for when the soil is fully saturated
+ - Custom Soil Water Retention Curve: Here you can input soil water retention curve in key-value pairs to help in conversion accuracy to volumetric water content
 
 ### Explanation of different attributes of the main screen
 - ***Sensor Overview***: Displays real-time data from connected sensors.
@@ -223,7 +372,7 @@ In the following different aspects and forms of the application are explained. T
 
 - ***Soil Type***: Choose the soil type that best matches your field’s composition.
 
-- ***Soil Water Retention Data***: Input soil water retention curve data in key-value pairs to help in prediction accuracy.
+- ***Soil Water Retention Data***: Input soil water retention curve data in key-value pairs to help in conversion accuracy to volumetric water content.
 
 - ***Permanent Wilting Point (PWP)***: Enter the soil moisture content at which plants can no longer extract water from the soil.
 
@@ -241,11 +390,11 @@ In the following different aspects and forms of the application are explained. T
 This sections explains how to check gateway, sensor devices and app status.
 
 ### Gateway
-Check the gateway regularly by visiting the UI, it should be accessible. If not restart the gateway by cutting the power and let it reboot.
+Check the gateway regularly by visiting the UI, it should be accessible. If not restart the gateway by cutting the power and let it reboot. After a reboot visit the UI and check whether the application is running and whether there is a config, if necessary press the `Start training` button to create predictions.
 
 ### Sensor devices
 To check if the sensor devices work properly you can observe the dashboard.
-In the dashboard view you can see whether sensors send regularly messages.
+In the dashboard view you can see whether sensors send regularly messages. The messages should 
 
 ### App status
 Visit regularly the the UI of the application
@@ -281,8 +430,8 @@ You can reach out to us at contact@waziup.org.
 
 **Q:** Can I use different types of sensors?
 
-&emsp;**A:**
+&emsp;**A:** Soil tension sensors and volumetric water content sensors are supported.
 
-**Q:** How do I access historical predictions?
+**Q:** How do I access historical sensor values?
 
-&emsp;**A:**
+&emsp;**A:** Via the Dashboard of the WaziGate or inside the Application, after you run the configuration.
