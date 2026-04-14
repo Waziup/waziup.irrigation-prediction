@@ -257,6 +257,7 @@ The different modes can be switched by defining an irrigation actuator device in
 For the actuator you can use the WaziAct board or any LoRa enabled arduino board.
 
 **Components:**
+
 - **WaziAct** Board or any **LoRa** enabled Arduino board
 - 868 Mhz dipole Antenna
 - Wires and jumpers
@@ -305,39 +306,172 @@ const int ledPin = 8;
 const int batt_pin = A0;
 ```
 
-After all necessary modifications had been done you can flash the firmware and check whether the relay switches on after an downlink was send. Afterwards it is advised to confirm whether the relay switches the pump off after the flow amount was reached. The device logs the current and anticipated quantities in the serial monitor.
+Another important point is that you have to adjust the **conversion factor** of the water flow sensor accordingly, this specifies how much water can run through the flow sensor in one revelation of the impeller. 
+
+```
+volatile float factor_conversion = 0.2;                // estimated for DN50
+volatile float factor_conversion = 5.625;              // calculated for DN20
+```
 
 
-## Using the application
+There are some presets in the script but you can adjust/calculate it on your own, to match your flow meters diameter, there are three methods to do so, they are explained in the following:
 
-You can observe the application by clicking on the apps name in the side bar of the user interface.
+1. The Standard Formula (K-Factor): Most flow meters have a K-factor printed on the datasheet or the housing. The K-factor is usually expressed in Pulses per Liter (P/L). 
+Example: If your DN20 meter says 450 pulses per liter:
+
+```
+                Frequency (Hz)
+Flow (L/min) = ----------------
+                K-Factor (P/L)
+```
+
+2. Manual Calibration (The "Bucket Test") 
+Since pipe diameter (DN20 vs DN50) and pressure greatly affect accuracy, the most reliable way is manual calibration: 
+Reset your NumPulses to 0.
+Run water through the meter into a calibrated container (like a 10-liter bucket) until it is exactly full.
+Read the total pulses (NumPulses) recorded by your code.
+Calculate:
+```
+                  Total Pulses (NumPulses)
+K-Faktor (P/L) = ----------------------------
+                  Gemessenes Volumen (Liter)
+```
+
+3. Estimates for DN20 - DN50
+Flow meters vary by brand (e.g., Hall effect vs. Ultrasonic), but here are common starting points for standard plastic Hall-effect sensors: 
+
+|Size	    |Typical K-Factor |Estimated `factor_conversion` |
+| :---      |    :----:       |                         ---: |
+|DN20 (3/4")|4.5 to 8	      |0.125 to 0.22                 |
+|DN25 (1")	|1.0 to 3.5	      |0.28 to 1.0                   |
+|DN50 (2")	|0.2 to 0.5	      |2.0 to 5.0                    |
+
+Calculate:
+```
+                ( Frequenz / K-Faktor )
+Flow (m3/min) = ------------------------
+                        1000
+```
+
+Since after an potential update of the flow meter or an incorrect calculation/measurement the conversion factor could change, you can just update it via the WaziGates dashboard. Just click on the device, select the actuator (indicated by a robot arm) and send another `conversion_factor` via LoRa. No need to open the device and update it in the arduino code.
+
+There are also confirmations for successful irrigations, the actuator will send back the given amount to the WazGate, after an irrigation was completed successfully.
+
+TODO: show picture of device on dashboard
+
+After all necessary modifications had been done you can flash the firmware and check whether the relay switches on after an downlink was send. Afterwards it is advised to confirm whether the relay switches the pump off after the flow amount was reached. Verify the calculated flow amount with a bucket test. The device logs the current and anticipated quantities in the serial monitor.
+
+## Irrigation Prediction Application
+After installing the application, you can observe it by clicking on the apps name in the side bar of the user interface.
 
 ### Setting up the application
+The first step after [installing](#install-the-irrigation-prediction-application) and launching the application is to **run the setup**, press the gear icon (**`⚙`**) in the top right corner. The settings menu is separated in three section:
 
-The first step after [installing the application](#install-the-irrigation-prediction-application) is to run the setup, press the gear icon (`⚙`) in the top right corner. The settings menu is separated in three section:
+- **Soil**
+- **Device**
+- **Prediction and Scheduling**
 
-- Soil
-- Device
-- Prediction and Scheduling
+The irrigation prediction application can survey and automatically irrigate multiple different plots with different characteristics at the same time. For each separate plot a specific configuration has to be saved, hence setting up each individual plot is required.
 
 ***Soil section:***
 
-The soil section covers all soil related aspects of the application. Below there is a screenshot of this section:
+The soil tab covers all soil related aspects of the application. Below there is a screenshot of this section:
 
 ![settings_soil](media/settings.png)
 
-In the first option it can decided on the sensor type, volumetric water content sensors (returns the humidity in %) or soil tension sensors (returns humidity in kPa or cBar) are supported.
+In the first option it can decided on the **sensor type**, volumetric water content sensors (returns the humidity in %) or soil tension sensors (returns humidity in kPa or cBar) are supported.
 
-The next option includes presets for soil types, here you can choose between different soil types, which automatically fills the remaining sections on this page.
+The next option includes presets for **soil types**, here you can choose between different soil types, which automatically fills the remaining sections on this page.
 
 Settings those aspects manually is also possible:
- - Permanent Wilting Point: describes a upper bound at which plants can no longer extract water from the soil
- - Field Capacity Upper: maximum soil moisture content that your soil can retain
- - Field Capacity Lower: minimum soil moisture content that your soil can hold
- - Saturation: moisture content level for when the soil is fully saturated
- - Custom Soil Water Retention Curve: Here you can input soil water retention curve in key-value pairs to help in conversion accuracy to volumetric water content
+ - **Permanent Wilting Point:** describes a upper bound at which plants can no longer extract water from the soil
+ - **Field Capacity Upper:** maximum soil moisture content that your soil can retain
+ - **Field Capacity Lower:** minimum soil moisture content that your soil can hold
+ - **Saturation:** moisture content level for when the soil is fully saturated
+ - **Custom Soil Water Retention Curve:** Here you can input soil water retention curve in key-value pairs to help in conversion accuracy to volumetric water content
 
-### Explanation of different attributes of the main screen
+**Device section:**
+
+The second tab is the **device tab**, here the sensor devices have to be specified. In the following there is a visualization of the device section.
+
+![settings_device](media/settings_device.png)
+
+On top a user can specify the name of the plot, this helps to identify the plot.
+
+In the next section **soil moisture sensor** can be defined. Select one or more soil moisture sensors that monitor soil tension and are connected to your WaziGate. To select or deselect multiple sensors, hold down the **CTRL** key.
+
+Below is the **soil temperature sensor** selection. Choose one or more sensors that measure soil temperature and are linked to your WaziGate. Use **CTRL** to select or deselect multiple sensors.
+
+This is followed be the **water flow sensor** section. Here the sensor that monitors the water flow of your pump connected to WaziGate. Only one water flow sensor can be chosen.
+
+Almost at the button the **GPS coordinates** have to be entered, this step is as crucial as the IoT sensors, the predictions of the application are heavily dependent on fetching weather forecasts.
+
+If there is no pump specified, the system tries to judge when an **irrigation was given**, to decide there is a **adjustable slope** to detect the circumstance. Specify the slope to assist in detecting artificial irrigation. This option is needed only if no water flow sensor is added.
+
+**Prediction and Scheduling section:**
+
+The last tab is the **prediction and scheduling tab**, here the sensor devices have to be specified. In the following there is a visualization of the prediction and scheduling section.
+
+![settings_pred](media/settings_pred.png)
+
+On top the **soil tension threshold** in hPa or cBar is specified. When the soil is getting dryer that this threshold and there is no precipitation forecasted for next hours (this can be specified with the option: look ahead time), irrigation is being given.
+
+The **irrigation volume** is meant for the specific plot in m³, not in mm, this would also make it necessary to include the area of the plot. Enter the volume of water in m³ (1 m³ = 1000 l) used for a single irrigation event.
+
+Like mentioned before, with this option **forecast look-ahead time**, the number of hours the precipitation forecast should be taken into account, is set. If the soil tension reading is not below 20% of this threshold and there is a precipitation amount in the forecast. The system will skip the irrigation and wait for the natural precipitation.
+
+When sensors are installed, they need to be primed and are inaccurate during early cycles. To not let the model learn from wrong readings the data can be omitted for the modelling process before a certain date. **Start date** selects the start date for sensor data to be included in model creation. It is recommended to allow a short warm-up period after sensor installation.
+
+To ensure good resilience **maximum data duration** was included, in a long term deployment, circumstances might change over time, so old data might not be representative, to prevent this a user can specify a time span how many days in the past should be used as training data for the model. A value of zero mean it should use all the gathered training data after the starting date (defined before).
+
+### Using the application
+
+After setting everything accordingly up. Press the `Start Training` button, to let the application train and compare different machine learning approaches to find the best suiting one for the use case. The application will indicate the start and end of this training procedure with a message from your browser, it can take from 5 minutes - 1 hour. Afterwards the models/predictions are retrained/generated automatically in dynamic intervals for you.
+
+Below but still in the top section, there is the **sensor overview**. Here real-time soil temperature and soil tension and humidity data from connected sensors is averaged and shown. 
+
+On the right hand side there is the **pump section**, it is active when you specified an actuator to perform the irrigation in the device tab of the configuration. If you have an actuated pump or a solenoid valve specified, manual irrigations can be initiated with an arbitrary quantity. 
+
+Below, there are three charts that show:
+- **sensor data**
+- **training data**
+- **predictions**
+
+In the bottom of each individual chart, different parameters can be selected and deactivated to be shown/rendered. Additionally start and end date can be adjusted by zooming into the chart to get more detail in a certain time period. In the three bar menu on the right top of the bar, the data can be downloaded in different formats.
+
+The first diagram shows **historical sensor values**, it renders the averaged value of all sensors of the same type, here soil tension and soil temperature is shown.
+
+The second chart shows **all inputs for the machine learning model**, already cleaned, sampled and prepared. Here certain trends can be visualized/analyzed and how they interlink to other parameters.
+
+The last chart shows the **predictions for the upcoming week**. It shows the moisture content of the soil as tension and as volumetric water content (VWC), this is realized with help of the soil water retention curve. If the sensor type is a VWC sensor, then it is only shown in VWC. Vertical lines indicate the next days. Vertically separated lines and areas indicate soil moisture levels for the specific soil type that had been set in the settings menu.
+
+The last aspect of this page is the **predicted irrigation time**, it shows a timestamp when the next irrigation is likely to happen, this happens when the threshold is met (and is not ) and there is no precipitation expected in the upcoming hours. 
+
+## Maintenance  
+This sections explains how to check gateway, sensor devices and app status.
+
+### Gateway
+Check the gateway regularly by visiting the UI, it should be accessible. If not restart the gateway by cutting the power and let it reboot. After a reboot visit the UI and check whether the application is running and whether there is a config, if necessary press the `Start training` button to create predictions.
+
+### Sensor devices
+To check if the sensor devices work properly you can observe the WaziGates dashboard.
+In the dashboard view you can see whether sensors send regularly messages. The messages should be received in the preset intervals, that were defined in the arduino script. 
+
+### App status
+Visit regularly the the UI of the application and interpret the data. Also have a visual check whether plants that you grow in that plot are healthy/with good nutrition and not infected by any diseases. Since this application does not visually check the health of the plants in the plot, human intervention is necessary to check on the status of the plants.
+
+## Troubleshooting
+Error Messages: 
+- TODO: Error messages should be explained here
+
+If you have any further questions/problems, please do not hesitate to contact us.
+You can reach out to us at contact@waziup.org. 
+
+## Tooltips
+
+All aspects of the application are explained with tooltips, the tooltips are printed below.
+
+### Tooltips of the main screen
 - ***Sensor Overview***: Displays real-time data from connected sensors.
 
 - ***Manual Irrigation Control***: Allows manual triggering of irrigation.
@@ -348,7 +482,7 @@ Settings those aspects manually is also possible:
 
 - ***Prediction Chart***: Provides the latest soil tension forecast for the upcoming week.
 
-### Explanation of different attributes of the settings menu
+### Tooltips of the settings menu
 
 In the following different aspects and forms of the application are explained. This information is also available via tooltips, just hover the question mark to observe them. 
 
@@ -384,45 +518,6 @@ In the following different aspects and forms of the application are explained. T
 
 - ***Soil Tension Threshold***: Specify the threshold for soil tension, measured in cbar or hPa, to guide irrigation decisions.
 
----------------- TODO: check content
-
-## Maintenance  
-This sections explains how to check gateway, sensor devices and app status.
-
-### Gateway
-Check the gateway regularly by visiting the UI, it should be accessible. If not restart the gateway by cutting the power and let it reboot. After a reboot visit the UI and check whether the application is running and whether there is a config, if necessary press the `Start training` button to create predictions.
-
-### Sensor devices
-To check if the sensor devices work properly you can observe the dashboard.
-In the dashboard view you can see whether sensors send regularly messages. The messages should 
-
-### App status
-Visit regularly the the UI of the application
-
-## Training the Prediction Model
-Open the Training Tab
-Explain how users can start the training process and what they should expect.
-
-## Adjust Model Parameters
-
-The hyperparameters are chosen and tuned automatically and cannot be changed by a user.
-There are other aspects that will change the models behavior and which can be altered:
- and how they impact predictions.
-Approximate training time.
-
-## Adjusting Settings
-List and explain the available settings, such as model type, prediction intervals, and data refresh rates.
-
-## Understanding Predictions
-Describe how to interpret predictions in the application. Are predictions presented as simple values or through a visual format, like graphs? How does the app indicate whether soil moisture is adequate?
-
-## Troubleshooting
-Error Messages: Explain common errors users might encounter and potential fixes.
-Connectivity Issues: Steps to take if sensors aren’t connecting or if there’s a data lag.
-
-If you have any further questions/problems, please do not hesitate to contact us.
-You can reach out to us at contact@waziup.org. 
-
 ## FAQ
 **Q:** How frequently should I re-train the model? 
 
@@ -430,8 +525,16 @@ You can reach out to us at contact@waziup.org.
 
 **Q:** Can I use different types of sensors?
 
-&emsp;**A:** Soil tension sensors and volumetric water content sensors are supported.
+&emsp;**A:** Soil tension sensors and volumetric water content (VWC) sensors are supported.
 
 **Q:** How do I access historical sensor values?
 
 &emsp;**A:** Via the Dashboard of the WaziGate or inside the Application, after you run the configuration.
+
+**Q:** What is the approximate training time.
+
+&emsp;**A:** Training usually takes 5-60min for one plot, it depends on the amount of data and the complexity of the best model.
+
+**Q:** Can I have an influence on or adjust the model parameters?
+
+&emsp;**A:** The hyperparameters and all other parameters relevant for machine learning are chosen and tuned automatically by the system and cannot be changed by a user. There are other aspects that will change the models behavior those can be altered in the settings menu.
