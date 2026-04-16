@@ -515,11 +515,12 @@ except Exception as e:
         logger = logging.getLogger(__name__)
 
         script_path = Path(tmp_dir) / f"nn_subprocess_{plot_name}_{datetime.now().timestamp()}.py"
-        result_clean = str(result_path).replace(".pkl", "")
+        result_clean = str(result_path).replace(".keras", "")
 
         model_configs_json = json.dumps(model_configs)
 
         script_content = f'''
+print("[SUBPROCESS NN] Started tuning and ensemble with Neural Networks for: {plot_name}", flush=True)
 import os
 import sys
 
@@ -527,7 +528,10 @@ import sys
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 sys.path.insert(0, os.getcwd())
-sys.settrace(None)
+if sys.gettrace() is None:
+    # sys.settrace(None)
+    pass  # Not debugging, no need to disable tracing
+sys.stdout.reconfigure(line_buffering=True)
 
 import json
 import pickle
@@ -536,7 +540,7 @@ import numpy as np
 import tensorflow as tf
 import gc
 
-from create_model import tune_model_nn, compare_nn_ensembles, Model_functions
+from create_model import tune_model_nn, compare_nn_ensembles, Model_functions, save_models_nn
 from keras_tuner.engine.hyperparameters import HyperParameters
 
 print("[SUBPROCESS NN] Started for: {plot_name}")
@@ -585,25 +589,27 @@ try:
         tuned_models.append(tuned)
         tuned_hps.append(hp)
 
-        tf.keras.backend.clear_session()
-        gc.collect()
+    tf.keras.backend.clear_session()
+    gc.collect()
+
+    save_models_nn("{plot_name}", tuned_models, "models/{plot_name}/tuned_models/nn/soil_tension_prediction_", tuned_hps)
 
     print("[SUBPROCESS NN] Running ensemble")
 
-    results = compare_nn_ensembles(
-        tuned_models,
-        tuned_hps,
-        X_train,
-        y_train,
-        X_val,
-        y_val
-    )
+    # results = compare_nn_ensembles(
+    #     tuned_models,
+    #     tuned_hps,
+    #     X_train,
+    #     y_train,
+    #     X_val,
+    #     y_val
+    # )
 
-    best_model = results["best_predictor"]
+    # best_model = results["best_predictor"]
 
-    # Save via pickle (or custom)
-    with open(r"{result_clean}.pkl", "wb") as f:
-        pickle.dump(best_model, f)
+    # Save best model to tmp dir -> DEBUG: skipping ensemble for now to speed up, just return best tuned model
+    #save_models_nn("{plot_name}", tuned_models[0], "{result_clean}", None)
+    tuned_models[0].save("{result_clean}" + ".keras")
 
     # Cleanup
     tf.keras.backend.clear_session()
@@ -640,7 +646,7 @@ except Exception as e:
             print(stderr)
 
             if process.returncode == 0:
-                return result_clean
+                return result_path
             return None
 
         finally:
@@ -727,41 +733,18 @@ except Exception as e:
         return stdout, stderr
     
     def _run_process_stream(self, process, plot_name):
-        import time
-
         stdout_lines = []
         stderr_lines = []
 
-        try:
-            while True:
-                # Read line-by-line (non-blocking-ish)
-                out = process.stdout.readline()
-                err = process.stderr.readline()
+        for line in process.stdout:
+            print(f"[{plot_name} STDOUT] {line}", end="")
+            stdout_lines.append(line)
 
-                if out:
-                    print(f"[{plot_name} STDOUT] {out.strip()}")
-                    stdout_lines.append(out)
+        for line in process.stderr:
+            print(f"[{plot_name} STDERR] {line}", end="")
+            stderr_lines.append(line)
 
-                if err:
-                    print(f"[{plot_name} STDERR] {err.strip()}")
-                    stderr_lines.append(err)
-
-                # Check if process finished
-                if process.poll() is not None:
-                    break
-
-                time.sleep(0.1)
-
-            # Read remaining output
-            remaining_out, remaining_err = process.communicate()
-            if remaining_out:
-                stdout_lines.append(remaining_out)
-            if remaining_err:
-                stderr_lines.append(remaining_err)
-
-        except Exception as e:
-            print(f"[{plot_name}] Error while streaming: {e}")
-            self._kill_process_tree(process)
+        process.wait()
 
         return "".join(stdout_lines), "".join(stderr_lines)
 
@@ -885,7 +868,7 @@ def run_tuning_and_ensemble_nn_with_subprocess(temp_dir, model_configs, plot_nam
     result_path = manager.run_tuning_and_ensemble_nn_subprocess(
         str(temp_dir),
         model_configs,
-        str(temp_dir) + "/result_model.pkl",
+        str(temp_dir) + "/result_model.keras",
         plot_name
     )
 

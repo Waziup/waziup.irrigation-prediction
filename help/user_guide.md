@@ -21,7 +21,7 @@ The **Irrigation Prediction Application** optimizes agricultural water managemen
 
 The Wazigate is a **LoRa Gateway.** It is the connecting link between your **sensor devices and the WaziCloud platform**. It merges and stores all the sensor values and also can **run custom applications**. 
 
-![WaziGate](./media/thumbnail.png)
+&nbsp;<p style="text-align: center;">![WaziGate](./media/thumbnail.png)</p><p style="text-align: center;"> Figure : </p> 
 
 ## System Requirements
 - **Supported OS:** WaziGateOS
@@ -41,14 +41,14 @@ For this application to work properly, an internet connection is needed
 
 1. Power the WaziGate with the delivered power supply and wait for 3min.
 2. Connect your smartphone or PC to a WIFI with the following SSID: `WAZIGATE_XXXXXXXXX` (X is arbitrary). The password for this network is `loragateway`. Your device may state that this network has no internet connection, but connect anyways.
-3. Open the browser of your choice, type the address [http://10.42.0.1](http://10.42.0.1) as URL and hit enter or scan this QR code. ![http://10.42.0.1](./media/qr_10_42_0_1_low.png)
+3. Open the browser of your choice, type the address [http://10.42.0.1](http://10.42.0.1) as URL and hit enter or scan this QR code. <p style="text-align: center;">![http://10.42.0.1](./media/qr_10_42_0_1_low.png)</p> <p style="text-align: center;"> Figure : </p> 
 4. The login screen of the WaziGate is shown. Use the following credentials:
    - **Username:** `admin`
    - **Password:** `loragateway`
-5. Next step is to connect to a local Wifi with internet access: Go to Settings -> Wifi. The WaziGate will now scan for local networks nearby. ![Connect to a Wifi](./media/connect_wifi_ui.png)
+5. Next step is to connect to a local Wifi with internet access: Go to Settings -> Wifi. The WaziGate will now scan for local networks nearby. ![Connect to a Wifi](./media/connect_wifi_ui.png)<p style="text-align: center;"> Figure : </p> 
 6. To connect to your Wifi, you have to issue the password of your network.
 7. After connecting, the UI is not any more responsive and the access point of the WaziGate will be closed. Now connect your device (smartphone, pc or tablet) to the same network like you formerly connected your WaziGate.
-8. Now you can access the WaziGate via the IP-address (`http://<ip address>`) , via the alias [http://wazigate.local](http://wazigate.local) or scan just this QR code. ![http://wazigate.local](./media/qr_wazigate_local_low.png) 
+8. Now you can access the WaziGate via the IP-address (`http://<ip address>`), via the alias [http://wazigate.local](http://wazigate.local) or scan just this QR code. <p style="text-align: center;">![http://wazigate.local](./media/qr_wazigate_local_low.png)</p><p style="text-align: center;"> Figure : </p> 
 
 The last two options are only available if there is only one WaziGate connected to the same Wifi network.
 
@@ -97,7 +97,8 @@ and select `“Reboot Wazigate”`
 ## Soil Sensor
 The soil sensors are LoRa enabled arduino microcontrollers with attached sensors housed in a waterproof case, powered by a solar panel. 
 
-![WaziSense](./media//20240131_143113.jpg)
+&nbsp;<p style="text-align: center;">![WaziSense](./media//20240131_143113.jpg)</p>
+<p style="text-align: center;"> Figure : WaziSense V2 with different sensor configuration.</p> 
 
 For the purpose of developing IoT solutions and testing them, we developed a new version of the development board “WaziSense”. This board will be used in the development and testing of the minimum viable products prosed hereafter. It is capable of supporting harsh outdoor environments. The WaziSense is an all-in-one style development board for projects involving outdoor sensing and agricultural purposes. 
 
@@ -114,7 +115,8 @@ The WaziSense V2 can support different types of sensors and actuators. In the ir
 
 The following the needed hardware is presented that is required in order build a soil device:
 
-![WaziSense](./media/20241217_141231.jpg)
+&nbsp;<p style="text-align: center;">![WaziSense](./media/20241217_141231.jpg)</p>
+<p style="text-align: center;"> Figure : WaziSense V2 assembly</p> 
 
 **Components:**
 - WaziSense V2 Board
@@ -224,7 +226,9 @@ Full **sensor accuracy will be reached after 5 or more irrigation cycles**, depe
 
 In the following the steps are outlined to deploy a WaziSense with Watermark sensor attached to it. It is just a brief overview, to obtain more in detail information, consult the [Watermark 200SS installation guide](https://www.irrometer.com/pdf/701.pdf) (you can also find this guide in the provided box).
 
-An illustration was created to visualize the process of installing the sensor devices in the ground. ![Installation of sensor devices](./media/deploy_vis.png) 
+An illustration was created to visualize the process of installing the sensor devices in the ground. 
+&nbsp;<p style="text-align: center;">![Installation of sensor devices](./media/deploy_vis.png)</p>
+<p style="text-align: center;">Figure : Soil sensor device deployment suggestion schematic.</p> 
 
 1. The very first step is to prepare your Watermark SS200 sensors, the procedure is explained in the former bullet point.
 2. In the field, place them diagonally in different locations. If you have drip irrigation, do not place them to close to the pipe with holes.
@@ -333,8 +337,8 @@ Read the total pulses (NumPulses) recorded by your code.
 Calculate:
 ```
                   Total Pulses (NumPulses)
-K-Faktor (P/L) = ----------------------------
-                  Gemessenes Volumen (Liter)
+K-Factor (P/L) = ----------------------------
+                      Volume (liters)
 ```
 
 3. Estimates for DN20 - DN50
@@ -348,7 +352,7 @@ Flow meters vary by brand (e.g., Hall effect vs. Ultrasonic), but here are commo
 
 Calculate:
 ```
-                ( Frequenz / K-Faktor )
+                ( Frequency / K-Factor )
 Flow (m3/min) = ------------------------
                         1000
 ```
@@ -376,8 +380,8 @@ The irrigation prediction application can survey and automatically irrigate mult
 ***Soil section:***
 
 The soil tab covers all soil related aspects of the application. Below there is a screenshot of this section:
-
-![settings_soil](media/settings.png)
+&nbsp;<p style="text-align: center;">![settings_soil](media/settings.png)</p>
+<p style="text-align: center;"> Figure : Soil section of the settings page.</p> 
 
 In the first option it can decided on the **sensor type**, volumetric water content sensors (returns the humidity in %) or soil tension sensors (returns humidity in kPa or cBar) are supported.
 
@@ -393,8 +397,8 @@ Settings those aspects manually is also possible:
 **Device section:**
 
 The second tab is the **device tab**, here the sensor devices have to be specified. In the following there is a visualization of the device section.
-
-![settings_device](media/settings_device.png)
+&nbsp;<p style="text-align: center;">![settings_device](media/settings_device.png)</p>
+<p style="text-align: center;"> Figure : Device section of the settings page.</p> 
 
 On top a user can specify the name of the plot, this helps to identify the plot.
 
@@ -411,8 +415,8 @@ If there is no pump specified, the system tries to judge when an **irrigation wa
 **Prediction and Scheduling section:**
 
 The last tab is the **prediction and scheduling tab**, here the sensor devices have to be specified. In the following there is a visualization of the prediction and scheduling section.
-
-![settings_pred](media/settings_pred.png)
+&nbsp;<p style="text-align: center;">![settings_pred](media/settings_pred.png)</p>
+<p style="text-align: center;"> Figure : Prediction and Scheduling section of the settings page.</p> 
 
 On top the **soil tension threshold** in hPa or cBar is specified. When the soil is getting dryer that this threshold and there is no precipitation forecasted for next hours (this can be specified with the option: look ahead time), irrigation is being given.
 
@@ -426,11 +430,15 @@ To ensure good resilience **maximum data duration** was included, in a long term
 
 ### Using the application
 
-After setting everything accordingly up. Press the `Start Training` button, to let the application train and compare different machine learning approaches to find the best suiting one for the use case. The application will indicate the start and end of this training procedure with a message from your browser, it can take from 5 minutes - 1 hour. Afterwards the models/predictions are retrained/generated automatically in dynamic intervals for you.
+[After setting everything accordingly up.](#setting-up-the-application) Press the `Start Training` button, to let the application train and compare different machine learning approaches to find the best suiting one for the use case. The application will indicate the start and end of this training procedure with a message from your browser, it can take from 5 minutes - 1 hour. Afterwards the models/predictions are retrained/generated automatically in dynamic intervals for you.
 
-Below but still in the top section, there is the **sensor overview**. Here real-time soil temperature and soil tension and humidity data from connected sensors is averaged and shown. 
+The irrigation prediction application is enabled to manage a whole farm with several plots, they can be added with different configurations and sensors. In the application those views can be changed via the tabs that are located in the top part of the screen. New plots can be added via the `+ Add Plot` button, which can be found next to the configuration button on the right. Plots can be deleted by clicking on the `✖` symbol on the top right corner of the currently active tab (the active tab is indicated by a blue background). 
 
-On the right hand side there is the **pump section**, it is active when you specified an actuator to perform the irrigation in the device tab of the configuration. If you have an actuated pump or a solenoid valve specified, manual irrigations can be initiated with an arbitrary quantity. 
+Below but still in the top section, there is the **sensor overview**. Here real-time soil temperature and soil tension and humidity data from connected sensors is averaged and shown. As shown in the figure below.
+&nbsp;<p style="text-align: center;">![main_top_bar](/help/media/main_top.png)</p>
+<p style="text-align: center;"> Figure : Top section with tabs, menu and live data from sensors and actuators.</p> 
+
+On the right hand side there is the **pump section**, it is active when you specified an actuator to perform the irrigation in the device tab of the configuration. If you have an actuated pump or a solenoid valve specified, manual irrigations can be initiated with an arbitrary quantity (in m³). 
 
 Below, there are three charts that show:
 - **sensor data**
@@ -440,12 +448,18 @@ Below, there are three charts that show:
 In the bottom of each individual chart, different parameters can be selected and deactivated to be shown/rendered. Additionally start and end date can be adjusted by zooming into the chart to get more detail in a certain time period. In the three bar menu on the right top of the bar, the data can be downloaded in different formats.
 
 The first diagram shows **historical sensor values**, it renders the averaged value of all sensors of the same type, here soil tension and soil temperature is shown.
+&nbsp;<p style="text-align: center;">![main_data](/help/media/main_sensor_data.png)</p>
+<p style="text-align: center;"> Figure : Averaged data accumulated by all soil moisture sensor devices that have the same type.</p> 
 
-The second chart shows **all inputs for the machine learning model**, already cleaned, sampled and prepared. Here certain trends can be visualized/analyzed and how they interlink to other parameters.
+The second chart shows **all inputs for the machine learning model**, already cleaned, sampled and prepared. Here certain trends can be visualized/analyzed and how they interlink to other parameters. The features that are shown here are either engineered variables or external data retrieved from a weather services API. An overview of this chart is illustrated in the figure below.
+&nbsp;<p style="text-align: center;">![main_data](/help/media/main_data.png)</p>
+<p style="text-align: center;"> Figure : Data used by the machine learning algorithm, includes sensor data, engineered features and weather data.</p> 
 
-The last chart shows the **predictions for the upcoming week**. It shows the moisture content of the soil as tension and as volumetric water content (VWC), this is realized with help of the soil water retention curve. If the sensor type is a VWC sensor, then it is only shown in VWC. Vertical lines indicate the next days. Vertically separated lines and areas indicate soil moisture levels for the specific soil type that had been set in the settings menu.
+The last chart shows the **predictions for the upcoming week**. It shows the moisture content of the soil as tension and as volumetric water content (VWC), this is realized with help of the soil water retention curve. If the sensor type is a VWC sensor, then it is only shown in VWC. Vertical lines indicate the next days. Vertically separated lines and areas indicate soil moisture levels for the specific soil type that had been set in the settings menu. A figure below gives a visual representation of the chart.
+&nbsp;<p style="text-align: center;">![main_prediction](/help/media/main_prediction.png)</p>
+<p style="text-align: center;"> Figure : Predictions for the upcoming days. Labels are explained above. </p> 
 
-The last aspect of this page is the **predicted irrigation time**, it shows a timestamp when the next irrigation is likely to happen, this happens when the threshold is met (and is not ) and there is no precipitation expected in the upcoming hours. 
+The last aspect of this page is the **predicted irrigation time**, it shows a timestamp when the next irrigation is likely to happen, this happens when the threshold is met and there is no precipitation expected in the upcoming hours. 
 
 ## Maintenance  
 This sections explains how to check gateway, sensor devices and app status.
@@ -482,7 +496,7 @@ All aspects of the application are explained with tooltips, the tooltips are pri
 
 - ***Prediction Chart***: Provides the latest soil tension forecast for the upcoming week.
 
-### Tooltips of the settings menu
+### Tooltips of the settings section
 
 In the following different aspects and forms of the application are explained. This information is also available via tooltips, just hover the question mark to observe them. 
 

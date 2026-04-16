@@ -38,7 +38,6 @@ from tensorflow.keras.layers import Dense, Conv1D, MaxPooling1D, Flatten, Dense,
 from tensorflow.keras.optimizers import Adam, SGD, RMSprop, get as get_optimizer
 from tensorflow.keras.callbacks import Callback
 from tensorflow.keras.backend import floatx
-from keras.callbacks import Callback
 from tensorflow.keras.callbacks import EarlyStopping
 import tensorflow.keras.models as keras_models
 from scikeras.wrappers import KerasRegressor
@@ -2002,10 +2001,10 @@ def save_models_nn(plot_name, nn_models, path_to_save, nn_hps = None):
         if isinstance(nn_models[i], tensorflow.keras.Model):
             try:
                 # Save the trained models for future use
-                nn_models[i].save(base_name + ".h5")
-                print(f"[OK] Saved Keras model: {base_name}.h5")
+                nn_models[i].save(base_name + ".keras")
+                print(f"[OK] Saved Keras model: {base_name}.keras")
             except Exception as e:
-                print(f"[FAIL] Could not save Keras model {nn_models[i].model_name}: {e}")
+                print(f"[FAIL] Could not save Keras model {model_name}: {e}")
 
             if nn_hps is not None:
                 try:
@@ -2013,7 +2012,7 @@ def save_models_nn(plot_name, nn_models, path_to_save, nn_hps = None):
                         with open(path_to_save + str(i) + '_' + nn_models[i].model_name + '_' + plot_name + "_hps.json", "w") as f:
                             json.dump(nn_hps[i].values, f, indent=2)
                 except Exception as e:
-                    print(f"HP save failed ({nn_models[i].model_name}): {e}")
+                    print(f"[Fail] HP save failed ({model_name}): {e}")
 
         # Ensemble models
         elif isinstance(nn_models[i], EnsemblePredictor):
@@ -2031,7 +2030,7 @@ def save_models_nn(plot_name, nn_models, path_to_save, nn_hps = None):
 
             except Exception as e:
                 print(f"[FAIL] Could not save ensemble predictor: {e}")  
-    # Unknown model type
+        # Unknown model type
         else:
             print(
                 f"[SKIP] Object of type {type(nn_models[i])} cannot be saved "
@@ -2045,12 +2044,12 @@ def load_models_nn(folder_path):
 
     # Sort to ensure model i matches hyperparameter i
     for file in sorted(os.listdir(folder_path)):
-        if file.endswith(".h5"):
+        if file.endswith(".h5") or file.endswith(".keras"):
             path = os.path.join(folder_path, file)
             model = keras_models.load_model(path)
 
             # Parse name: index_modelname_plot.h5
-            parts = file.replace(".h5", "").split("_", 2)
+            parts = file.replace(".h5", "").replace(".keras", "").split("_", 2)
             if len(parts) >= 2:
                 model.model_name = parts[1]
 
@@ -2058,7 +2057,8 @@ def load_models_nn(folder_path):
             print(f"Loaded NN model: {file}")
 
             # Attempt to load corresponding hyperparameters JSON
-            hp_file = file.replace(".h5", "_hps.json")
+            base_name, _ = os.path.splitext(file)
+            hp_file = f"{base_name}_hps.json"
             hp_path = os.path.join(folder_path, hp_file)
             if os.path.exists(hp_path):
                 try:
@@ -2578,8 +2578,8 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
         tuner = Hyperband(
             builder,
             objective='val_mae',
-            max_epochs=80,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
-            factor=3,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
+            max_epochs=10,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
+            factor=4,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
             hyperband_iterations=1,     # Limits the number full hyperband runs
             directory='hyperband_dir',
             project_name='hyperband_' + best_model_nn.model_name,
@@ -3248,13 +3248,13 @@ def generate_predictions(best, exp, features):
 
 # Generating predictions with neural network model
 def generate_predictions_nn(best_model_nn, features, start, end):
-    print("Generating predictions with NN model:", best_model_nn.model_name)
+    print("Generating predictions with NN model:", safe_model_name(best_model_nn))
 
     # Ensure features is a numpy array
     X_pred = np.asarray(features)
 
     # Adapt features to model input shape
-    #X_pred = adapt_X_for_model(best_model_nn, X_pred)
+    X_pred = adapt_X_for_model(best_model_nn, X_pred)
 
     # Generate predictions
     predictions = best_model_nn.predict(X_pred)
@@ -3544,7 +3544,7 @@ def main(plot) -> int:
             # Perform entire tuning and ensemble pipeline in subprocess
             plot.best_model = init_nn_subprocess_tuning_and_ensemble(plot.user_given_name, X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn)
             # Save best ensemble model
-            save_models_nn(plot.user_given_name, plot.best_model, f'models/{plot.user_given_name}/ensemble_models/nn/best_tuned_soil_tension_ensemble_prediction_nn_model_', tuned_best_hps)
+            #save_models_nn(plot.user_given_name, plot.best_model, f'models/{plot.user_given_name}/ensemble_models/nn/best_tuned_soil_tension_ensemble_prediction_nn_model_', None)
         elif plot.ensemble and not Use_subprocess:
             tuned_best_models = []
             tuned_best_hps = []
