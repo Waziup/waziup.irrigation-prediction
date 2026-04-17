@@ -17,6 +17,7 @@ import pickle
 import shutil
 from dateutil import parser
 import subprocess
+#import joblib
 import pycaret 
 #from pycaret.time_series import *
 from pycaret.regression import *
@@ -1696,9 +1697,9 @@ def prepare_data_for_cnn(data, target_variable):
 
     return X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler
 
-def prepare_data_for_cnn2(data, target_variable, test_size=0.2, val_size=0.2, random_state=42):
+def prepare_data_for_cnn2(plot, target_variable, test_size=0.2, val_size=0.2, random_state=42, training=True):
     # To RangeIndex => do not use timestamps as index
-    data = data.reset_index(drop=False, inplace=False)
+    data = plot.data.reset_index(drop=False, inplace=False)
 
     # Drop non-important columns
     data_nn = data.drop(columns=To_be_dropped, axis=1, inplace=False)
@@ -1724,10 +1725,17 @@ def prepare_data_for_cnn2(data, target_variable, test_size=0.2, val_size=0.2, ra
     )
 
     # ---- Scaling: fit on TRAIN only ----
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_val_scaled   = scaler.transform(X_val)
-    X_test_scaled  = scaler.transform(X_test)
+    if training:
+        plot.data_scaler = StandardScaler()             # Store the scaler in the plot object for later use during inference
+        #joblib.dump(plot.data_scaler, 'current_scaler_nn.plk')   # Save the scaler for later use
+    else:
+        if not hasattr(plot, 'data_scaler'):
+            #plot.data_scaler = joblib.load("current_scaler_nn.plk")  # Load the scaler used during training for inference
+            plot.data_scaler = StandardScaler()   # If scaler file is not found, create a new one (though this may lead to inconsistent scaling if not handled properly)
+    
+    X_train_scaled = plot.data_scaler.fit_transform(X_train)
+    X_val_scaled   = plot.data_scaler.transform(X_val)
+    X_test_scaled  = plot.data_scaler.transform(X_test)
 
     # ---- CNN / sequence shaped versions ----
     X_train_cnn = X_train_scaled[..., np.newaxis]
@@ -1739,7 +1747,7 @@ def prepare_data_for_cnn2(data, target_variable, test_size=0.2, val_size=0.2, ra
         y_train, y_val, y_test,
         X_train_scaled, X_val_scaled, X_test_scaled,
         X_train_cnn, X_val_cnn, X_test_cnn,
-        scaler
+        plot.data_scaler
     )
 
 def default_hp_nn(): # TODO: wire those into training function
@@ -3342,7 +3350,7 @@ def predict_with_updated_data(plot):
     Currently_active = True
     
     # Run data pipeline to obtain latest data
-    train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = data_pipeline(plot)
+    train, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = data_pipeline(plot)
     # Create future value set to feed new data to model
     future_features = create_future_values(plot.data, plot)
     # Compare dataframes cols to be sure that they match, otherwise drop
@@ -3355,7 +3363,8 @@ def predict_with_updated_data(plot):
         plot.predictions = generate_predictions(plot.best_model, plot.best_exp, future_features)
     
     # Cut passed time from predictions
-    plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]
+    if not plot.load_data_from_csv:
+        plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]
         
     # Align predictions with historical data
     align_with_latest_sensor_values(plot)
@@ -3388,7 +3397,7 @@ def data_pipeline(plot):
     train, test = split_by_ratio(plot.data, 20) # here a split is done to rule out the models that are overfitting
     
     # NN
-    X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = prepare_data_for_cnn2(plot.data, 'rolling_mean_grouped_soil')
+    X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = prepare_data_for_cnn2(plot, 'rolling_mean_grouped_soil')
 
     return train, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler 
 
@@ -3415,7 +3424,7 @@ def main(plot) -> int:
         plot.data.index = pd.to_datetime(plot.data.index, utc=True).tz_convert(TimeUtils.Timezone)
         train, test = split_by_ratio(plot.data, 20)
         #X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = prepare_data_for_cnn(plot.data, 'rolling_mean_grouped_soil')
-        X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = prepare_data_for_cnn2(plot.data, 'rolling_mean_grouped_soil') #testing consistant val dataset for comparison
+        X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = prepare_data_for_cnn2(plot, 'rolling_mean_grouped_soil', True) #testing consistant val dataset for comparison
     else:
         # Data preparation pipeline: get config, fetch, align, clean, sample....
         train, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = data_pipeline(plot)
@@ -3578,7 +3587,7 @@ def main(plot) -> int:
         # Generate predictions with NN model
         plot.predictions = generate_predictions_nn(plot.best_model, Z_scaled, future_features.index[0], future_features.index[-1])
 
-    # Cut passed time from predictions
+
     # Ensure the index of plot.predictions is datetime with the same timezone
     if plot.predictions.index.tz is None:
         #plot.predictions.index = pd.to_datetime(plot.predictions.index).tz_localize('UTC').tz_convert(TimeUtils.Timezone)
@@ -3591,7 +3600,7 @@ def main(plot) -> int:
     current_time = pd.Timestamp.now(tz=TimeUtils.Timezone).floor('H')
 
     # Now, slice the predictions DataFrame based on the timestamp
-
+    # Cut passed time from predictions
     if not plot.load_data_from_csv:
         plot.predictions = plot.predictions.loc[current_time:]
         #plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]    

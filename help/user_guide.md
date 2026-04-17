@@ -435,7 +435,7 @@ To ensure good resilience **maximum data duration** was included, in a long term
 The irrigation prediction application is enabled to manage a whole farm with several plots, they can be added with different configurations and sensors. In the application those views can be changed via the tabs that are located in the top part of the screen. New plots can be added via the `+ Add Plot` button, which can be found next to the configuration button on the right. Plots can be deleted by clicking on the `✖` symbol on the top right corner of the currently active tab (the active tab is indicated by a blue background). 
 
 Below but still in the top section, there is the **sensor overview**. Here real-time soil temperature and soil tension and humidity data from connected sensors is averaged and shown. As shown in the figure below.
-&nbsp;<p style="text-align: center;">![main_top_bar](/help/media/main_top.png)</p>
+&nbsp;<p style="text-align: center;">![main_top_bar](media/main_top.png)</p>
 <p style="text-align: center;"> Figure : Top section with tabs, menu and live data from sensors and actuators.</p> 
 
 On the right hand side there is the **pump section**, it is active when you specified an actuator to perform the irrigation in the device tab of the configuration. If you have an actuated pump or a solenoid valve specified, manual irrigations can be initiated with an arbitrary quantity (in m³). 
@@ -448,15 +448,15 @@ Below, there are three charts that show:
 In the bottom of each individual chart, different parameters can be selected and deactivated to be shown/rendered. Additionally start and end date can be adjusted by zooming into the chart to get more detail in a certain time period. In the three bar menu on the right top of the bar, the data can be downloaded in different formats.
 
 The first diagram shows **historical sensor values**, it renders the averaged value of all sensors of the same type, here soil tension and soil temperature is shown.
-&nbsp;<p style="text-align: center;">![main_data](/help/media/main_sensor_data.png)</p>
+&nbsp;<p style="text-align: center;">![main_data](media/main_sensor_data.png)</p>
 <p style="text-align: center;"> Figure : Averaged data accumulated by all soil moisture sensor devices that have the same type.</p> 
 
 The second chart shows **all inputs for the machine learning model**, already cleaned, sampled and prepared. Here certain trends can be visualized/analyzed and how they interlink to other parameters. The features that are shown here are either engineered variables or external data retrieved from a weather services API. An overview of this chart is illustrated in the figure below.
-&nbsp;<p style="text-align: center;">![main_data](/help/media/main_data.png)</p>
+&nbsp;<p style="text-align: center;">![main_data](media/main_data.png)</p>
 <p style="text-align: center;"> Figure : Data used by the machine learning algorithm, includes sensor data, engineered features and weather data.</p> 
 
 The last chart shows the **predictions for the upcoming week**. It shows the moisture content of the soil as tension and as volumetric water content (VWC), this is realized with help of the soil water retention curve. If the sensor type is a VWC sensor, then it is only shown in VWC. Vertical lines indicate the next days. Vertically separated lines and areas indicate soil moisture levels for the specific soil type that had been set in the settings menu. A figure below gives a visual representation of the chart.
-&nbsp;<p style="text-align: center;">![main_prediction](/help/media/main_prediction.png)</p>
+&nbsp;<p style="text-align: center;">![main_prediction](media/main_prediction.png)</p>
 <p style="text-align: center;"> Figure : Predictions for the upcoming days. Labels are explained above. </p> 
 
 The last aspect of this page is the **predicted irrigation time**, it shows a timestamp when the next irrigation is likely to happen, this happens when the threshold is met and there is no precipitation expected in the upcoming hours. 
@@ -468,8 +468,7 @@ This sections explains how to check gateway, sensor devices and app status.
 Check the gateway regularly by visiting the UI, it should be accessible. If not restart the gateway by cutting the power and let it reboot. After a reboot visit the UI and check whether the application is running and whether there is a config, if necessary press the `Start training` button to create predictions.
 
 ### Sensor devices
-To check if the sensor devices work properly you can observe the WaziGates dashboard.
-In the dashboard view you can see whether sensors send regularly messages. The messages should be received in the preset intervals, that were defined in the arduino script. 
+1. To check if the sensor devices work properly you can observe the WaziGates dashboard. In the dashboard view you can see whether sensors send regularly messages. The messages should be received in the preset intervals, that were defined in the arduino script. 
 
 ### App status
 Visit regularly the the UI of the application and interpret the data. Also have a visual check whether plants that you grow in that plot are healthy/with good nutrition and not infected by any diseases. Since this application does not visually check the health of the plants in the plot, human intervention is necessary to check on the status of the plants.
@@ -481,9 +480,9 @@ Error Messages:
 If you have any further questions/problems, please do not hesitate to contact us.
 You can reach out to us at contact@waziup.org. 
 
-## Tooltips
+## Tooltips (taken )
 
-All aspects of the application are explained with tooltips, the tooltips are printed below.
+All aspects of the application are explained with tooltips, the tooltips are printed below. In the app they are indicated by a question mark (`?`), just hover it with your mouse to see the tooltips.
 
 ### Tooltips of the main screen
 - ***Sensor Overview***: Displays real-time data from connected sensors.
