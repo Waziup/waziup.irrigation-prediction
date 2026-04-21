@@ -132,16 +132,17 @@ def schedule_log_cleanup():
         cleaner.start()
 
 class ModelCleanerThread(threading.Thread):
-    def __init__(self, folder_path, interval_days=7, name="ModelCleaner"):
+    def __init__(self, folder_paths, interval_days=7, name="ModelCleaner"):
         super().__init__(name=name)
-        self.folder_path = folder_path
+        self.folder_paths = folder_paths if isinstance(folder_paths, list) else [folder_paths]
         self.interval_days = interval_days
         self.daemon = True
         self.stop_event = threading.Event()
 
     def run(self):
         while not self.stop_event.is_set():
-            delete_old_files(self.folder_path)
+            for folder in self.folder_paths:
+                delete_old_files(folder)
             time.sleep(self.interval_days * 24 * 3600)
 
     def stop(self):
@@ -169,12 +170,14 @@ def delete_old_files(folder_path):
                     print(f"Error deleting file {file_path}: {e}")
 
 # setup function for model cleaner
-def schedule_model_cleanup(folder_path, interval_days=7):
+def schedule_model_cleanup(folder_paths, interval_days=7):
     """
     Periodically runs the delete_old_files function every interval_hours.
     """
-    cleaner = ModelCleanerThread(folder_path, interval_days)
+    cleaner = ModelCleanerThread(folder_paths, interval_days)
     cleaner.start()
+
+    return cleaner
 
 # Get URL of API from .env file => TODO: better with try catch than locals, getenv can still stop backend
 def getApiUrl(url, body):
@@ -1049,8 +1052,8 @@ if __name__ == "__main__":
     getConfigsFromAllFiles()
 
     # Start thread that deletes old models
-    folder_to_check = "models"
-    schedule_model_cleanup(folder_to_check, interval_days=7)  # Check every week
+    folders_to_check = ["models", "tmp", "hyperband_dir", "data/subprocess_temp", "catboost_info"]
+    schedule_model_cleanup(folders_to_check, interval_days=7)  # Check every week
 
     # Clean logs
     schedule_log_cleanup()
