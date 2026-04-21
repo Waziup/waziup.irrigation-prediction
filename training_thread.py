@@ -94,7 +94,7 @@ class TrainingThread(threading.Thread):
                 if (
                     self.currentPlot.prediction_thread is None 
                     and not create_model.SkipDataPreprocessing
-                    and not create_model.SkipTraning
+                    and not create_model.SkipTraining
                 ):
                     prediction_thread.start(self.currentPlot)
                 else:

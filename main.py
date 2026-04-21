@@ -1065,7 +1065,7 @@ if __name__ == "__main__":
     server_thread.start()
     print("Server started and running in thread:", server_thread.name)
 
-    # DEBUG: directly start training for testing purposes, if production check confifiguration is present
+    # DEBUG: directly start training for testing purposes, if production check configuration is present
     #training_thread.start(plot_manager.getCurrentPlot())
 
     # Keep main thread alive

@@ -480,7 +480,7 @@ Error Messages:
 If you have any further questions/problems, please do not hesitate to contact us.
 You can reach out to us at contact@waziup.org. 
 
-## Tooltips (taken )
+## Tooltips from inside the Application
 
 All aspects of the application are explained with tooltips, the tooltips are printed below. In the app they are indicated by a question mark (`?`), just hover it with your mouse to see the tooltips.
 

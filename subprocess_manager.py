@@ -596,20 +596,24 @@ try:
 
     print("[SUBPROCESS NN] Running ensemble")
 
-    # results = compare_nn_ensembles(
-    #     tuned_models,
-    #     tuned_hps,
-    #     X_train,
-    #     y_train,
-    #     X_val,
-    #     y_val
-    # )
+    results = compare_nn_ensembles(
+        tuned_models,
+        tuned_hps,
+        X_train,
+        y_train,
+        X_val,
+        y_val
+    )
 
-    # best_model = results["best_predictor"]
+    # Only save the best model from ensemble
+    best_model = results["best_predictor"]
 
     # Save best model to tmp dir -> DEBUG: skipping ensemble for now to speed up, just return best tuned model
-    #save_models_nn("{plot_name}", tuned_models[0], "{result_clean}", None)
-    tuned_models[0].save("{result_clean}" + ".keras")
+    best_model_paths = save_models_nn("{plot_name}", best_model, "{tmp_dir}" + "/", None)
+    #tuned_models[0].save("{result_clean}" + ".keras")
+
+    with open(tmp_dir + "/result_path.txt", "w") as f:
+        f.write(best_model_paths[0])
 
     # Cleanup
     tf.keras.backend.clear_session()
@@ -868,7 +872,7 @@ def run_tuning_and_ensemble_nn_with_subprocess(temp_dir, model_configs, plot_nam
     result_path = manager.run_tuning_and_ensemble_nn_subprocess(
         str(temp_dir),
         model_configs,
-        str(temp_dir) + "/result_model.keras",
+        str(temp_dir) + "/result_path.txt",
         plot_name
     )
 

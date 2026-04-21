@@ -1138,10 +1138,10 @@
 RollingMeanWindowData = 15              # Smoothing window size (minutes)
 RollingMeanWindowGrouped = 5            # Grouped smoothing window
 Sample_rate = 60                        # Minutes between sensor samples
-Forcast_horizon = 5                     # Days into future
+Forecast_horizon = 5                     # Days into future
 Verbose_logging = True/False            # Debug flag
 SkipDataPreprocessing = False           # Use debug CSV instead of API
-SkipTraning = False                     # Use debug predictions
+SkipTraining = False                     # Use debug predictions
 Perform_training = True                 # Execute training vs load from disk
 Currently_active = False                # Global training lock
 ```

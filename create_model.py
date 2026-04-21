@@ -18,6 +18,7 @@ import shutil
 from dateutil import parser
 import subprocess
 #import joblib
+import joblib
 import pycaret 
 #from pycaret.time_series import *
 from pycaret.regression import *
@@ -70,7 +71,7 @@ RollingMeanWindowGrouped = 5
 Sample_rate = 60
 
 # Forecast horizon TODO: add config or adjust automa !!!!
-Forcast_horizon = 5 #days
+Forecast_horizon = 5 #days
 
 # Created features that are dropped later -> TODO: evaluate this!!!
 To_be_dropped = ['minute', 'Timestamp', 'gradient', 
@@ -117,7 +118,7 @@ Currently_active = False
 ## DEBUG -> is overwritten by .env
 # to skip data preprocessing and training, load data from file
 SkipDataPreprocessing = False       # if true, load dataset from static file
-SkipTraning = False                 # if true, load predictions from static file
+SkipTraining = False                 # if true, load predictions from static file
 # Load variables of training from file, that had been saved from former training/predictions to debug actuation part: DEBUG
 Perform_training = True             # kind of redundant, but automatically saves and loads former results of predictions
 Use_subprocess = True               # if true, parts of training is performed in subprocess, to prevent memory leaks and to ensure that resources are released after training
@@ -1147,11 +1148,11 @@ def create_and_compare_model_reg(train):
     # Run compare_models function TODO: configure setup accordingly
     best_re = re_exp.compare_models(
         n_select = 19, 
-        fold = 3, # DEBUG was 10
+        fold = 10, # DEBUG was 10 now 3
         sort = 'R2',
         verbose = Verbose_logging,
-        #exclude=['lar', 'dummy', 'lightgbm', 'lr', 'par'], # excluded those that do not perform well (bad R2 on testset)
-        include=['xgboost', 'catboost'] #DEBUG
+        exclude=['lar', 'dummy', 'lightgbm', 'lr', 'par'], # excluded those that do not perform well (bad R2 on testset)
+        #include=['xgboost', 'catboost'] #DEBUG
     )
 
     return re_exp, best_re
@@ -1298,7 +1299,7 @@ def create_future_values(data, plot):
     print("start: ", start)
     train_end = data.index[-1] #+ timedelta(minutes=sample_rate)
     print("train end before adding: ", train_end)
-    end = train_end+pd.Timedelta(days=Forcast_horizon)
+    end = train_end+pd.Timedelta(days=Forecast_horizon)
     print("end after adding: ", end,"\n")
     all_dates = pd.date_range(start=train_end, end=end, freq=str(Sample_rate)+'T')    
     print("all dates: ", all_dates,"\n")
@@ -1995,6 +1996,8 @@ def save_models_nn(plot_name, nn_models, path_to_save, nn_hps = None):
     # Ensure the directory exists
     os.makedirs(os.path.dirname(path_to_save), exist_ok=True)
 
+    model_paths = []  # To keep track of saved model paths for reference
+
     # type check for array -> convert
     if not isinstance(nn_models, list):
         nn_models = [nn_models]
@@ -2009,15 +2012,17 @@ def save_models_nn(plot_name, nn_models, path_to_save, nn_hps = None):
         if isinstance(nn_models[i], tensorflow.keras.Model):
             try:
                 # Save the trained models for future use
-                nn_models[i].save(base_name + ".keras")
-                print(f"[OK] Saved Keras model: {base_name}.keras")
+                p = base_name + ".keras"
+                nn_models[i].save(p)
+                model_paths.append(p)
+                print(f"[OK] Saved Keras model: {p}")
             except Exception as e:
-                print(f"[FAIL] Could not save Keras model {model_name}: {e}")
+                print(f"[FAIL] Could not save Keras model {p}: {e}")
 
             if nn_hps is not None:
                 try:
                     if nn_hps is not None and nn_hps[i] is not None:
-                        with open(path_to_save + str(i) + '_' + nn_models[i].model_name + '_' + plot_name + "_hps.json", "w") as f:
+                        with open(base_name + "_hps.json", "w") as f:
                             json.dump(nn_hps[i].values, f, indent=2)
                 except Exception as e:
                     print(f"[Fail] HP save failed ({model_name}): {e}")
@@ -2031,10 +2036,15 @@ def save_models_nn(plot_name, nn_models, path_to_save, nn_hps = None):
                     "note": "This is a meta-predictor. Base models are saved separately."
                 }
 
-                with open(base_name + "_ensemble.json", "w") as f:
+                with open(base_name + "_ensemble_meta.json", "w") as f:
                     json.dump(ensemble_meta, f, indent=2)
 
-                print(f"[OK] Saved ensemble metadata: {base_name}_ensemble.json")
+                # Save the ensemble predictor itself
+                p = base_name + "_ensemble.joblib"
+                joblib.dump(nn_models[i], p)
+                model_paths.append(p)
+
+                print(f"[OK] Saved ensemble metadata: {p}")
 
             except Exception as e:
                 print(f"[FAIL] Could not save ensemble predictor: {e}")  
@@ -2043,41 +2053,76 @@ def save_models_nn(plot_name, nn_models, path_to_save, nn_hps = None):
             print(
                 f"[SKIP] Object of type {type(nn_models[i])} cannot be saved "
                 f"(model_name={getattr(nn_models[i], 'model_name', 'unknown')})"
-            )  
+            ) 
+
+    return model_paths
 
 # Load NN models
-def load_models_nn(folder_path):
+def load_models_nn(input_path):
     models = []
     best_hps = []
 
-    # Sort to ensure model i matches hyperparameter i
-    for file in sorted(os.listdir(folder_path)):
-        if file.endswith(".h5") or file.endswith(".keras"):
-            path = os.path.join(folder_path, file)
-            model = keras_models.load_model(path)
+    # should be capsulated in functions for loading single models and loading ensembles, but for now we keep it simple and just check if path is dir or file
+    if os.path.isdir(input_path):
+        # Sort to ensure model i matches hyperparameter i
+        for file in sorted(os.listdir(input_path)):
+            # Keras models
+            if file.endswith(".h5") or file.endswith(".keras"):
+                path = os.path.join(input_path, file)
+                model = keras_models.load_model(path)
 
-            # Parse name: index_modelname_plot.h5
-            parts = file.replace(".h5", "").replace(".keras", "").split("_", 2)
-            if len(parts) >= 2:
-                model.model_name = parts[1]
+                # Parse name: index_modelname_plot.h5
+                parts = file.replace(".h5", "").replace(".keras", "").split("_", 2)
+                if len(parts) >= 2:
+                    model.model_name = parts[1]
 
-            models.append(model)
-            print(f"Loaded NN model: {file}")
+                models.append(model)
+                print(f"Loaded NN model: {file}")
 
-            # Attempt to load corresponding hyperparameters JSON
-            base_name, _ = os.path.splitext(file)
-            hp_file = f"{base_name}_hps.json"
-            hp_path = os.path.join(folder_path, hp_file)
-            if os.path.exists(hp_path):
-                try:
-                    with open(hp_path, "r") as f:
-                        hps = json.load(f)
-                    best_hps.append(hps)
-                except Exception as e:
-                    print(f"Failed to load hyperparameters for {file}: {e}")
+                # Attempt to load corresponding hyperparameters JSON
+                base_name, _ = os.path.splitext(file)
+                hp_file = f"{base_name}_hps.json"
+                hp_path = os.path.join(input_path, hp_file)
+                if os.path.exists(hp_path):
+                    try:
+                        with open(hp_path, "r") as f:
+                            hps = json.load(f)
+                        best_hps.append(hps)
+                    except Exception as e:
+                        print(f"Failed to load hyperparameters for {file}: {e}")
+                        best_hps.append(None)
+                else:
                     best_hps.append(None)
-            else:
-                best_hps.append(None)
+            # Ensemble models
+            elif file.endswith(".joblib"):
+                path = os.path.join(input_path, file)
+                try:
+                    ensemble_model = joblib.load(path)
+                    models.append(ensemble_model)
+                    print(f"Loaded ensemble model: {file}")
+                except Exception as e:
+                    print(f"Failed to load ensemble model {file}: {e}")
+    else:
+        # Keras model
+        if input_path.endswith(".h5") or input_path.endswith(".keras"):
+                model = keras_models.load_model(input_path)
+
+                # Parse name: index_modelname_plot.h5
+                parts = input_path.replace(".h5", "").replace(".keras", "").split("_", 2)
+                if len(parts) >= 2:
+                    model.model_name = parts[1]
+
+                models.append(model)
+                print(f"Loaded NN model: {input_path}")
+                # Hyperparameters are not needed when loading single models
+        # Ensemble model
+        elif input_path.endswith(".joblib"):
+            try:
+                ensemble_model = joblib.load(input_path)
+                models.append(ensemble_model)
+                print(f"Loaded ensemble model from: {input_path}")
+            except Exception as e:
+                print(f"Failed to load ensemble model from: {input_path}: {e}")
 
     return models, best_hps
 
@@ -2586,8 +2631,8 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
         tuner = Hyperband(
             builder,
             objective='val_mae',
-            max_epochs=10,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
-            factor=4,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
+            max_epochs=80,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
+            factor=3,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
             hyperband_iterations=1,     # Limits the number full hyperband runs
             directory='hyperband_dir',
             project_name='hyperband_' + best_model_nn.model_name,
@@ -2930,9 +2975,15 @@ def init_nn_subprocess_tuning_and_ensemble(plot_name, X_train, y_train, X_val, y
     np.save(temp_dir / "X_val.npy", X_val)
     np.save(temp_dir / "y_val.npy", y_val)
 
+    # Run tuning and ensemble creation in subprocess
     result_path = run_tuning_and_ensemble_nn_with_subprocess(temp_dir, model_configs, plot_name)
 
-    return keras_models.load_model(result_path)
+    # Check if result file exists and load the best model config
+    if Path(result_path).exists():
+        with open(result_path) as f:
+            result_clean = f.read().strip()
+
+    return load_models_nn(result_clean)[0][0]  # return the best model (first in list)
 
 # helper in case hp is dict or keras tuner object
 def hp_get(hp, key, default):
@@ -3053,9 +3104,9 @@ def compare_nn_ensembles(
     X_val,
     y_val,
     metric="r2",
-    bagging_rounds=5,
-    stacking_folds=5,
-    verbose=True
+    bagging_rounds=5,   # DEBUG, was 5
+    stacking_folds=5,   # DEBUG, was 5
+    verbose=Verbose_logging
 ):
     """
     Compare:
@@ -3367,7 +3418,7 @@ def predict_with_updated_data(plot):
         plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]
         
     # Align predictions with historical data
-    align_with_latest_sensor_values(plot)
+    #align_with_latest_sensor_values(plot)
     
     # Calculate when threshold will be meet
     plot.threshold_timestamp = calc_threshold(plot.predictions, 'smoothed_values', plot)
@@ -3430,7 +3481,7 @@ def main(plot) -> int:
         train, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = data_pipeline(plot)
 
     # Debug mode -> skips training and uses debug.csv
-    if SkipTraning:
+    if SkipTraining:
         debug_df = pd.read_csv('data/debug/debug_predictions.csv').set_index('Timestamp')
         debug_df.index = pd.to_datetime(debug_df.index, utc=True).tz_convert(TimeUtils.Timezone)
 
@@ -3471,7 +3522,7 @@ def main(plot) -> int:
 
     # TODO FROM HERE ON THIS COULD BE ALSO CAPSULATED IN SEPARATE FUNCTION
     # Force pycaret or nn usage for DEBUG purposes
-    plot.use_pycaret = False
+    #plot.use_pycaret = False
 
     # Train best model on whole dataset (without skipping "test-set")
     if plot.use_pycaret:
@@ -3606,7 +3657,7 @@ def main(plot) -> int:
         #plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]    
     
     # Align predictions with historical data -> TODO: dodgy fix, only trigger in case of bad performance? DEBUG
-    #align_with_latest_sensor_values(plot)
+    align_with_latest_sensor_values(plot)
     plot.predictions['smoothed_values'] = plot.predictions['prediction_label']
 
     # Calculate when threshold will be meet
