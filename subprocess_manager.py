@@ -6,23 +6,15 @@ Runs operations in isolated subprocesses that can be killed to free RAM
 @author: felix markwordt
 """
 
-from concurrent.futures import process
 import subprocess
-import sys
-import os
-import pickle
-import json
-import tempfile
-import signal
-from gevent import config
 import psutil
 import logging
 from pathlib import Path
-from datetime import datetime
-from pycaret.regression import save_experiment
-from testifu import run_tuning_pycaret_debug
+#from testifu import run_tuning_pycaret_debug
 
 logger = logging.getLogger(__name__)
+
+Debug_flag = True # DEBUG
 
 
 class SubprocessManager:
@@ -498,6 +490,197 @@ except Exception as e:
             if script_path.exists():
                 script_path.unlink()
 
+
+    def run_tune_single_model_subprocess(self, tmp_dir, model_config, plot_name):
+        import subprocess, sys, json
+        from pathlib import Path
+        from datetime import datetime
+
+        script_path = Path(tmp_dir) / f"nn_tune_single_{datetime.now().timestamp()}.py"
+        model_config_json = json.dumps(model_config)
+
+        script_content = f'''
+import os, sys, json, gc
+import numpy as np
+import tensorflow as tf
+
+# Add current working directory to path for imports
+sys.path.insert(0, os.getcwd())
+
+from create_model import tune_model_nn, Model_functions, save_models_nn
+from keras_tuner.engine.hyperparameters import HyperParameters
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
+tmp_dir = r"{tmp_dir}"
+
+X_train = np.load(tmp_dir + "/X_train.npy")
+y_train = np.load(tmp_dir + "/y_train.npy")
+X_val   = np.load(tmp_dir + "/X_val.npy")
+y_val   = np.load(tmp_dir + "/y_val.npy")
+
+cfg = json.loads('{model_config_json}')
+
+# Build model
+hp = HyperParameters()
+if cfg["hp_values"]:
+    for k, v in cfg["hp_values"].items():
+        hp.values[k] = v
+
+model = Model_functions[cfg["model_name"]](hp, tuple(cfg["shape"]))
+
+if cfg.get("weights_path") and os.path.exists(cfg["weights_path"]):
+    model.load_weights(cfg["weights_path"])
+
+# Tune
+tuned_model, tuned_hp = tune_model_nn(X_train, y_train, X_val, y_val, model)
+
+# Save
+paths = save_models_nn("{plot_name}", tuned_model, tmp_dir + "/", [tuned_hp])
+
+model_path = paths[0]
+
+# Save HP JSON next to model
+hp_path = model_path.replace(".keras", ".json")
+
+with open(hp_path, "w") as f:
+    json.dump(tuned_hp.values, f)
+
+# Return BOTH paths
+with open(tmp_dir + "/result_single.txt", "w") as f:
+    f.write(model_path + "|" + hp_path)
+
+tf.keras.backend.clear_session()
+gc.collect()
+'''
+
+        try:
+            with open(script_path, "w") as f:
+                f.write(script_content)
+
+            process = subprocess.Popen(
+                [sys.executable, str(script_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+                close_fds=True
+            )
+            if Debug_flag:
+                stdout, stderr = self._run_process_stream(process, plot_name)
+            else:
+                stdout, stderr = self._run_process(process, plot_name)
+
+            print(stdout)
+            print(stderr)
+
+            if process.returncode != 0:
+                print(stderr)
+                return None
+        finally:
+            if script_path.exists():
+                script_path.unlink()
+
+        # read result
+        with open(Path(tmp_dir) / "result_single.txt") as f:
+            model_path, hp_path = f.read().strip().split("|")
+            return model_path, hp_path
+        
+    def run_ensemble_nn_subprocess(self, tmp_dir, model_paths, hp_paths, plot_name):
+        import subprocess, sys, json
+        from pathlib import Path
+        from datetime import datetime
+
+        script_path = Path(tmp_dir) / f"nn_ensemble_{datetime.now().timestamp()}.py"
+        model_paths_json = json.dumps(model_paths)
+        hp_paths_json = json.dumps(hp_paths)
+
+        script_content = f'''
+import os, sys, json, gc
+import numpy as np
+import tensorflow as tf
+
+# Add current working directory to path for imports
+sys.path.insert(0, os.getcwd())
+
+from create_model import compare_nn_ensembles, load_models_nn
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
+tmp_dir = r"{tmp_dir}"
+
+X_train = np.load(tmp_dir + "/X_train.npy")
+y_train = np.load(tmp_dir + "/y_train.npy")
+X_val   = np.load(tmp_dir + "/X_val.npy")
+y_val   = np.load(tmp_dir + "/y_val.npy")
+
+model_paths = json.loads('{model_paths_json}')
+hp_paths = json.loads('{hp_paths_json}')
+
+models = []
+hps = []
+
+for mp, hp in zip(model_paths, hp_paths):
+    print(f"[SUBPROCESS ENSEMBLE] Model: {mp}")
+    print(f"[SUBPROCESS ENSEMBLE] HP: {hp}")
+
+    models.append(load_models_nn(mp))
+
+    with open(hp, "r") as f:
+        hps.append(json.load(f))
+
+results = compare_nn_ensembles(
+    models,
+    hps,
+    X_train,
+    y_train,
+    X_val,
+    y_val
+)
+
+best_model = results["best_predictor"]
+
+# Save best
+best_model.save(tmp_dir + "/ensemble.keras")
+
+with open(tmp_dir + "/ensemble_result.txt", "w") as f:
+    f.write(tmp_dir + "/ensemble.keras")
+
+tf.keras.backend.clear_session()
+gc.collect()
+'''
+
+        try:
+            with open(script_path, "w") as f:
+                f.write(script_content)
+
+            process = subprocess.Popen(
+                [sys.executable, str(script_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+                close_fds=True
+            )
+            if Debug_flag:
+                stdout, stderr = self._run_process_stream(process, plot_name)
+            else:
+                stdout, stderr = self._run_process(process, plot_name)
+
+            print(stdout)
+            print(stderr)
+
+            if process.returncode != 0:
+                print(stderr)
+                return None
+        finally:
+            if script_path.exists():
+                script_path.unlink()
+
+        with open(Path(tmp_dir) / "ensemble_result.txt") as f:
+            return f.read().strip()
+    
+
     def run_tuning_and_ensemble_nn_subprocess(
         self,
         tmp_dir,
@@ -534,7 +717,6 @@ if sys.gettrace() is None:
 sys.stdout.reconfigure(line_buffering=True)
 
 import json
-import pickle
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -640,8 +822,7 @@ except Exception as e:
                 start_new_session=True,
                 close_fds=True
             )
-            debug_flag = True  # Set to True to stream output in real time for debugging, False to wait until process finishes
-            if debug_flag:
+            if Debug_flag:
                 stdout, stderr = self._run_process_stream(process, plot_name)
             else:
                 stdout, stderr = self._run_process(process, plot_name)
@@ -656,7 +837,7 @@ except Exception as e:
         finally:
             if script_path.exists():
                 script_path.unlink()
-    
+
     def _monitor_process(self, plot_name, check_interval=5):
         """
         Monitor subprocess for timeout and memory usage
@@ -813,7 +994,7 @@ def run_tuning_with_subprocess(temp_dir, best_model_path, plot_name):
         raise
 
 
-def run_ensemble_with_subprocess(temp_dir, best_model_path, plot_name):
+def run_ensemble_with_subprocess(self,temp_dir, best_model_path, hp_paths, plot_name):
     """
     Convenience function to run PyCaret ensemble creation in subprocess
     
@@ -865,15 +1046,82 @@ def run_tuning_and_ensemble_with_subprocess(temp_dir, best_model_path, plot_name
         logger.error(f"Error during tuning for {plot_name}: {e}")
         raise
 
+def run_full_nn_pipeline(self, tmp_dir, model_configs, plot_name):
+    """
+    Orchestrates:
+    1. Tune each model in isolated subprocess
+    2. Run ensemble in separate subprocess
+    """
+
+    tuned_model_paths = []
+    tuned_hp_paths = []
+
+    print(f"[ORCHESTRATOR] Tuning {len(model_configs)} models...")
+
+    # ---- STEP 1: Tune each model separately ----
+    for i, cfg in enumerate(model_configs):
+        print(f"[ORCHESTRATOR] Tuning model {i+1}/{len(model_configs)}")
+
+        path = self.run_tune_single_model_subprocess(
+            tmp_dir,
+            cfg,
+            plot_name
+        )
+
+        if path is None:
+            print(f"[ORCHESTRATOR] Model {i+1} failed → skipping")
+            continue
+
+
+        model_path, hp_path = path
+
+        tuned_model_paths.append(model_path)
+        tuned_hp_paths.append(hp_path)
+
+    if not tuned_model_paths:
+        raise RuntimeError("All model tunings failed")
+
+    print(f"[ORCHESTRATOR] {len(tuned_model_paths)} models tuned successfully")
+
+    # ---- STEP 2: Ensemble ----
+    print("[ORCHESTRATOR] Running ensemble...")
+
+    ensemble_path = self.run_ensemble_nn_subprocess(
+        tmp_dir,
+        tuned_model_paths,
+        tuned_hp_paths,
+        plot_name
+    )
+
+    # fallback is needed because ensemble subprocess might fail due to OOM or other issues, in that case we return the best tuned model
+    if ensemble_path is None:
+        print("[ORCHESTRATOR] Ensemble failed, returning best tuned model")
+
+        # In case of ensemble failure, return the best tuned model (first one in the list)
+        ensemble_path = tuned_model_paths[0]
+
+    return ensemble_path
+
 def run_tuning_and_ensemble_nn_with_subprocess(temp_dir, model_configs, plot_name):
+
+    run_individual_subprocess = True  # Set to True to run tuning of individual models in separate subprocesses, False to run tuning and ensemble in one subprocess
 
     manager = SubprocessManager(max_memory_percent=85, timeout_seconds=3600)
 
-    result_path = manager.run_tuning_and_ensemble_nn_subprocess(
-        str(temp_dir),
-        model_configs,
-        str(temp_dir) + "/result_path.txt",
-        plot_name
+    if run_individual_subprocess:
+        result_path = run_full_nn_pipeline(
+            manager,
+            str(temp_dir),
+            model_configs,
+            plot_name
+    )
+    else:
+        # Run tuning and ensemble in one subprocess
+        result_path = manager.run_tuning_and_ensemble_nn_subprocess(
+            str(temp_dir),
+            model_configs,
+            str(temp_dir) + "/result_path.txt",
+            plot_name
     )
 
     if result_path:

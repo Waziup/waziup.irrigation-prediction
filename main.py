@@ -32,6 +32,8 @@ PATH = os.path.dirname(os.path.abspath(__file__))
 
 # Set the threshold to cleanup models to 3 months (approximately 90 days)
 THRESHOLD_DAYS_CLEANUP = 90
+
+Auto_start_training = False # TODO: set to false for production, then training is only started when user clicks on "start training" in UI, otherwise it is started directly when config is present, which can lead to long waiting times on page load if training is heavy
 #---------------------#
 
 
@@ -1051,7 +1053,7 @@ if __name__ == "__main__":
     # Get saved config from all plots and save it in objects
     getConfigsFromAllFiles()
 
-    # Start thread that deletes old models
+    # Start thread that deletes old models and data regularly to save memory
     folders_to_check = ["models", "tmp", "hyperband_dir", "data/subprocess_temp", "catboost_info"]
     schedule_model_cleanup(folders_to_check, interval_days=7)  # Check every week
 
@@ -1070,6 +1072,12 @@ if __name__ == "__main__":
 
     # DEBUG: directly start training for testing purposes, if production check configuration is present
     #training_thread.start(plot_manager.getCurrentPlot())
+
+    # Start training for all untrained plots that have a config, heavy, only PRODUCTION, DEBUG
+    if Auto_start_training:
+        for p in plot_manager.getPlots().values():
+            if p.configPath and not p.training_finished:
+                training_thread.start(p)
 
     # Keep main thread alive
     try:

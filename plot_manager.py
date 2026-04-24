@@ -150,7 +150,7 @@ def getCurrentPlot():
     return Plots[CurrentPlotTab]
 
 # def getCurrentPlot():
-#     print(f"Into get cueernt plot with id: {CurrentPlotTab}")
+#     print(f"Into get current plot with id: {CurrentPlotTab}")
 #     print(f"[{multiprocessing.current_process().name}] Trying to acquire plot_lock...")
 #     with plot_lock:
 #         print(f"[{multiprocessing.current_process().name}] Lock acquired.")

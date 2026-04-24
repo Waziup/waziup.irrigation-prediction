@@ -144,10 +144,10 @@ class TimeLimitCallback(Callback):
             self.model.stop_training = True
             print(f"\nTraining stopped after {self.max_time_seconds} seconds") # will continue after epoch
 
-# Restrict memory usage, if more than 80% is used, stop training to prevent crashing of the device
+# Restrict memory usage, if more than 75% is used, stop training to prevent crashing of the device
 class MemoryLimitCallback(tensorflow.keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
-        if psutil.virtual_memory().percent > 80:
+        if psutil.virtual_memory().percent > 75:  # Check if memory usage exceeds 75%
             print("Memory limit reached, stopping training")
             self.model.stop_training = True
 
@@ -2631,8 +2631,8 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
         tuner = Hyperband(
             builder,
             objective='val_mae',
-            max_epochs=80,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
-            factor=3,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
+            max_epochs=20,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
+            factor=4,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
             hyperband_iterations=1,     # Limits the number full hyperband runs
             directory='hyperband_dir',
             project_name='hyperband_' + best_model_nn.model_name,
@@ -2771,7 +2771,7 @@ def init_pycaret_subprocess_ensemble(plot_name, exp, tuned_best_models):
         return tuned_best_models
     
 
-def init_pycaret_subprocess_tuning_and_ensemble(plot_name, exp, tuned_best_models):
+def init_pycaret_subprocess_tuning_and_ensemble(plot_name, exp, tuned_best_models, ensemble=True):
     try:
         # save data, model and exp to disk TODO: evaluate tmp folder-> overflow
         temp_dir = Path("./tmp") / f"tuning_{plot_name}_{datetime.now().timestamp()}" #TODO: later cleanup old temp folders
@@ -3104,8 +3104,8 @@ def compare_nn_ensembles(
     X_val,
     y_val,
     metric="r2",
-    bagging_rounds=5,   # DEBUG, was 5
-    stacking_folds=5,   # DEBUG, was 5
+    bagging_rounds=2,   # DEBUG, was 5
+    stacking_folds=2,   # DEBUG, was 5
     verbose=Verbose_logging
 ):
     """
@@ -3418,7 +3418,7 @@ def predict_with_updated_data(plot):
         plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]
         
     # Align predictions with historical data
-    #align_with_latest_sensor_values(plot)
+    align_with_latest_sensor_values(plot)
     
     # Calculate when threshold will be meet
     plot.threshold_timestamp = calc_threshold(plot.predictions, 'smoothed_values', plot)
@@ -3522,7 +3522,7 @@ def main(plot) -> int:
 
     # TODO FROM HERE ON THIS COULD BE ALSO CAPSULATED IN SEPARATE FUNCTION
     # Force pycaret or nn usage for DEBUG purposes
-    #plot.use_pycaret = False
+    plot.use_pycaret = False
 
     # Train best model on whole dataset (without skipping "test-set")
     if plot.use_pycaret:
