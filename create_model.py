@@ -1779,35 +1779,35 @@ def train_nn_models(X_train, X_val, y_train, y_val, X_train_scaled, X_val_scaled
     # Create an array to store all the models
     nn_models = []
 
-    # # Create neural network
+    # Create neural network
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # hp.Fixed('activation', 'relu')
-    # hp.Fixed('units_hidden1', 128)
-    # hp.Fixed('use_second_layer', True)
-    # hp.Fixed('units_hidden2', 64)
-    # hp.Fixed('use_third_layer', True)
-    # hp.Fixed('units_hidden3', 32)
-    # hp.Fixed('optimizer', 'adam')
-    # hp.Fixed('learning_rate', 0.001)
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    hp.Fixed('activation', 'relu')
+    hp.Fixed('units_hidden1', 128)
+    hp.Fixed('use_second_layer', True)
+    hp.Fixed('units_hidden2', 64)
+    hp.Fixed('use_third_layer', True)
+    hp.Fixed('units_hidden3', 32)
+    hp.Fixed('optimizer', 'adam')
+    hp.Fixed('learning_rate', 0.001)
 
 
-    # # Call the model function with the hp object and the input shape
-    # input_shape = (X_train.shape[1],)
-    # model_nn = create_nn_model(hp, shape=input_shape)
+    # Call the model function with the hp object and the input shape
+    input_shape = (X_train.shape[1],)
+    model_nn = create_nn_model(hp, shape=input_shape)
 
-    # # Train the model
-    # print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
-    # history_nn = model_nn.fit(
-    #     X_train_scaled, 
-    #     y_train, 
-    #     epochs=50, 
-    #     batch_size=32, 
-    #     validation_data=(X_val_scaled, y_val)
-    # )
-    # # Append for comparison
-    # nn_models.append(model_nn)
+    # Train the model
+    print('Will now train a Neural net (NN), with the following hyperparameters: ' + str(hp.values))
+    history_nn = model_nn.fit(
+        X_train_scaled, 
+        y_train, 
+        epochs=50, 
+        batch_size=32, 
+        validation_data=(X_val_scaled, y_val)
+    )
+    # Append for comparison
+    nn_models.append(model_nn)
 
     # Create conv neural network
 
@@ -1849,40 +1849,40 @@ def train_nn_models(X_train, X_val, y_train, y_val, X_train_scaled, X_val_scaled
     # Append for comparison
     nn_models.append(model_cnn)
 
-    # # Create RNN model
+    # Create RNN model
 
-    # # Create a dummy HyperParameters object with fixed values
-    # hp = HyperParameters()
-    # # Number of RNN layers
-    # hp.Fixed('num_rnn_layers', 2)
+    # Create a dummy HyperParameters object with fixed values
+    hp = HyperParameters()
+    # Number of RNN layers
+    hp.Fixed('num_rnn_layers', 2)
 
-    # # Layer 0
-    # hp.Fixed('units_rnn_0', 64)
-    # hp.Fixed('use_dropout_0', True)
-    # hp.Fixed('dropout_rate_0', 0.3)
+    # Layer 0
+    hp.Fixed('units_rnn_0', 64)
+    hp.Fixed('use_dropout_0', True)
+    hp.Fixed('dropout_rate_0', 0.3)
 
-    # # Layer 1
-    # hp.Fixed('units_rnn_1', 32)
-    # hp.Fixed('use_dropout_1', False)  # No dropout in the second layer
+    # Layer 1
+    hp.Fixed('units_rnn_1', 32)
+    hp.Fixed('use_dropout_1', False)  # No dropout in the second layer
 
-    # # Optimizer settings
-    # hp.Fixed('optimizer', 'adam')
-    # hp.Fixed('learning_rate', 0.001)
+    # Optimizer settings
+    hp.Fixed('optimizer', 'adam')
+    hp.Fixed('learning_rate', 0.001)
 
-    # input_shape = (1, X_train.shape[1])
-    # model_rnn = create_rnn_model(hp, shape=input_shape)
+    input_shape = (1, X_train.shape[1])
+    model_rnn = create_rnn_model(hp, shape=input_shape)
 
-    # # Train the model
-    # print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
-    # history_rnn = model_rnn.fit(X_train_scaled[:, np.newaxis, :], 
-    #                             y_train, 
-    #                             epochs=50, 
-    #                             batch_size=32, 
-    #                             validation_data=(X_val_scaled[:, np.newaxis, :], y_val)
-    # )
+    # Train the model
+    print('Will now train a Recurrent neural network (RNN), with the following hyperparameters: ' + str(hp.values))
+    history_rnn = model_rnn.fit(X_train_scaled[:, np.newaxis, :], 
+                                y_train, 
+                                epochs=50, 
+                                batch_size=32, 
+                                validation_data=(X_val_scaled[:, np.newaxis, :], y_val)
+    )
 
-    # # Append for comparison
-    # nn_models.append(model_rnn)
+    # Append for comparison
+    nn_models.append(model_rnn)
 
     # Create GRU model
 
@@ -1952,14 +1952,14 @@ def train_nn_models(X_train, X_val, y_train, y_val, X_train_scaled, X_val_scaled
     # Append for comparison
     nn_models.append(model_lstm)
     
-    # # Save training history plots and jsons
-    # if Verbose_logging:
-    #     for history, name in zip(
-    #         [history_nn, history_cnn, history_rnn, history_gru, history_bilstm],
-    #         ['nn_model', 'cnn_model', 'rnn_model', 'gru_model', 'lstm_model']
-    #     ):
-    #         plot_history_png(history, filename=f'models/{plot_name}/intermediate_models/nn/soil_tension_prediction_{name}_{datetime.now()}.png')
-    #         save_history_json(history, filename=f'models/{plot_name}/intermediate_models/nn/soil_tension_prediction_{name}_{datetime.now()}.json')
+    # Save training history plots and jsons
+    if Verbose_logging:
+        for history, name in zip(
+            [history_nn, history_cnn, history_rnn, history_gru, history_bilstm],
+            ['nn_model', 'cnn_model', 'rnn_model', 'gru_model', 'lstm_model']
+        ):
+            plot_history_png(history, filename=f'models/{plot_name}/intermediate_models/nn/soil_tension_prediction_{name}_{datetime.now()}.png')
+            save_history_json(history, filename=f'models/{plot_name}/intermediate_models/nn/soil_tension_prediction_{name}_{datetime.now()}.json')
 
     return nn_models
 
@@ -2631,8 +2631,8 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
         tuner = Hyperband(
             builder,
             objective='val_mae',
-            max_epochs=20,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
-            factor=4,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
+            max_epochs=80,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
+            factor=3,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
             hyperband_iterations=1,     # Limits the number full hyperband runs
             directory='hyperband_dir',
             project_name='hyperband_' + best_model_nn.model_name,
@@ -2978,12 +2978,17 @@ def init_nn_subprocess_tuning_and_ensemble(plot_name, X_train, y_train, X_val, y
     # Run tuning and ensemble creation in subprocess
     result_path = run_tuning_and_ensemble_nn_with_subprocess(temp_dir, model_configs, plot_name)
 
-    # Check if result file exists and load the best model config
-    if Path(result_path).exists():
-        with open(result_path) as f:
-            result_clean = f.read().strip()
+    # return the best model (first in list)
+    model = load_models_nn(result_path)[0][0]
 
-    return load_models_nn(result_clean)[0][0]  # return the best model (first in list)
+    # Delete tmp folder and all containing files
+    try:
+        shutil.rmtree(temp_dir)
+        print(f"Deleted temp dir after successful tuning and ensemble creation: {temp_dir}")
+    except Exception as e:
+        print(f"Warning: Failed to delete temp dir {temp_dir}: {e}")
+
+    return model  
 
 # helper in case hp is dict or keras tuner object
 def hp_get(hp, key, default):
@@ -3104,8 +3109,8 @@ def compare_nn_ensembles(
     X_val,
     y_val,
     metric="r2",
-    bagging_rounds=2,   # DEBUG, was 5
-    stacking_folds=2,   # DEBUG, was 5
+    bagging_rounds=5,   # DEBUG, was 5
+    stacking_folds=5,   # DEBUG, was 5
     verbose=Verbose_logging
 ):
     """
@@ -3522,7 +3527,7 @@ def main(plot) -> int:
 
     # TODO FROM HERE ON THIS COULD BE ALSO CAPSULATED IN SEPARATE FUNCTION
     # Force pycaret or nn usage for DEBUG purposes
-    plot.use_pycaret = False
+    #plot.use_pycaret = False
 
     # Train best model on whole dataset (without skipping "test-set")
     if plot.use_pycaret:

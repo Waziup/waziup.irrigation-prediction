@@ -1,18 +1,35 @@
 # Irrigation Prediction Application – User Guide
 
-## Table of Contents TODO: update structure accordingly
+# Irrigation Prediction Application – User Guide
+
+## Table of Contents
 1. [Introduction](#introduction)
 2. [System Requirements](#system-requirements)
-3. [Installation](#installation)
-   - [Sensor preparation](#sensors-preparation)
-4. [Setup and Configuration](#setup-and-configuration)
-5. [Using the Application](#using-the-application)
-   - [Connecting Sensors](#connecting-sensors)
-   - [Training the Prediction Model](#training-the-prediction-model)
-   - [Adjusting Settings](#adjusting-settings)
-6. [Understanding Predictions](#understanding-predictions)
-7. [Troubleshooting](#troubleshooting)
-8. [FAQ](#faq)
+3. [Setup and Installation of the WaziGate](#setup-and-installation-of-the-wazigate)
+   - [Connect the WaziGate to a Local WiFi Network](#connect-the-wazigate-to-a-local-wifi-network)
+   - [Connect the WaziGate via GSM Modem](#connect-the-wazigate-via-gsm-modem)
+   - [Install the Irrigation Prediction Application](#install-the-irrigation-prediction-application)
+   - [Change LoRa Frequency of the WaziGate](#change-lora-frequency-of-the-wazigate)
+4. [Soil Sensor](#soil-sensor)
+   - [How to Build the Sensor Devices](#how-to-build-the-sensor-devices)
+   - [How to Connect Soil Sensor Devices to the WaziGate](#how-to-connect-soil-sensor-devices-to-the-wazigate)
+   - [How to Prepare and Deploy the Watermark 200SS Sensor](#how-to-prepare-and-deploy-the-watermark-200ss-sensor)
+5. [Actuator](#actuator)
+   - [Different Modes of Operation](#different-modes-of-operation)
+   - [How to Build an Actuator](#how-to-build-an-actuator)
+   - [How to Flash the Firmware of an Actuator](#how-to-flash-the-firmware-of-an-actuator)
+6. [Irrigation Prediction Application](#irrigation-prediction-application)
+   - [Setting Up the Application](#setting-up-the-application)
+   - [Using the Application](#using-the-application)
+7. [Maintenance](#maintenance)
+   - [Gateway](#gateway)
+   - [Sensor Devices](#sensor-devices)
+   - [App Status](#app-status)
+8. [Troubleshooting](#troubleshooting)
+9. [Tooltips from Inside the Application](#tooltips-from-inside-the-application)
+   - [Tooltips of the Main Screen](#tooltips-of-the-main-screen)
+   - [Tooltips of the Settings Section](#tooltips-of-the-settings-section)
+10. [FAQ](#faq)
 
 ---
 

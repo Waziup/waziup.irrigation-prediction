@@ -603,7 +603,7 @@ import tensorflow as tf
 # Add current working directory to path for imports
 sys.path.insert(0, os.getcwd())
 
-from create_model import compare_nn_ensembles, load_models_nn
+from create_model import compare_nn_ensembles, load_models_nn, save_models_nn
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
@@ -621,10 +621,20 @@ models = []
 hps = []
 
 for mp, hp in zip(model_paths, hp_paths):
-    print(f"[SUBPROCESS ENSEMBLE] Model: {mp}")
-    print(f"[SUBPROCESS ENSEMBLE] HP: {hp}")
+    print(f"[SUBPROCESS ENSEMBLE] Model: {{mp}}")
+    print(f"[SUBPROCESS ENSEMBLE] HP: {{hp}}")
 
-    models.append(load_models_nn(mp))
+    loaded = load_models_nn(mp)
+
+    # Case 1: returns tuple (model, something)
+    if isinstance(loaded, tuple):
+        loaded = loaded[0]
+
+    # Case 2: returns list of models
+    if isinstance(loaded, list):
+        models.extend(loaded)
+    else:
+        models.append(loaded)
 
     with open(hp, "r") as f:
         hps.append(json.load(f))
@@ -641,10 +651,11 @@ results = compare_nn_ensembles(
 best_model = results["best_predictor"]
 
 # Save best
-best_model.save(tmp_dir + "/ensemble.keras")
+# best_model.save(tmp_dir + "/ensemble.keras")
+save_path = save_models_nn("{plot_name}", best_model, tmp_dir + "/", None)
 
 with open(tmp_dir + "/ensemble_result.txt", "w") as f:
-    f.write(tmp_dir + "/ensemble.keras")
+    f.write(save_path[0])
 
 tf.keras.backend.clear_session()
 gc.collect()

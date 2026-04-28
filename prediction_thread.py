@@ -22,7 +22,7 @@ class PredictionThread(threading.Thread):
     def time_until_n_hours(hours):   # TODO: Put in TimeUtils ASAP
         """Calculate the time difference from now until the next noon."""
         now = datetime.now()#DEBUG
-        predict_time = now + timedelta(hours=0, minutes=hours, seconds=0, microseconds=0) #TODO: change to hours DEBUG
+        predict_time = now + timedelta(hours=hours, minutes=0, seconds=0, microseconds=0) #TODO: change to hours DEBUG
 
         return (predict_time - now).total_seconds()
 
