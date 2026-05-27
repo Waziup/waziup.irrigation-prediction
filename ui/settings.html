@@ -141,8 +141,32 @@
         },
       };
 
+      var soil_texture_class_by_preset = {
+        Sandy_Soil: 0,
+        Fine_sandy_loams: 2,
+        Loams_and_silt_loams: 3,
+        Clay_loams: 7,
+        Clays: 11,
+        Kaolinite: 7,
+        Illite: 8,
+        Montmorillonite: 11,
+        Vermiculite: 8,
+        Humus: 4,
+        Peat_Soil: 4,
+        Sandy_Clay_Loam: 6,
+        Silty_Clay: 10,
+        Loess_Soil: 4,
+        Chalky_Soil: 1,
+        Volcanic_Ash_Soil: 4,
+        Sesquioxides: 5,
+      };
+
+      var selectedSoilTextureClass = 3;
+
       // For debug set custom API path
       var Api_path = "";
+      var waitForTraining = true;
+      var TrainingReadyCheck = 10000;
 
       // Event listers
       document.addEventListener("DOMContentLoaded", function () {
@@ -219,6 +243,63 @@
         window.location.href = "index.html";
       }
 
+      function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+      }
+
+      function startTraining() {
+        const trainButton = document.getElementById("train_btn");
+        if (!trainButton) return;
+
+        trainButton.disabled = true;
+        trainButton.classList.remove("highlight");
+        trainButton.innerHTML = "<span class=\"material-symbols-outlined\">psychology</span>Training...";
+
+        fetch(`../api/startTraining`)
+          .then((response) => response.text())
+          .then((data) => {
+            if (data === "") {
+              alert("Training started. This page will notify you when it finishes.");
+              waitForTraining = true;
+              isTrainingReady();
+              return;
+            }
+
+            trainButton.disabled = false;
+            trainButton.innerHTML = "<span class=\"material-symbols-outlined\">psychology</span>Start Training";
+            alert("Cannot start training. See console for details.");
+            console.log(data);
+          })
+          .catch((error) => {
+            trainButton.disabled = false;
+            trainButton.innerHTML = "<span class=\"material-symbols-outlined\">psychology</span>Start Training";
+            console.error("Error starting training:", error);
+          });
+      }
+
+      async function isTrainingReady() {
+        const trainButton = document.getElementById("train_btn");
+
+        while (waitForTraining) {
+          fetch(`../api/isTrainingReady`)
+            .then((response) => response.json())
+            .then((response_data) => {
+              if (response_data.isTrainingFinished == true) {
+                waitForTraining = false;
+                if (trainButton) {
+                  trainButton.disabled = false;
+                  trainButton.innerHTML = "<span class=\"material-symbols-outlined\">psychology</span>Start Training";
+                }
+                alert("Training process is finished!");
+              }
+            })
+            .catch((error) => {
+              console.error("Error checking training status:", error);
+            });
+          await sleep(TrainingReadyCheck);
+        }
+      }
+
       // to get to know the API path from backend
       async function getApiPath() {
         await fetch(`../api/getApiUrl`)
@@ -254,6 +335,114 @@
           return token;
         } else {
           return "";
+        }
+      }
+
+      let plotNames = [];
+      let currentPlotIndex = 1;
+
+      async function loadPlotList() {
+        try {
+          const response = await fetch("../api/getPlots");
+          const data = await response.json();
+          plotNames = Array.isArray(data.tabnames) ? data.tabnames : [];
+          const currentPlot = parseInt(data.currentPlot, 10);
+          if (Number.isFinite(currentPlot) && currentPlot > 0) {
+            currentPlotIndex = currentPlot;
+          }
+          if (plotNames.length === 0) {
+            plotNames = ["Plot 1"];
+          }
+          if (currentPlotIndex > plotNames.length) {
+            currentPlotIndex = plotNames.length;
+          }
+          renderPlotList();
+        } catch (error) {
+          console.error("Error loading plots:", error);
+        }
+      }
+
+      function renderPlotList() {
+        const container = document.getElementById("plot_list");
+        if (!container) return;
+
+        container.innerHTML = plotNames.map((name, index) => {
+          const plotNumber = index + 1;
+          const isActive = plotNumber === currentPlotIndex;
+          const label = name || `Plot ${plotNumber}`;
+          return `
+            <button
+              class="plot-chip${isActive ? " active" : ""}"
+              onclick="setActivePlot(${plotNumber})"
+              type="button"
+            >
+              ${label}
+            </button>`;
+        }).join("");
+      }
+
+      async function setActivePlot(plotNumber) {
+        try {
+          await fetch("../api/setPlot", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: `currentPlot=${encodeURIComponent(plotNumber)}`,
+          });
+          currentPlotIndex = plotNumber;
+          renderPlotList();
+          await getFormerConfig();
+          await loadSensorRegistry();
+        } catch (error) {
+          console.error("Error setting plot:", error);
+          alert("Failed to switch plot.");
+        }
+      }
+
+      async function addPlot() {
+        try {
+          const nextPlot = plotNames.length + 1;
+          const response = await fetch("../api/addPlot", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: `tab_nr=${encodeURIComponent(nextPlot)}`,
+          });
+          if (!response.ok) {
+            throw new Error("Add plot failed");
+          }
+          await loadPlotList();
+          await setActivePlot(nextPlot);
+        } catch (error) {
+          console.error("Error adding plot:", error);
+          alert("Failed to add a new plot.");
+        }
+      }
+
+      async function removePlot() {
+        if (plotNames.length <= 1) {
+          alert("At least one plot must remain.");
+          return;
+        }
+        const confirmed = confirm("Remove the current plot? This will delete its local config file.");
+        if (!confirmed) return;
+
+        try {
+          await fetch("../api/removePlot", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: `currentPlot=${encodeURIComponent(currentPlotIndex)}`,
+          });
+          currentPlotIndex = Math.max(1, currentPlotIndex - 1);
+          await loadPlotList();
+          await setActivePlot(currentPlotIndex);
+        } catch (error) {
+          console.error("Error removing plot:", error);
+          alert("Failed to remove plot.");
         }
       }
 
@@ -298,11 +487,16 @@
               // Assignment for a user given plot name
               document.getElementById("name_form").value = response_data.Name;
 
+              if (response_data.Zone_name) {
+                document.getElementById("zone_name_form").value = response_data.Zone_name;
+              }
+
               // Assignment for Gps_info
+              var gpsInfo = response_data.Gps_info || {};
+              var lat = gpsInfo.latitude || gpsInfo.lattitude || "";
+              var lon = gpsInfo.longitude || "";
               document.getElementById("gps_form").value =
-                String(response_data.Gps_info.lattitude) +
-                ", " +
-                String(response_data.Gps_info.longitude);
+                String(lat) + ", " + String(lon);
 
               // Assignment for Slope
               document.getElementById("slope_form").value = response_data.Slope;
@@ -314,6 +508,16 @@
               // Assignment for Irrigation_amount
               document.getElementById("irrigation_amount_form").value =
                 response_data.Irrigation_amount;
+
+              // Assignment for Plot_area_m2
+              document.getElementById("plot_area_m2_form").value =
+                response_data.Plot_area_m2 ?? "";
+
+              // Assignment for Irrigation_type
+              if (response_data.Irrigation_type) {
+                document.getElementById("irrigation_type_select").value =
+                  response_data.Irrigation_type;
+              }
 
               // Assignment for Look_ahead_time
               document.getElementById("look_ahead_time_form").value =
@@ -347,20 +551,114 @@
               document.getElementById("sat_form").value =
                 response_data.Saturation;
 
+              // Assignment for crop config
+              if (response_data.Crop_type) {
+                document.getElementById("crop_type_form").value =
+                  response_data.Crop_type;
+              }
+              if (response_data.Planting_date) {
+                document.getElementById("planting_date_form").value =
+                  new Date(response_data.Planting_date)
+                    .toISOString()
+                    .split("T")[0];
+              }
+              if (response_data.Initial_gdd !== undefined && response_data.Initial_gdd !== null) {
+                document.getElementById("initial_gdd_form").value =
+                  response_data.Initial_gdd;
+              }
+              document.getElementById("use_dynamic_threshold_form").checked =
+                response_data.Use_dynamic_threshold !== false;
+              if (
+                response_data.Soil_texture_class !== undefined &&
+                response_data.Soil_texture_class !== null
+              ) {
+                selectedSoilTextureClass = parseInt(
+                  response_data.Soil_texture_class,
+                  10
+                );
+              }
+
               // Assignment of Soil Water Retention Curve
               const soilWaterRetention =
                 response_data.Soil_water_retention_curve;
-              // Create the formatted string: "Soil tension, VWC" on each line
-              const formattedString = soilWaterRetention
-                .map((item) => `${item["Soil tension"]}, ${item.VWC.trim()}`)
-                .join("\n");
-              // Set the result into a text field
-              document.getElementById("soil_water_retention_text").value =
-                formattedString;
+              if (Array.isArray(soilWaterRetention)) {
+                const formattedString = soilWaterRetention
+                  .map((item) =>
+                    `${item["Soil tension"]}, ${(item.VWC || "").trim()}`
+                  )
+                  .join("\n");
+                document.getElementById("soil_water_retention_text").value =
+                  formattedString;
+              }
             } else {
               console.log(
                 "No data was formerly set or there was an error, fallback: use std values."
               );
+            }
+          });
+      }
+
+      function renderSensorRegistry(registryResponse) {
+        const container = document.getElementById("sensor_registry_summary");
+        if (!container) return;
+
+        const sensors = Array.isArray(registryResponse?.sensors)
+          ? registryResponse.sensors
+          : [];
+
+        if (sensors.length === 0) {
+          container.innerHTML = "No registered sensors for this zone yet.";
+          return;
+        }
+
+        const rows = sensors.map((sensor) => {
+          const status = sensor.status || {};
+          const online = status.online ? "Online" : "Offline";
+          const lastSeen = status.last_seen || "--";
+          const battery = status.battery === null || status.battery === undefined ? "--" : status.battery;
+          const readings = Array.isArray(status.readings) ? status.readings.length : 0;
+          return `
+            <tr>
+              <td>${sensor.device_sensor_id || "--"}</td>
+              <td>${sensor.role || "--"}</td>
+              <td>${sensor.zone_name || "--"}</td>
+              <td>${sensor.latitude ?? "--"}, ${sensor.longitude ?? "--"}</td>
+              <td>${online}</td>
+              <td>${lastSeen}</td>
+              <td>${battery}</td>
+              <td>${readings}</td>
+            </tr>`;
+        }).join("");
+
+        container.innerHTML = `
+          <div class="registry-table-wrap">
+            <table class="registry-table">
+              <thead>
+                <tr>
+                  <th>Sensor</th>
+                  <th>Role</th>
+                  <th>Zone</th>
+                  <th>Coordinates</th>
+                  <th>Status</th>
+                  <th>Last seen</th>
+                  <th>Battery</th>
+                  <th>Readings</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
+      }
+
+      function loadSensorRegistry() {
+        return fetch(`../api/getSensorRegistry`)
+          .then((response) => response.json())
+          .then((data) => renderSensorRegistry(data))
+          .catch((error) => {
+            console.error("Error fetching sensor registry:", error);
+            const container = document.getElementById("sensor_registry_summary");
+            if (container) {
+              container.textContent = "Failed to load sensor registry.";
             }
           });
       }
@@ -372,6 +670,11 @@
         var soil_water_retention = document.getElementById(
           "soil_water_retention_text"
         );
+
+        if (selectedOption in soil_texture_class_by_preset) {
+          selectedSoilTextureClass =
+            soil_texture_class_by_preset[selectedOption];
+        }
 
         // Fill textfield according to select form
         console.log("Selected option: " + selectedOption);
@@ -390,6 +693,15 @@
             ", " +
             soil_retention_tuples[selectedOption].waterRetention[i] +
             "\n";
+
+        document.getElementById("pwp_form").value =
+          soil_retention_tuples[selectedOption].PermanentWiltingPoint;
+        document.getElementById("fcu_form").value =
+          soil_retention_tuples[selectedOption].FieldCapacity[1];
+        document.getElementById("fcl_form").value =
+          soil_retention_tuples[selectedOption].FieldCapacity[0];
+        document.getElementById("sat_form").value =
+          soil_retention_tuples[selectedOption].Saturation;
       }
 
       // Get selected items from
@@ -425,11 +737,31 @@
         // Define a CSV parsing function (you can use a CSV parsing library)
         // For this example, we'll use a simple split approach to check for valid CSV data
         const rows = csvString.split("\n");
+        let hasData = false;
         for (const row of rows) {
-          const columns = row.split(",");
+          const trimmed = row.trim();
+          if (!trimmed) {
+            continue;
+          }
+          const columns = trimmed.split(",").map((cell) => cell.trim());
           if (columns.length < 2) {
             throw new Error("Invalid CSV format");
           }
+          if (
+            columns[0].toLowerCase() === "soil tension" &&
+            columns[1].toLowerCase() === "vwc"
+          ) {
+            continue;
+          }
+          const tension = Number(columns[0]);
+          const vwc = Number(columns[1]);
+          if (!Number.isFinite(tension) || !Number.isFinite(vwc)) {
+            throw new Error("CSV values must be numeric");
+          }
+          hasData = true;
+        }
+        if (!hasData) {
+          throw new Error("CSV must include at least one data row");
         }
         return true;
       }
@@ -449,6 +781,13 @@
         // Check weather data is compliant
         const isParsable = isStringParsableAsCSV(water_ret_csv);
 
+        if (!isParsable) {
+          alert(
+            "Soil water retention data is not in valid CSV format.\nExpected: tension_value, vwc_value (one per line)."
+          );
+          return null;
+        }
+
         // Create a Blob containing the CSV data
         const blob = new Blob([water_ret_csv], { type: "text/csv" });
 
@@ -458,6 +797,7 @@
       // Parse data from forms after "Save"
       function parseForms() {
         var name = document.getElementById("name_form").value;
+        var zone_name = document.getElementById("zone_name_form").value;
         var selectedSensorKind = document.querySelector(
           'input[name="sensor_kind_radio"]:checked'
         ).value;
@@ -468,6 +808,10 @@
         ).value;
         var irrigation_amount = document.getElementById(
           "irrigation_amount_form"
+        ).value;
+        var plot_area_m2 = document.getElementById("plot_area_m2_form").value;
+        var irrigation_type = document.getElementById(
+          "irrigation_type_select"
         ).value;
         var look_ahead_time = document.getElementById(
           "look_ahead_time_form"
@@ -483,6 +827,14 @@
         var fcu = document.getElementById("fcu_form").value;
         var fcl = document.getElementById("fcl_form").value;
         var sat = document.getElementById("sat_form").value;
+        var crop_type = document.getElementById("crop_type_form").value;
+        var planting_date = document.getElementById(
+          "planting_date_form"
+        ).value;
+        var initial_gdd = document.getElementById("initial_gdd_form").value;
+        var use_dynamic_threshold = document.getElementById(
+          "use_dynamic_threshold_form"
+        ).checked;
 
         // Convert the selected date to an ISO timestamp => TODO: check timestamp
         var isoTimestamp = new Date(starting_date).toISOString();
@@ -490,6 +842,8 @@
         const Params =
           "&name=" +
           encodeURIComponent(name) +
+          "&zone_name=" +
+          encodeURIComponent(zone_name) +
           "&sensor_kind=" +
           encodeURIComponent(selectedSensorKind) +
           "&gps=" +
@@ -500,6 +854,10 @@
           encodeURIComponent(tension_threshold) +
           "&amount=" +
           encodeURIComponent(irrigation_amount) +
+          "&plot_area_m2=" +
+          encodeURIComponent(plot_area_m2) +
+          "&irrigation_type=" +
+          encodeURIComponent(irrigation_type) +
           "&lookahead=" +
           encodeURIComponent(look_ahead_time) +
           "&start=" +
@@ -515,7 +873,17 @@
           "&fcl=" +
           encodeURIComponent(fcl) +
           "&sat=" +
-          encodeURIComponent(sat);
+          encodeURIComponent(sat) +
+          "&crop_type=" +
+          encodeURIComponent(crop_type) +
+          "&planting_date=" +
+          encodeURIComponent(planting_date) +
+          "&initial_gdd=" +
+          encodeURIComponent(initial_gdd) +
+          "&use_dynamic_threshold=" +
+          encodeURIComponent(use_dynamic_threshold) +
+          "&soil_texture_class=" +
+          encodeURIComponent(selectedSoilTextureClass);
 
         return Params;
       }
@@ -527,10 +895,12 @@
         selectedOptionsFlow = evalSelected("actuator_list_flow");
 
         if (selectedOptionsMoisture.length == 0 || selectedOptionsTemp.length == 0) {
-          alert(
-            "Please select at least one sensor for each category (Moisture, Temperature). Those sensors are required for the irrigation prediction."
+          const proceed = confirm(
+            "No moisture or temperature sensors are selected. Save as pending and add sensors later?"
           );
-          return;
+          if (!proceed) {
+            return;
+          }
         }
 
         // Encode the list as a query parameter & all other forms
@@ -545,6 +915,9 @@
         );
         const queryForms = parseForms();
         const queryRetention = parseSoilWaterRetention();
+        if (queryRetention === null) {
+          return;
+        }
 
         // Make a GET request to Python backend
         fetch(`../api/setConfig`, {
@@ -556,23 +929,47 @@
             queryRetention
           )}`,
         })
-          .then((response) => response.text())
-          .then((data) => {
-            if (data != "") {
-              alert(data);
-            } else {
-              alert(
-                "Configuration was saved and successfully transmitted to the backend.\n" +
-                  selectedOptions
-              );
+          .then(async (response) => {
+            const text = await response.text();
+            let payload = null;
+            try {
+              payload = JSON.parse(text);
+            } catch (e) {
+              payload = null;
             }
-            console.log(data);
+
+            if (!response.ok && payload && payload.status === "error") {
+              const errors = payload.errors || {};
+              const messages = Object.keys(errors)
+                .map((key) => `${key}: ${errors[key]}`)
+                .join("\n");
+              alert(`Validation failed:\n${messages}`);
+              return;
+            }
+
+            if (payload && payload.status === "pending") {
+              alert(`${payload.message}\nReturning to dashboard.`);
+              goHome();
+              return;
+            }
+
+            if (payload && payload.message) {
+              alert(`${payload.message}\nReturning to dashboard.`);
+              goHome();
+              return;
+            }
+
+            if (text && text.trim() !== "Configuration has been successfully saved!") {
+              alert("Configuration saved: " + text);
+            } else {
+              alert("Configuration saved successfully.\nReturning to dashboard.");
+            }
+            goHome();
           })
           .catch((error) => {
             console.error("Error:", error);
+            alert("Failed to save configuration. Check your network connection.");
           });
-
-        goHome();
       }
 
       // JavaScript function to toggle visibility
@@ -672,6 +1069,8 @@
           console.log("Sensors: ", sensors);
           displaySensorsAndElements(sensors);
           getFormerConfig();
+          loadSensorRegistry();
+          loadPlotList();
           //$("#sensor_list").html(sensors).fadeIn();
           //autoR = setTimeout(function () { loadStuff() }, 2000);
         });
@@ -733,11 +1132,37 @@
             <a href="index.html" onclick="goHome()">Home</a> / Settings
           </div>
         </div>
-        <a href="index.html" class="back-home-btn" onclick="goHome()">
-          <span class="material-symbols-outlined">arrow_back</span>
-          Back to Home
-        </a>
+        <div class="header-actions">
+          <button id="train_btn" class="settings-train-btn" onclick="startTraining()">
+            <span class="material-symbols-outlined">psychology</span>
+            Start Training
+          </button>
+          <a href="index.html" class="back-home-btn" onclick="goHome()">
+            <span class="material-symbols-outlined">arrow_back</span>
+            Back to Home
+          </a>
+        </div>
       </header>
+
+      <section class="plot-management">
+        <div class="plot-management-header">
+          <div>
+            <h2>Farm / Plot Management</h2>
+            <p>Switch between plots, add a new plot, or remove the current plot.</p>
+          </div>
+          <div class="plot-management-actions">
+            <button type="button" class="btn-secondary" onclick="addPlot()">
+              <span class="material-symbols-outlined">add</span>
+              Add plot
+            </button>
+            <button type="button" class="btn-secondary danger" onclick="removePlot()">
+              <span class="material-symbols-outlined">delete</span>
+              Remove plot
+            </button>
+          </div>
+        </div>
+        <div id="plot_list" class="plot-list">Loading plots...</div>
+      </section>
 
       <!-- Settings tabs -->
       <div class="settings-tabs">
@@ -779,6 +1204,17 @@
                   />
                   <label for="capacitive"
                     >Capacitive soil moisture sensor (Humidity in %)
+                  </label>
+                </div>
+                <div class="radio-item">
+                  <input
+                    type="radio"
+                    id="both"
+                    name="sensor_kind_radio"
+                    value="both"
+                  />
+                  <label for="both"
+                    >Both tension and capacitive sensors (mixed)
                   </label>
                 </div>
                 <div class="radio-item">
@@ -865,7 +1301,7 @@
 
             <div class="form-row">
               <div class="form-group">
-                <label for="fcl_form">Field Capacity Lower (%kPa, cBar)
+                <label for="fcl_form">Field Capacity Lower (kPa, cBar)
                   <span class="tooltip material-symbols-outlined" data-tooltip-id="fclTooltip">help
                     <span class="tooltiptext" id="fclTooltip"></span>
                   </span>
@@ -939,6 +1375,21 @@
                 value="Plot"
               />
             </div>
+
+              <div class="form-group">
+                <label for="zone_name_form">Zone name
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="zoneNameTooltip">help
+                    <span class="tooltiptext" id="zoneNameTooltip"></span>
+                  </span>
+                </label>
+                <p class="form-hint">Named field or sensor zone tracked in the registry</p>
+                <input
+                  type="text"
+                  id="zone_name_form"
+                  class="form-control"
+                  value="Main zone"
+                />
+              </div>
 
             <div class="form-group">
               <label for="sensor_list_moisture">Soil moisture sensors
@@ -1015,12 +1466,78 @@
                 step="0.01"
               />
             </div>
+
+            <div class="form-group">
+              <label for="irrigation_type_select">Irrigation type
+                <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationTypeTooltip">help
+                  <span class="tooltiptext" id="irrigationTypeTooltip"></span>
+                </span>
+              </label>
+              <p class="form-hint">Affects efficiency when converting ETc to irrigation volume</p>
+              <select id="irrigation_type_select" class="form-control">
+                <option value="drip">Drip (90% efficient)</option>
+                <option value="sprinkler">Sprinkler (75% efficient)</option>
+                <option value="flood">Flood (55% efficient)</option>
+                <option value="furrow">Furrow / gravity (advisory only)</option>
+                <option value="rainfed">Rainfed (advisory only)</option>
+                <option value="unknown">Unknown / Not configured (70% fallback)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <div class="form-section-title">Sensor registry</div>
+              <p class="form-hint">Location and live status for sensors in this zone</p>
+              <div id="sensor_registry_summary" class="registry-summary">Loading registry...</div>
+            </div>
           </div>
         </div>
 
         <!-- Prediction & Scheduling Tab -->
         <div id="prediction-tab" class="tab-content">
           <div class="form-section">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="crop_type_form">Crop type
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="cropTypeTooltip">help
+                    <span class="tooltiptext" id="cropTypeTooltip"></span>
+                  </span>
+                </label>
+                <p class="form-hint">Used for crop-stage GDD thresholds and dynamic irrigation</p>
+                <select id="crop_type_form" class="form-control">
+                  <option value="maize">Maize</option>
+                  <option value="beans">Beans</option>
+                  <option value="wheat">Wheat</option>
+                  <option value="tomato">Tomato</option>
+                  <option value="sorghum">Sorghum</option>
+                  <option value="olive">Olive</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="planting_date_form">Planting date
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="plantingDateTooltip">help
+                    <span class="tooltiptext" id="plantingDateTooltip"></span>
+                  </span>
+                </label>
+                <p class="form-hint">Required for GDD accumulation</p>
+                <input type="date" id="planting_date_form" class="form-control" />
+              </div>
+              <div class="form-group">
+                <label for="initial_gdd_form">Initial GDD
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="initialGddTooltip">help
+                    <span class="tooltiptext" id="initialGddTooltip"></span>
+                  </span>
+                </label>
+                <p class="form-hint">Optional heat units already accumulated before the first reading</p>
+                <input type="number" id="initial_gdd_form" class="form-control" value="0" step="0.1" min="0" />
+              </div>
+              <div class="form-group">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="use_dynamic_threshold_form" checked />
+                  Use dynamic threshold (GDD-based)
+                </label>
+                <p class="form-hint">Switches between static and crop-stage thresholds</p>
+              </div>
+            </div>
             <div class="form-group">
               <label for="tension_threshold_form"
                 >Soil Tension Threshold (cbar)
@@ -1035,7 +1552,7 @@
                 type="number"
                 id="tension_threshold_form"
                 class="form-control"
-                value="7"
+                value="45"
               />
             </div>
 
@@ -1047,12 +1564,29 @@
                       <span class="tooltiptext" id="irrigationAmountTooltip"></span>
                   </span>
                 </label>
-                <p class="form-hint">Amount per irrigation cycle (min 10l = 0.01)</p>
+                <p class="form-hint">Volume per irrigation cycle (min 0.01 m³ = 10 L)</p>
                 <input
                   type="number"
                   id="irrigation_amount_form"
                   class="form-control"
-                  value="10"
+                  value="1"
+                  min="0.01"
+                  step="0.01"
+                />
+              </div>
+              <div class="form-group">
+                <label for="plot_area_m2_form">Plot area (m²)
+                  <span class="tooltip material-symbols-outlined" data-tooltip-id="plotAreaTooltip">help
+                    <span class="tooltiptext" id="plotAreaTooltip"></span>
+                  </span>
+                </label>
+                <p class="form-hint">Required for converting ETc depth into irrigation volume</p>
+                <input
+                  type="number"
+                  id="plot_area_m2_form"
+                  class="form-control"
+                  min="0"
+                  step="0.01"
                 />
               </div>
               <div class="form-group">
@@ -1067,7 +1601,7 @@
                   type="number"
                   id="look_ahead_time_form"
                   class="form-control"
-                  value="6"
+                  value="24"
                 />
               </div>
             </div>

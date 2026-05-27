@@ -7,7 +7,7 @@ import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import time
 from urllib.parse import urlparse
-import traceback 
+import traceback
 
 from dotenv import load_dotenv
 
@@ -61,7 +61,7 @@ class HTTPHandler(BaseHTTPRequestHandler):
     def callAPI(self, method="GET", body=""):
         inPath = urlparse(self.path).path
         routPath = ""
-        
+
         try:
             # Try matching the incoming path with the registered routes
             for key in routing.get(method, {}):
@@ -70,10 +70,12 @@ class HTTPHandler(BaseHTTPRequestHandler):
                     break
 
             if not routPath:
-                raise Exception(f"No route matched for path: {inPath} and method: {method}")
+                raise Exception(
+                    f"No route matched for path: {inPath} and method: {method}")
 
             # Call the registered route function
-            resCode, resBody, resHeaders = routing[method][routPath](self.path, body)
+            resCode, resBody, resHeaders = routing[method][routPath](
+                self.path, body)
 
         except Exception as e:
             print(f"Exception in callAPI(): {e}")
@@ -164,20 +166,27 @@ def start():
     load_dotenv()
     sockAddr = os.getenv("Proxy_URL")
 
-    # Make sure the socket does not already exist
+    previous_umask = os.umask(0)
     try:
-        print(f"Removing old socket file at {sockAddr}")
-        os.unlink(sockAddr)
-    except OSError as e:
-        if os.path.exists(sockAddr):
-            print(f"Failed to remove old socket file: {e}")
-            raise
+        # Make sure the socket does not already exist
+        try:
+            print(f"Removing old socket file at {sockAddr}")
+            os.unlink(sockAddr)
+        except OSError as e:
+            if os.path.exists(sockAddr):
+                print(f"Failed to remove old socket file: {e}")
+                raise
 
-    unixSock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    unixSock.settimeout(20)
+        unixSock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        unixSock.settimeout(20)
 
-    print('Binding on %s' % sockAddr)
-    unixSock.bind(sockAddr)
+        print('Binding on %s' % sockAddr)
+        unixSock.bind(sockAddr)
+        # The host WaziGate process may run as a different user than this container.
+        # Ensure world read/write on the unix socket so app proxy requests do not fail with EACCES.
+        os.chmod(sockAddr, 0o666)
+    finally:
+        os.umask(previous_umask)
 
     # Listen for incoming connections
     unixSock.listen(5)
@@ -199,6 +208,8 @@ def start():
 
 # Just a wrapper to start the server with recovery
 # This function will restart the server if it crashes
+
+
 def start_with_recovery():
     while True:
         try:
@@ -211,4 +222,4 @@ def start_with_recovery():
             time.sleep(5)
         else:
             print("Server exited normally — breaking out.")
-            break  # Exit if server stops on purpose    
+            break  # Exit if server stops on purpose

@@ -22,7 +22,7 @@ RUN apt-get update \
 RUN \
     pip install --upgrade pip setuptools wheel && \
     \
-    pip install --retries 10 --timeout 120 tensorflow-aarch64 && \
+    pip install --retries 10 --timeout 120 tensorflow && \
     \
     pip install --retries 10 --timeout 120 pycaret && \
     \

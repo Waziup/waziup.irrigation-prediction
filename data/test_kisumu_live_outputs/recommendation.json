@@ -1,0 +1,124 @@
+{
+  "available": true,
+  "actuator_based": false,
+  "crop_type": "maize",
+  "growth_stage": "Pre-emergence",
+  "kc": 0.325,
+  "etc_daily_mm": 0.0,
+  "recommended_depth_mm": 0.0,
+  "recommended_volume_m3": null,
+  "volume_available": false,
+  "irrigation_type": "drip",
+  "efficiency": 0.9,
+  "plot_area_m2": 1000.0,
+  "threshold_cbar": 45.0,
+  "gdd_cumulative": 82.5,
+  "rain_since_planting_mm": 6.3,
+  "rain_last_24h_mm": 0.0,
+  "rain_forecast_mm": 6.3,
+  "historical_rain_credit_mm": 0.0,
+  "cumulative_etc_mm": 6.34,
+  "net_irrigation_need_mm": 0.0,
+  "sat_ndvi": 0.38,
+  "sat_ndre": null,
+  "sat_ndvi_age_hours": 297.3,
+  "sat_vv_db": null,
+  "sat_data_age_hours": 297.3,
+  "weather_data_age_hours": 0.3,
+  "weather_data_summary": {
+    "available_fields": [
+      "Temperature",
+      "Rain",
+      "Windspeed",
+      "Winddirection",
+      "Et0_evapotranspiration"
+    ],
+    "missing_fields": [
+      "Humidity",
+      "Cloudcover",
+      "Shortwave_Radiation",
+      "Soil_temperature_7-28",
+      "Soil_moisture_0-7"
+    ],
+    "rows": 121,
+    "start_timestamp": "2026-05-20T00:00:00",
+    "end_timestamp": "2026-05-25T00:00:00",
+    "latest_timestamp": "2026-05-25T00:00:00",
+    "cadence_hours": 1.0,
+    "cadence_label": "hourly",
+    "field_values": {
+      "Temperature": 21.38,
+      "Humidity": null,
+      "Rain": 0.0,
+      "Cloudcover": null,
+      "Shortwave_Radiation": null,
+      "Windspeed": 1.17,
+      "Winddirection": 28.0,
+      "Soil_temperature_7-28": null,
+      "Soil_moisture_0-7": null,
+      "Et0_evapotranspiration": 0.0
+    }
+  },
+  "satellite_data_summary": {
+    "available_fields": [
+      "sat_ndvi",
+      "satellite_data_age",
+      "sat_ndvi_age"
+    ],
+    "missing_fields": [
+      "sat_ndre",
+      "sat_vv_db"
+    ],
+    "rows": 1,
+    "start_timestamp": "2026-05-08T00:00:00+00:00",
+    "end_timestamp": "2026-05-08T00:00:00+00:00",
+    "latest_timestamp": "2026-05-08T00:00:00+00:00",
+    "cadence_hours": null,
+    "cadence_label": "unknown",
+    "field_values": {
+      "sat_ndvi": 0.38,
+      "sat_ndre": null,
+      "sat_vv_db": null,
+      "satellite_data_age": 297.2967,
+      "sat_ndvi_age": 297.2967
+    }
+  },
+  "data_requirements": {
+    "weather": {
+      "expected_interval": "hourly",
+      "used_for": [
+        "Temperature",
+        "Rain",
+        "Windspeed",
+        "Winddirection",
+        "Et0_evapotranspiration"
+      ],
+      "model_processing": [
+        "hourly weather is resampled to daily Tmax/Tmin for GDD",
+        "rainfall is summed over the request window",
+        "ET0 is accumulated as a rolling daily demand term"
+      ]
+    },
+    "satellite": {
+      "expected_interval": "scene-based / as available",
+      "used_for": [
+        "sat_ndvi",
+        "sat_ndre",
+        "sat_vv_db"
+      ],
+      "model_processing": [
+        "NDVI and NDRE feed Kc blending",
+        "VV is used only to cap NDVI staleness when SAR confirms canopy"
+      ]
+    }
+  },
+  "data_stale": true,
+  "data_stale_sources": [
+    "satellite"
+  ],
+  "data_stale_thresholds": {
+    "weather_hours": 6.0,
+    "satellite_hours": 72.0
+  },
+  "reason": "No pump/actuator configured for this irrigation mode. Advice only."
+}

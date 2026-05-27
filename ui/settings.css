@@ -36,6 +36,12 @@ body {
   align-items: flex-start;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .header-content h1 {
   font-size: 32px;
   font-weight: 600;
@@ -81,6 +87,36 @@ body {
 }
 
 .back-home-btn .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.settings-train-btn {
+  background: var(--secondary-color);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 16px;
+  font-family: "Inter", sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-train-btn:hover:not(:disabled) {
+  background: #d9501a;
+  transform: translateY(-1px);
+}
+
+.settings-train-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.settings-train-btn .material-symbols-outlined {
   font-size: 18px;
 }
 
@@ -176,6 +212,80 @@ body {
   box-shadow: var(--card-shadow);
   border: 1px solid var(--border-color);
   min-height: 500px;
+}
+
+.plot-management {
+  background: white;
+  border-radius: var(--border-radius);
+  box-shadow: var(--card-shadow);
+  border: 1px solid var(--border-color);
+  padding: 20px 24px;
+  margin-bottom: 24px;
+}
+
+.plot-management-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.plot-management-header h2 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.plot-management-header p {
+  font-size: 14px;
+  color: #666;
+}
+
+.plot-management-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.plot-management .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plot-management .btn-secondary.danger {
+  border-color: rgba(231, 76, 60, 0.4);
+  color: var(--danger-color);
+}
+
+.plot-list {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.plot-chip {
+  border: 1px solid var(--border-color);
+  background: #fdfdfd;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.plot-chip:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.plot-chip.active {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
 }
 
 .tab-content {
@@ -338,6 +448,12 @@ textarea.form-control {
     align-items: flex-start;
   }
 
+  .header-actions {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
   .back-home-btn {
     align-self: flex-end;
   }
@@ -371,6 +487,19 @@ textarea.form-control {
   .form-actions {
     max-width: none;
     padding: 0 16px 24px;
+  }
+
+  .plot-management {
+    padding: 18px 16px;
+  }
+
+  .plot-management-actions {
+    width: 100%;
+  }
+
+  .plot-management-actions .btn-secondary {
+    flex: 1 1 auto;
+    justify-content: center;
   }
 
   .btn-primary,

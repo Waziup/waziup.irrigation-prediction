@@ -11,6 +11,8 @@ import requests
 from utils import NetworkUtils, TimeUtils
 
 # Class plot members represent individual plots in the application
+
+
 class Plot:
     # Class init, called when created in UI
     def __init__(self, tab_number, configPath):
@@ -26,26 +28,41 @@ class Plot:
 
         # Variables that were global before, now plot-specific
         # Device
-        self.device_and_sensor_ids_moisture = []            # Device address of humidity sensor
-        self.device_and_sensor_ids_temp = []                # Device address of temperature sensor
-        self.device_and_sensor_ids_flow = []                # Device address of flow meter
-        self.device_and_sensor_ids_flow_confirmation = []   # Device address of flow meter confirmation sensor
+        # Device address of humidity sensor
+        self.device_and_sensor_ids_moisture = []
+        # Device address of temperature sensor
+        self.device_and_sensor_ids_temp = []
+        # Device address of flow meter
+        self.device_and_sensor_ids_flow = []
+        # Device address of flow meter confirmation sensor
+        self.device_and_sensor_ids_flow_confirmation = []
         self.gps_info = ""                                  # Coordinates of sensors
         self.sensor_kind = "tension"                        # Type of humidity sensor
         self.sensor_unit = ""                               # Unit of humidity
-        self.slope = 0                                      # Slope to evaluate irrigation has taken place
+        # Slope to evaluate irrigation has taken place
+        self.slope = 0
         self.threshold = 0                                  # Threshold to irrigate plants
-        self.irrigation_amount = 0                          # Amount in liters to irrigate plants
-        self.look_ahead_time = 0                            # Time to look ahead in forecast how long soil tension threshold can be exceeded in hours
-        self.start_date = ""                                # Start date: use sensor and API data from this date
-        self.period = 0                                     # Time period to include into the model
-        self.train_period_days = 1                          # Frequencies in days in between train cycles
-        self.predict_period_hours = 3                       # Frequencies in hours in between predict cycles
-        self.soil_type = ""                                 # Soil type for current field                           
-        self.permanent_wilting_point = 40                   # Soil is to dry, plant cannot access any water with its roots
-        self.field_capacity_upper = 30                      # Upper bound of soil is getting to dry
-        self.field_capacity_lower = 10                      # Lower bound of wet soil, no more retention, water seeps through soil
-        self.saturation = 0                                 # Soil is completely saturated with water
+        # Amount in liters to irrigate plants
+        self.irrigation_amount = 0
+        # Time to look ahead in forecast how long soil tension threshold can be exceeded in hours
+        self.look_ahead_time = 0
+        # Start date: use sensor and API data from this date
+        self.start_date = ""
+        # Time period to include into the model
+        self.period = 0
+        # Frequencies in days in between train cycles
+        self.train_period_days = 1
+        # Frequencies in hours in between predict cycles
+        self.predict_period_hours = 3
+        self.soil_type = ""                                 # Soil type for current field
+        # Soil is to dry, plant cannot access any water with its roots
+        self.permanent_wilting_point = 40
+        # Upper bound of soil is getting to dry
+        self.field_capacity_upper = 30
+        # Lower bound of wet soil, no more retention, water seeps through soil
+        self.field_capacity_lower = 10
+        # Soil is completely saturated with water
+        self.saturation = 0
         self.soil_water_retention_curve = [                 # Soil water retention curve init
             (0, 0.45),
             (5, 0.40),
@@ -58,30 +75,48 @@ class Plot:
             (1000, 0.05),
         ]
 
+        # Phenology / dynamic threshold configuration
+        self.crop_type = "generic"
+        self.planting_date = ""
+        self.use_dynamic_threshold = False
+
         # Initialize an empty dictionary to store the current config, obtained from "config.json"
         self.config = {}
 
         # Threading
         self.training_thread = None                         # Training thread of object
-        self.prediction_thread = None                       # Prediction thread of object
-        self.training_finished = False                      # Flag training process finished
-        self.currently_training = False                     # Flag currently training this plot
-        self.currently_active = False                       # Redundant as set in plot:manager
+        # Prediction thread of object
+        self.prediction_thread = None
+        # Flag training process finished
+        self.training_finished = False
+        # Flag currently training this plot
+        self.currently_training = False
+        # Redundant as set in plot:manager
+        self.currently_active = False
 
         # Data
-        self.data = pd.DataFrame                            # Dataframe that holds data for training
-        self.data_w = pd.DataFrame                          # Dataframe that stores weatherdata
-        self.predictions = pd.DataFrame                     # Dataframe that holds latest predictions
-        self.threshold_timestamp = ""                       # Threshold timestamp when soil will be to dry
+        # Dataframe that holds data for training
+        self.data = pd.DataFrame
+        # Dataframe that stores weatherdata
+        self.data_w = pd.DataFrame
+        # Dataframe that holds latest predictions
+        self.predictions = pd.DataFrame
+        # Threshold timestamp when soil will be to dry
+        self.threshold_timestamp = ""
 
         # Model
-        self.best_model = None                              # Stores the currently best model
-        self.best_exp = None                                # Stores the pycarets experiment object
+        # Stores the currently best model
+        self.best_model = None
+        # Stores the pycarets experiment object
+        self.best_exp = None
 
         # Debug
-        self.use_pycaret = True                             # Flag can be switched to decide on model usage
-        self.load_data_from_csv = False                     # Flag can be switched to decide on data source
-        self.ensemble = True                                # Flag to use ensemble/stacking model
+        # Flag can be switched to decide on model usage
+        self.use_pycaret = True
+        # Flag can be switched to decide on data source
+        self.load_data_from_csv = False
+        # Flag to use ensemble/stacking model
+        self.ensemble = True
         # Synthetic but weather-consistent debug dataset: tension simulated from real ERA5
         # weather at plot1's GPS (51.023591, 13.744087 / Dresden), Jun 2022 - Jun 2023, via a
         # leaky soil-water bucket with ~15 irrigation events. The old file
@@ -90,7 +125,8 @@ class Plot:
         self.data_from_csv = "data/debug/synthetic_tension_dresden.csv"
         # Load former irrigations from file "data/irrigations.json" DEBUG
         self.load_irrigations_from_file = False
-        self.irrigations_from_json = 'data/irrigations_plot_' + str(id)  + '.json'
+        self.irrigations_from_json = 'data/irrigations_plot_' + \
+            str(id) + '.json'
 
         def __repr__(self):
             return (
@@ -106,9 +142,9 @@ class Plot:
     def printPlotNumber(self):
         print("Current object is plot/tab number: " + str(self.tab_number),
               ", with the path: " + self.configPath + ", it has the internal id: ", self.id)
-        
 
     # Load config from file TODO: move the rest
+
     def getConfigFromFile(self):
         # Get path
         currentConfigPath = self.configPath
@@ -120,33 +156,63 @@ class Plot:
 
             if not self.load_data_from_csv:
                 # Get chosen sensors
-                self.device_and_sensor_ids_moisture = data.get('DeviceAndSensorIdsMoisture', [])
-                self.device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
-                self.device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
-                flow_confirmation = data.get('DeviceAndSensorIdsFlowConfirmation', [])
-                self.device_and_sensor_ids_flow_confirmation = flow_confirmation if isinstance(flow_confirmation, list) else []
+                self.device_and_sensor_ids_moisture = data.get(
+                    'DeviceAndSensorIdsMoisture', [])
+                self.device_and_sensor_ids_temp = data.get(
+                    'DeviceAndSensorIdsTemp', [])
+                self.device_and_sensor_ids_flow = data.get(
+                    'DeviceAndSensorIdsFlow', [])
+                flow_confirmation = data.get(
+                    'DeviceAndSensorIdsFlowConfirmation', [])
+                self.device_and_sensor_ids_flow_confirmation = flow_confirmation if isinstance(
+                    flow_confirmation, list) else []
 
             # Get data from forms
             self.user_given_name = data.get('Name', [])
+            self.zone_name = data.get('Zone_name', self.user_given_name)
             self.sensor_kind = data.get('Sensor_kind', [])
-            self.gps_info = data.get('Gps_info', [])
+            gps_info = data.get('Gps_info', {})
+            if isinstance(gps_info, dict):
+                lat = gps_info.get('latitude', gps_info.get('lattitude', 0))
+                lon = gps_info.get('longitude', 0)
+                self.gps_info = {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "lattitude": lat,
+                }
+            else:
+                self.gps_info = gps_info
             self.slope = float(data.get('Slope', []))
             self.threshold = float(data.get('Threshold', []))
             self.irrigation_amount = float(data.get('Irrigation_amount', []))
+            self.plot_area_m2 = float(data.get('Plot_area_m2', 0))
+            self.irrigation_type = data.get(
+                'Irrigation_type', 'unknown') or 'unknown'
             self.look_ahead_time = float(data.get('Look_ahead_time', []))
             self.start_date = data.get('Start_date', [])
             self.period = int(data.get('Period', []))
             self.soil_type = data.get('Soil_type', [])
-            self.permanent_wilting_point = float(data.get('PermanentWiltingPoint', []))
-            self.field_capacity_upper = float(data.get('FieldCapacityUpper', []))
-            self.field_capacity_lower = float(data.get('FieldCapacityLower', []))
+            self.soil_texture_class = data.get('Soil_texture_class', None)
+            self.permanent_wilting_point = float(
+                data.get('PermanentWiltingPoint', []))
+            self.field_capacity_upper = float(
+                data.get('FieldCapacityUpper', []))
+            self.field_capacity_lower = float(
+                data.get('FieldCapacityLower', []))
             self.saturation = float(data.get('Saturation', []))
 
             # Get soil water retention curve -> currently not needed here
-            self.soil_water_retention_curve = data.get('Soil_water_retention_curve', [])
+            self.soil_water_retention_curve = data.get(
+                'Soil_water_retention_curve', [])
+
+            # Phenology / dynamic threshold configuration
+            self.crop_type = data.get('Crop_type', 'generic')
+            self.planting_date = data.get('Planting_date', '')
+            self.use_dynamic_threshold = data.get(
+                'Use_dynamic_threshold', False)
 
             # Sensor kind
-            if self.sensor_kind == "tension":
+            if self.sensor_kind in ("tension", "both"):
                 self.sensor_unit = "Moisture in cbar (Soil Tension)"
             elif self.sensor_kind == "capacitive":
                 self.sensor_unit = "Moisture in % (Volumetric Water Content)"
@@ -156,20 +222,21 @@ class Plot:
             return True
         else:
             return False
-        
 
-    #Get the device ID of the confirmation sensor (xlppChan == 5)
+    # Get the device ID of the confirmation sensor (xlppChan == 5)
+
     def getConfirmationDeviceID(self, id):
         # API request to get sensor meta data of a device
         device_id = id[0].split('/')[0]
-        url = f"{NetworkUtils.ApiUrl}devices/{device_id}/sensors" 
+        url = f"{NetworkUtils.ApiUrl}devices/{device_id}/sensors"
         headers = {
             'Authorization': f'Bearer {NetworkUtils.Token}'
         }
         try:
             response = requests.get(url, headers=headers)
             if response.status_code != 200:
-                print(f"Failed to fetch sensors, status code: {response.status_code}")
+                print(
+                    f"Failed to fetch sensors, status code: {response.status_code}")
                 return ""
 
             data = response.json()
@@ -177,14 +244,15 @@ class Plot:
             # Find the sensor ID with xlppChan == 5
             sensor_id = next(
                 (sensor["id"] for sensor in data
-                if sensor.get("meta", {}).get("xlppChan") == 5),
+                 if sensor.get("meta", {}).get("xlppChan") == 5),
                 ""
             )
         except requests.exceptions.RequestException as e:
             print("Request error:", e)
-            print(f"Determining the confirmation sensor of the actuator failed for plot {self.id}.")
+            print(
+                f"Determining the confirmation sensor of the actuator failed for plot {self.id}.")
             return ""
-        
+
         return device_id + "/" + sensor_id
 
     # Obtain current sensor value from API
@@ -249,7 +317,7 @@ class Plot:
             return "Error in 'load_latest_data_api()'! ", e  # TODO: introduce error handling!
 
         return response_ok
-    
+
     # Load data from CSV file
     def load_latest_data_csv(self, sensor_name, type):
         print("load_latest_data_csv: will load data for plot: " +
@@ -260,11 +328,11 @@ class Plot:
             with open(self.data_from_csv, "r") as file:
                 # Specify the column(s) you want to load
                 data = pd.read_csv(file, header=0, usecols=[sensor_name])
-            return data.iloc[-1, 0] # last element first col
+            return data.iloc[-1, 0]  # last element first col
         except FileNotFoundError:
             print("File not found:", self.data_from_csv)
             return None
-        except Exception as e: 
+        except Exception as e:
             print("An error occurred, loading latest data from csv file:", e)
             return None
 
@@ -296,7 +364,12 @@ class Plot:
 
                 # create array with sensors strings
                 for col in data.columns:
-                    if col.startswith("tension"):
+                    if (
+                        col.startswith("tension")
+                        or col.startswith("vwc")
+                        or col.startswith("volumetric")
+                        or col.startswith("capacitive")
+                    ):
                         self.device_and_sensor_ids_moisture.append(col)
                     elif col.startswith("soil_temp"):
                         self.device_and_sensor_ids_temp.append(col)
@@ -310,7 +383,8 @@ class Plot:
                     self.device_and_sensor_ids_flow = config["DeviceAndSensorIdsFlow"]
         # If the CSV file does not exist, use data from API
         except FileNotFoundError:
-             print(f"Debug mode was set in .env, but no file with was found in {self.data_from_csv}. Received the following error: {e}")
+            print(
+                f"Debug mode was set in .env, but no file with was found in {self.data_from_csv}. Received the following error: {e}")
         except Exception as e:
             print(
                 "An error occurred in read config: No devices are set in settings, there is also no local config file.", e)
@@ -320,7 +394,7 @@ class Plot:
     # Load from wazigate API, !!!! TODO: investigate why HTTP server becomes unresponsive after running!!!!
     def load_data_api(self, sensor_name, type, from_timestamp):  # , token)
         print("load_data_api: will load data for plot: " + self.user_given_name
-               + " For the sensor: " + sensor_name)
+              + " For the sensor: " + sensor_name)
 
         # Obtain ApiUrl
         apiUrl = NetworkUtils.ApiUrl
@@ -357,10 +431,10 @@ class Plot:
 
         # Reconstruct the URL with the encoded query
         encoded_url = urllib.parse.urlunsplit((parsed_url.scheme,
-                                            parsed_url.netloc,
-                                            parsed_url.path,
-                                            encoded_query,
-                                            parsed_url.fragment))
+                                               parsed_url.netloc,
+                                               parsed_url.path,
+                                               encoded_query,
+                                               parsed_url.fragment))
 
         # Define headers for the GET request
         headers = {
@@ -391,23 +465,23 @@ class Plot:
             return "", e  # TODO: introduce error handling!
 
         return response_ok
-        
+
     def load_data_csv(self):
-        print("load_data_csv: will load data from CSV for plot: " + self.user_given_name)
+        print("load_data_csv: will load data from CSV for plot: " +
+              self.user_given_name)
 
         # Load data from CSV file
         try:
             with open(self.data_from_csv, "r") as file:
                 # Specify the column(s) you want to load
-                data = pd.read_csv(file, header=0)#, usecols=[sensor_name])
+                data = pd.read_csv(file, header=0)  # , usecols=[sensor_name])
             return data
         except FileNotFoundError:
             print("File not found:", self.data_from_csv)
             return None
-        except Exception as e: 
+        except Exception as e:
             print("An error occurred, loading data from csv file:", e)
             return None
-
 
     # Redundant set active state
 
@@ -435,11 +509,11 @@ class Plot:
     # Get the prediction thread
     def getPredictionThread(self):
         return self.prediction_thread
-    
+
     # Check if a training thread is already running
     def isTrainingRunning(self):
         return self.training_thread is not None and self.training_thread.is_alive()
-    
+
     # surveillance, check threads are running
     def check_threads(self):
         print("Checking threads of plot: " + self.user_given_name)
@@ -465,7 +539,7 @@ class Plot:
     # Predictions Getter
     def get_predictions(self):
         if self.predictions.empty:
-            return False    
+            return False
         else:
             return self.predictions
 
