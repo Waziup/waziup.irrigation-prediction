@@ -235,10 +235,24 @@
 
         const formattedDate = `${yyyy}-${mm}-${dd}`;
         console.log("Setting date to:", formattedDate);
-        dateInput.value = formattedDate;
+          if (dateInput && !dateInput.value) {
+            dateInput.value = formattedDate;
+          }
       });
 
       // handle menu button
+      function openRegisterFarmPage() {
+        window.location.href = "register_farm.html";
+      }
+
+      function openAppPage(page) {
+        if (page === "settings") {
+          window.location.href = "settings.html";
+          return;
+        }
+        window.location.href = `index.html#${page}`;
+      }
+
       function goHome() {
         window.location.href = "index.html";
       }
@@ -341,9 +355,14 @@
       let plotNames = [];
       let currentPlotIndex = 1;
 
+      function getActiveOwner() {
+        return (localStorage.getItem("waziup.currentFarmOwner") || "").trim();
+      }
+
       async function loadPlotList() {
         try {
-          const response = await fetch("../api/getPlots");
+          const owner = getActiveOwner();
+          const response = await fetch(owner ? `../api/getPlots?owner=${encodeURIComponent(owner)}` : "../api/getPlots");
           const data = await response.json();
           plotNames = Array.isArray(data.tabnames) ? data.tabnames : [];
           const currentPlot = parseInt(data.currentPlot, 10);
@@ -351,7 +370,8 @@
             currentPlotIndex = currentPlot;
           }
           if (plotNames.length === 0) {
-            plotNames = ["Plot 1"];
+            // no plots returned from backend
+            plotNames = [];
           }
           if (currentPlotIndex > plotNames.length) {
             currentPlotIndex = plotNames.length;
@@ -359,6 +379,11 @@
           renderPlotList();
         } catch (error) {
           console.error("Error loading plots:", error);
+          // On error, fall back to any name entered in the form, otherwise show no plots
+          const nameVal = (document.getElementById("name_form")?.value || "").trim();
+          plotNames = nameVal ? [nameVal] : [];
+          currentPlotIndex = nameVal ? 1 : 0;
+          renderPlotList();
         }
       }
 
@@ -366,19 +391,88 @@
         const container = document.getElementById("plot_list");
         if (!container) return;
 
+        if (!plotNames.length) {
+          // No plots to show; clear container and active label
+          container.innerHTML = "";
+          updateActiveFarmLabel("");
+          return;
+        }
+
+        const activeName = plotNames[currentPlotIndex - 1] || document.getElementById("name_form")?.value || "";
+        const ownerName = document.getElementById("owner_form")?.value || getActiveOwner() || "";
+        const cropType = (document.getElementById("crop_type_form")?.value || "").replace(/^./, (char) => char.toUpperCase());
+        const plantingDate = document.getElementById("planting_date_form")?.value || document.getElementById("starting_timestamp_form")?.value || "";
+        const area = document.getElementById("plot_area_m2_form")?.value || "";
+
         container.innerHTML = plotNames.map((name, index) => {
           const plotNumber = index + 1;
           const isActive = plotNumber === currentPlotIndex;
           const label = name || `Plot ${plotNumber}`;
           return `
             <button
-              class="plot-chip${isActive ? " active" : ""}"
+              class="plot-card${isActive ? " active" : ""}"
               onclick="setActivePlot(${plotNumber})"
               type="button"
             >
-              ${label}
+              <div class="plot-card-copy">
+                <div class="plot-card-title">${label}</div>
+                <div class="plot-card-subtitle">${ownerName ? `Owner: ${ownerName} · ` : ""}${cropType} · Planted ${plantingDate} · ${area} m²</div>
+              </div>
+              <div class="plot-card-actions">
+                ${isActive ? '<span class="plot-badge">ACTIVE</span><span class="plot-edit">Edit</span>' : '<span class="plot-switch">Switch</span>'}
+              </div>
             </button>`;
         }).join("");
+
+        updateActiveFarmLabel(activeName);
+      }
+
+      function updateActiveFarmLabel(farmName) {
+        const label = document.getElementById("activeFarmLabel");
+        if (!label) return;
+        label.textContent = farmName || document.getElementById("name_form")?.value || "";
+      }
+
+      function applyPendingFarmDraft() {
+        const rawDraft = localStorage.getItem("waziup.pendingFarmDraft");
+        if (!rawDraft) return;
+
+        try {
+          const draft = JSON.parse(rawDraft);
+          if (!draft || typeof draft !== "object") return;
+
+          if (draft.name && document.getElementById("name_form")) {
+            document.getElementById("name_form").value = draft.name;
+          }
+          if (draft.owner && document.getElementById("owner_form")) {
+            document.getElementById("owner_form").value = draft.owner;
+            localStorage.setItem("waziup.currentFarmOwner", draft.owner);
+          }
+          if (draft.cropType && document.getElementById("crop_type_form")) {
+            document.getElementById("crop_type_form").value = draft.cropType;
+          }
+          if (draft.gps && document.getElementById("gps_form")) {
+            document.getElementById("gps_form").value = draft.gps;
+          }
+          if (draft.plotArea && document.getElementById("plot_area_m2_form")) {
+            document.getElementById("plot_area_m2_form").value = draft.plotArea;
+          }
+          const draftPlantingDate = draft.plantingDate || draft.startDate || "";
+          if (draftPlantingDate && document.getElementById("planting_date_form")) {
+            document.getElementById("planting_date_form").value = draftPlantingDate;
+          }
+          if (draft.startDate && document.getElementById("starting_timestamp_form")) {
+            document.getElementById("starting_timestamp_form").value = draft.startDate;
+          }
+          if (draft.soilType && document.getElementById("soil_type_select")) {
+            document.getElementById("soil_type_select").value = draft.soilType;
+          }
+          updateActiveFarmLabel(draft.name || "");
+          renderPlotList();
+          localStorage.removeItem("waziup.pendingFarmDraft");
+        } catch (error) {
+          console.warn("Failed to restore pending farm draft:", error);
+        }
       }
 
       async function setActivePlot(plotNumber) {
@@ -456,7 +550,8 @@
 
       // Get formerly saved config from backend
       function getFormerConfig() {
-        return fetch(`../api/returnConfig`)
+        const owner = getActiveOwner();
+        return fetch(owner ? `../api/returnConfig?owner=${encodeURIComponent(owner)}` : `../api/returnConfig`)
           .then((response) => response.json())
           .then((data) => {
             if (data.status_code == 200) {
@@ -486,6 +581,10 @@
 
               // Assignment for a user given plot name
               document.getElementById("name_form").value = response_data.Name;
+              if (response_data.Owner && document.getElementById("owner_form")) {
+                document.getElementById("owner_form").value = response_data.Owner;
+                localStorage.setItem("waziup.currentFarmOwner", response_data.Owner);
+              }
 
               if (response_data.Zone_name) {
                 document.getElementById("zone_name_form").value = response_data.Zone_name;
@@ -590,6 +689,10 @@
                 document.getElementById("soil_water_retention_text").value =
                   formattedString;
               }
+
+              updateActiveFarmLabel(response_data.Name || plotNames[currentPlotIndex - 1] || document.getElementById("name_form")?.value || "");
+              renderPlotList();
+              applyPendingFarmDraft();
             } else {
               console.log(
                 "No data was formerly set or there was an error, fallback: use std values."
@@ -797,6 +900,7 @@
       // Parse data from forms after "Save"
       function parseForms() {
         var name = document.getElementById("name_form").value;
+        var owner = document.getElementById("owner_form")?.value || getActiveOwner();
         var zone_name = document.getElementById("zone_name_form").value;
         var selectedSensorKind = document.querySelector(
           'input[name="sensor_kind_radio"]:checked'
@@ -842,6 +946,8 @@
         const Params =
           "&name=" +
           encodeURIComponent(name) +
+          "&owner=" +
+          encodeURIComponent(owner) +
           "&zone_name=" +
           encodeURIComponent(zone_name) +
           "&sensor_kind=" +
@@ -1062,18 +1168,31 @@
         return sensorList;
       }
 
-      // Main function for from same device fetching
+      // Main function for fetching devices via backend proxy (with fallback)
       function loadStuff() {
-        $.get("../../../devices", function (data) {
-          const sensors = parseSensorData(data);
-          console.log("Sensors: ", sensors);
-          displaySensorsAndElements(sensors);
-          getFormerConfig();
-          loadSensorRegistry();
-          loadPlotList();
-          //$("#sensor_list").html(sensors).fadeIn();
-          //autoR = setTimeout(function () { loadStuff() }, 2000);
-        });
+        fetch("../api/devices")
+          .then((response) => {
+            if (!response.ok) throw response;
+            return response.json();
+          })
+          .then((data) => {
+            const sensors = parseSensorData(data);
+            console.log("Sensors: ", sensors);
+            displaySensorsAndElements(sensors);
+            getFormerConfig();
+            loadSensorRegistry();
+            loadPlotList();
+          })
+          .catch((err) => {
+            console.warn("API proxy /api/devices failed, falling back to local devices endpoint:", err);
+            $.get("../../../devices", function (data) {
+              const sensors = parseSensorData(data);
+              displaySensorsAndElements(sensors);
+              getFormerConfig();
+              loadSensorRegistry();
+              loadPlotList();
+            });
+          });
       }
 
       // Main function for remote fetching
@@ -1116,8 +1235,22 @@
         $("#sensor_list")
           .html('<img src="./loading.gif" /> Loading...')
           .fadeIn();
+        renderPlotList();
         loadStuff();
         //loadStuff_remote() // DEBUG
+      });
+
+      // Live-update plot header when user edits the form fields
+      document.addEventListener("DOMContentLoaded", function () {
+        ["name_form", "owner_form", "crop_type_form", "starting_timestamp_form", "planting_date_form", "plot_area_m2_form"].forEach((id) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.addEventListener("input", function () {
+            // re-render plot list and active label from current form values
+            renderPlotList();
+            updateActiveFarmLabel(document.getElementById("name_form")?.value || "");
+          });
+        });
       });
     </script>
   </head>
@@ -1128,36 +1261,25 @@
       <header class="settings-header">
         <div class="header-content">
           <h1>Settings</h1>
-          <div class="breadcrumb">
-            <a href="index.html" onclick="goHome()">Home</a> / Settings
-          </div>
         </div>
+        <div id="activeFarmLabel" class="header-farm-name"></div>
         <div class="header-actions">
           <button id="train_btn" class="settings-train-btn" onclick="startTraining()">
             <span class="material-symbols-outlined">psychology</span>
             Start Training
           </button>
-          <a href="index.html" class="back-home-btn" onclick="goHome()">
-            <span class="material-symbols-outlined">arrow_back</span>
-            Back to Home
-          </a>
         </div>
       </header>
 
       <section class="plot-management">
         <div class="plot-management-header">
           <div>
-            <h2>Farm / Plot Management</h2>
-            <p>Switch between plots, add a new plot, or remove the current plot.</p>
+            <h2>Your Farms</h2>
           </div>
           <div class="plot-management-actions">
-            <button type="button" class="btn-secondary" onclick="addPlot()">
+            <button type="button" class="btn-secondary add-farm-btn" onclick="openRegisterFarmPage()">
               <span class="material-symbols-outlined">add</span>
-              Add plot
-            </button>
-            <button type="button" class="btn-secondary danger" onclick="removePlot()">
-              <span class="material-symbols-outlined">delete</span>
-              Remove plot
+              Add New Farm
             </button>
           </div>
         </div>
@@ -1174,18 +1296,15 @@
           <span class="material-symbols-outlined">devices</span>
           Device
         </button>
-        <button class="tab-button" data-tab="prediction-tab">
-          <span class="material-symbols-outlined">calendar_month</span>
-          Prediction & Scheduling
-        </button>
       </div>
 
       <!-- Tab Contents -->
       <div class="settings-content">
         <!-- Soil Tab -->
         <div id="soil-tab" class="tab-content active">
+          <div class="section-heading">SOIL TYPE</div>
           <div class="form-section">
-            <div class="form-group">
+            <div class="form-group advanced-field">
               <label for="sensor_kind_radio">Moisture sensor type
                 <span class="tooltip material-symbols-outlined" data-tooltip-id="moistureKindTooltip">help
                   <span class="tooltiptext" id="moistureKindTooltip"></span>
@@ -1268,6 +1387,17 @@
               </select>
             </div>
 
+            <div class="form-group">
+              <label for="owner_form">Owner *</label>
+              <p class="form-hint">The person or account that owns this farm</p>
+              <input
+                type="text"
+                id="owner_form"
+                class="form-control"
+                value=""
+              />
+            </div>
+
             <div class="form-row">
               <div class="form-group">
                 <label for="pwp_form">Permanent Wilting Point (kPa, cBar)
@@ -1283,7 +1413,7 @@
                   value="35"
                 />
               </div>
-              <div class="form-group">
+              <div class="form-group advanced-field">
                 <label for="fcu_form">Field Capacity Upper (kPa, cBar)
                   <span class="tooltip material-symbols-outlined" data-tooltip-id="fcuTooltip">help
                     <span class="tooltiptext" id="fcuTooltip"></span>
@@ -1355,44 +1485,29 @@
 500, 0.05
 1000, 0.025</textarea>
             </div>
+
+            <div class="form-group">
+              <label for="use_dynamic_threshold_form">Threshold mode</label>
+              <p class="form-hint">Use the crop-stage dynamic threshold from the phenology engine. Turn it off to keep the farmer-configured fixed threshold.</p>
+              <div class="radio-group">
+                <div class="radio-item">
+                  <input
+                    type="checkbox"
+                    id="use_dynamic_threshold_form"
+                  />
+                  <label for="use_dynamic_threshold_form">Use dynamic crop-stage thresholds</label>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
         <!-- Device Tab -->
         <div id="device-tab" class="tab-content">
+          <div class="section-heading">SENSOR ASSIGNMENT</div>
           <div class="form-section">
             <div class="form-group">
-              <label for="name_form">Plot name
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="plotNameTooltip">help
-                  <span class="tooltiptext" id="plotNameTooltip"></span>
-                </span>
-              </label>
-              <p class="form-hint">Set the plot name</p>
-              <input
-                type="text"
-                id="name_form"
-                class="form-control"
-                value="Plot"
-              />
-            </div>
-
-              <div class="form-group">
-                <label for="zone_name_form">Zone name
-                  <span class="tooltip material-symbols-outlined" data-tooltip-id="zoneNameTooltip">help
-                    <span class="tooltiptext" id="zoneNameTooltip"></span>
-                  </span>
-                </label>
-                <p class="form-hint">Named field or sensor zone tracked in the registry</p>
-                <input
-                  type="text"
-                  id="zone_name_form"
-                  class="form-control"
-                  value="Main zone"
-                />
-              </div>
-
-            <div class="form-group">
-              <label for="sensor_list_moisture">Soil moisture sensors
+              <label for="sensor_list_moisture">Moisture sensors *
                 <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorHumidityTooltip">help
                   <span class="tooltiptext" id="sensorHumidityTooltip"></span>
                 </span>
@@ -1407,7 +1522,7 @@
             </div>
 
             <div class="form-group">
-              <label for="sensor_list_temp">Soil temperature sensors
+              <label for="sensor_list_temp">Temperature sensors *
                 <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorTemperatureTooltip">help
                   <span class="tooltiptext" id="sensorTemperatureTooltip"></span>
                 </span>
@@ -1422,7 +1537,7 @@
             </div>
 
             <div class="form-group">
-              <label for="actuator_list_flow">Water flow sensor
+              <label for="actuator_list_flow">Flow sensor
                 <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorFlowTooltip">help
                   <span class="tooltiptext" id="sensorFlowTooltip"></span>
                 </span>
@@ -1437,50 +1552,12 @@
             </div>
 
             <div class="form-group">
-              <label for="gps_form">GPS coordinates
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="gpsCoordinates">help
-                  <span class="tooltiptext" id="gpsCoordinates"></span>
-                </span>
+              <label for="actuator_mode_form">Actuator present?
               </label>
-              <p class="form-hint">Enter the GPS coordinates of your plot</p>
-              <input
-                type="text"
-                id="gps_form"
-                class="form-control"
-                value="51.023591, 13.744087"
-              />
-            </div>
-
-            <div class="form-group">
-              <label for="slope_form">Irrigation slope detection
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="slopeTooltip">help
-                  <span class="tooltiptext" id="slopeTooltip"></span>
-                </span>
-              </label>
-              <p class="form-hint">Slope for detecting artificial irrigation</p>
-              <input
-                type="number"
-                id="slope_form"
-                class="form-control"
-                value="-0.07"
-                step="0.01"
-              />
-            </div>
-
-            <div class="form-group">
-              <label for="irrigation_type_select">Irrigation type
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationTypeTooltip">help
-                  <span class="tooltiptext" id="irrigationTypeTooltip"></span>
-                </span>
-              </label>
-              <p class="form-hint">Affects efficiency when converting ETc to irrigation volume</p>
-              <select id="irrigation_type_select" class="form-control">
-                <option value="drip">Drip (90% efficient)</option>
-                <option value="sprinkler">Sprinkler (75% efficient)</option>
-                <option value="flood">Flood (55% efficient)</option>
-                <option value="furrow">Furrow / gravity (advisory only)</option>
-                <option value="rainfed">Rainfed (advisory only)</option>
-                <option value="unknown">Unknown / Not configured (70% fallback)</option>
+              <p class="form-hint">Select whether the pump runs manually or automatically</p>
+              <select id="actuator_mode_form" class="form-control">
+                <option value="manual">No (manual)</option>
+                <option value="auto">Yes (auto pump)</option>
               </select>
             </div>
 
@@ -1492,166 +1569,33 @@
           </div>
         </div>
 
-        <!-- Prediction & Scheduling Tab -->
-        <div id="prediction-tab" class="tab-content">
-          <div class="form-section">
-            <div class="form-row">
-              <div class="form-group">
-                <label for="crop_type_form">Crop type
-                  <span class="tooltip material-symbols-outlined" data-tooltip-id="cropTypeTooltip">help
-                    <span class="tooltiptext" id="cropTypeTooltip"></span>
-                  </span>
-                </label>
-                <p class="form-hint">Used for crop-stage GDD thresholds and dynamic irrigation</p>
-                <select id="crop_type_form" class="form-control">
-                  <option value="maize">Maize</option>
-                  <option value="beans">Beans</option>
-                  <option value="wheat">Wheat</option>
-                  <option value="tomato">Tomato</option>
-                  <option value="sorghum">Sorghum</option>
-                  <option value="olive">Olive</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="planting_date_form">Planting date
-                  <span class="tooltip material-symbols-outlined" data-tooltip-id="plantingDateTooltip">help
-                    <span class="tooltiptext" id="plantingDateTooltip"></span>
-                  </span>
-                </label>
-                <p class="form-hint">Required for GDD accumulation</p>
-                <input type="date" id="planting_date_form" class="form-control" />
-              </div>
-              <div class="form-group">
-                <label for="initial_gdd_form">Initial GDD
-                  <span class="tooltip material-symbols-outlined" data-tooltip-id="initialGddTooltip">help
-                    <span class="tooltiptext" id="initialGddTooltip"></span>
-                  </span>
-                </label>
-                <p class="form-hint">Optional heat units already accumulated before the first reading</p>
-                <input type="number" id="initial_gdd_form" class="form-control" value="0" step="0.1" min="0" />
-              </div>
-              <div class="form-group">
-                <label class="checkbox-label">
-                  <input type="checkbox" id="use_dynamic_threshold_form" checked />
-                  Use dynamic threshold (GDD-based)
-                </label>
-                <p class="form-hint">Switches between static and crop-stage thresholds</p>
-              </div>
-            </div>
-            <div class="form-group">
-              <label for="tension_threshold_form"
-                >Soil Tension Threshold (cbar)
-                <span class="tooltip material-symbols-outlined" data-tooltip-id="tensionThresholdTooltip">help
-                  <span class="tooltiptext" id="tensionThresholdTooltip"></span>
-                </span>
-              </label>
-              <p class="form-hint">
-                Set the soil tension threshold for irrigation
-              </p>
-              <input
-                type="number"
-                id="tension_threshold_form"
-                class="form-control"
-                value="45"
-              />
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="irrigation_amount_form"
-                  >Irrigation Amount (m³)
-                  <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationAmountTooltip">help
-                      <span class="tooltiptext" id="irrigationAmountTooltip"></span>
-                  </span>
-                </label>
-                <p class="form-hint">Volume per irrigation cycle (min 0.01 m³ = 10 L)</p>
-                <input
-                  type="number"
-                  id="irrigation_amount_form"
-                  class="form-control"
-                  value="1"
-                  min="0.01"
-                  step="0.01"
-                />
-              </div>
-              <div class="form-group">
-                <label for="plot_area_m2_form">Plot area (m²)
-                  <span class="tooltip material-symbols-outlined" data-tooltip-id="plotAreaTooltip">help
-                    <span class="tooltiptext" id="plotAreaTooltip"></span>
-                  </span>
-                </label>
-                <p class="form-hint">Required for converting ETc depth into irrigation volume</p>
-                <input
-                  type="number"
-                  id="plot_area_m2_form"
-                  class="form-control"
-                  min="0"
-                  step="0.01"
-                />
-              </div>
-              <div class="form-group">
-                <label for="look_ahead_time_form"
-                  >Look Ahead Time (hours)
-                    <span class="tooltip material-symbols-outlined" data-tooltip-id="lookAheadTimeTooltip">help
-                        <span class="tooltiptext" id="lookAheadTimeTooltip"></span>
-                    </span>
-                  </label>
-                <p class="form-hint">Set forecast lead time (in hours) for next irrigation</p>
-                <input
-                  type="number"
-                  id="look_ahead_time_form"
-                  class="form-control"
-                  value="24"
-                />
-              </div>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="starting_timestamp_form">Starting Date
-                  <span class="tooltip material-symbols-outlined" data-tooltip-id="startingDateTooltip">help
-                    <span class="tooltiptext" id="startingDateTooltip"></span>
-                  </span>
-                </label>
-                <p class="form-hint">
-                  Select the starting date for predictions
-                </p>
-                <input
-                  type="date"
-                  id="starting_timestamp_form"
-                  class="form-control"
-                />
-              </div>
-              <div class="form-group">
-                <label for="maximum_time_period_form">
-                  Max Time Period (days)
-                  <span class="tooltip material-symbols-outlined" data-tooltip-id="maxTimePeriodTooltip">help
-                    <span class="tooltiptext" id="maxTimePeriodTooltip"></span>
-                  </span>
-                </label>
-                <p class="form-hint">Maximum time period for analysis</p>
-                <input
-                  type="number"
-                  id="maximum_time_period_form"
-                  class="form-control"
-                  value="0"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       <!-- Action buttons -->
       <div class="form-actions">
         <button id="save-btn" class="btn-primary" onclick="setConfig()">
           <span class="material-symbols-outlined">save</span>
-          SAVE CHANGES
+          SAVE SETTINGS
         </button>
         <button id="cancel-btn" class="btn-secondary" onclick="goHome()">
           CANCEL
         </button>
       </div>
+
+      <section class="settings-nav" aria-label="Page navigation">
+        <button type="button" class="settings-nav-button" onclick="openAppPage('dashboard')">
+          <span class="emoji-icon">▦</span>
+          <span>Dashboard</span>
+        </button>
+        <button type="button" class="settings-nav-button" onclick="openAppPage('phenology')">
+          <span class="emoji-icon">🌿</span>
+          <span>Phenology</span>
+        </button>
+        <button type="button" class="settings-nav-button active" onclick="openAppPage('settings')">
+          <span class="emoji-icon">⚙</span>
+          <span>Settings</span>
+        </button>
+      </section>
 
       <!-- Hidden elements for compatibility -->
       <div style="display: none">

@@ -25,6 +25,8 @@ class Plot:
         self.id = int(re.search(r'(\d+)\.json$', self.configPath).group(1))
         # User given name is preset, but can be changed later
         self.user_given_name = "Plot " + str(self.id)
+        # Farm owner / account that controls this plot
+        self.owner = ""
 
         # Variables that were global before, now plot-specific
         # Device
@@ -42,6 +44,8 @@ class Plot:
         # Slope to evaluate irrigation has taken place
         self.slope = 0
         self.threshold = 0                                  # Threshold to irrigate plants
+        # Farmer-configured fixed threshold
+        self.threshold_static = 0
         # Amount in liters to irrigate plants
         self.irrigation_amount = 0
         # Time to look ahead in forecast how long soil tension threshold can be exceeded in hours
@@ -169,6 +173,7 @@ class Plot:
 
             # Get data from forms
             self.user_given_name = data.get('Name', [])
+            self.owner = data.get('Owner', '')
             self.zone_name = data.get('Zone_name', self.user_given_name)
             self.sensor_kind = data.get('Sensor_kind', [])
             gps_info = data.get('Gps_info', {})
@@ -184,6 +189,7 @@ class Plot:
                 self.gps_info = gps_info
             self.slope = float(data.get('Slope', []))
             self.threshold = float(data.get('Threshold', []))
+            self.threshold_static = float(data.get('Threshold', []))
             self.irrigation_amount = float(data.get('Irrigation_amount', []))
             self.plot_area_m2 = float(data.get('Plot_area_m2', 0))
             self.irrigation_type = data.get(
@@ -210,6 +216,7 @@ class Plot:
             self.planting_date = data.get('Planting_date', '')
             self.use_dynamic_threshold = data.get(
                 'Use_dynamic_threshold', False)
+            self.farm_data_bundle = data.get('Farm_data_bundle', None)
 
             # Sensor kind
             if self.sensor_kind in ("tension", "both"):

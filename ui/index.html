@@ -88,9 +88,14 @@
           const pill = document.querySelector('.alert-pill');
           if (pill) {
             const urg = (alert.urgency || 'ok').toLowerCase();
+            const isNeutral = urg === 'ok';
+            pill.hidden = isNeutral;
             pill.className = 'alert-pill ' + (urg === 'critical' ? 'critical' : urg === 'watch' ? 'watch' : 'ok');
-            pill.textContent = (alert.urgency || 'OK').toUpperCase();
+            pill.textContent = isNeutral ? '' : (alert.urgency || 'OK').toUpperCase();
           }
+        } else {
+          const pill = document.querySelector('.alert-pill');
+          if (pill) pill.hidden = true;
         }
       }
 
@@ -114,23 +119,28 @@
 
         const badge = document.getElementById('threshold-source-badge');
         if (badge) {
-          const dynamic = Number.isFinite(Number(pred?.threshold_cbar_dynamic));
-          badge.textContent = dynamic ? 'Dynamic threshold' : 'Static threshold';
+          const dynamic = isDynamicThresholdMode(pred);
+          badge.textContent = dynamic ? 'Dynamic threshold active' : 'Static threshold active';
           badge.classList.toggle('dynamic', dynamic);
           badge.classList.toggle('static', !dynamic);
         }
 
         const phenoSource = document.getElementById('pheno-threshold-source');
         if (phenoSource) {
-          const dynamic = Number.isFinite(Number(pred?.threshold_cbar_dynamic));
-          phenoSource.textContent = dynamic ? 'Dynamic threshold' : 'Static threshold';
+          const dynamic = isDynamicThresholdMode(pred);
+          phenoSource.textContent = dynamic ? 'Dynamic threshold active' : 'Static threshold active';
           phenoSource.classList.toggle('dynamic', dynamic);
           phenoSource.classList.toggle('static', !dynamic);
         }
 
         const phenoThreshold = document.getElementById('pheno-threshold-value');
         if (phenoThreshold) {
-          const thresholdValue = Number(pred?.threshold_cbar_dynamic ?? pred?.threshold_cbar);
+          const dynamic = isDynamicThresholdMode(pred);
+          const thresholdValue = Number(
+            dynamic
+              ? (pred?.threshold_cbar_dynamic ?? pred?.threshold_cbar)
+              : (pred?.threshold_cbar_static ?? pred?.threshold_cbar)
+          );
           phenoThreshold.textContent = Number.isFinite(thresholdValue)
             ? thresholdValue.toFixed(1)
             : '--';
@@ -138,10 +148,10 @@
 
         const phenoNote = document.getElementById('pheno-threshold-note');
         if (phenoNote) {
-          const dynamic = Number.isFinite(Number(pred?.threshold_cbar_dynamic));
+          const dynamic = isDynamicThresholdMode(pred);
           phenoNote.textContent = dynamic
-            ? 'Dynamic threshold uses crop stage and soil texture to adjust the trigger.'
-            : 'Static threshold uses the fixed value from the farm configuration.';
+            ? 'Dynamic threshold uses crop stage and soil texture to adjust the trigger. The chart also keeps the fixed farmer threshold for comparison.'
+            : 'Static threshold uses the fixed value from the farm configuration. The chart still shows the dynamic crop-stage line for comparison.';
         }
       }
 
@@ -155,14 +165,21 @@
           : null;
         const farm = farms.find((entry) => entry.plot_id === currentPlot);
         const el = document.getElementById('farmName');
+        const pageTitle = document.getElementById('pageTitle');
+        const pageFarmName = document.getElementById('pageFarmName');
+        const currentPage = document.body.dataset.page || 'dashboard';
+        const farmLabel = farm
+          ? (farm.name || plotName || `Plot ${currentPlot}`)
+          : (plotName || 'No farm configured');
         if (el) {
-          if (farm) {
-            el.textContent = farm.name || plotName || `Plot ${currentPlot}`;
-          } else if (plotName) {
-            el.textContent = plotName;
-          } else {
-            el.textContent = 'No farm configured';
-          }
+          el.textContent = farmLabel;
+        }
+        if (pageFarmName) {
+          pageFarmName.textContent = farmLabel;
+          pageFarmName.style.display = currentPage === 'phenology' ? 'inline-flex' : 'none';
+        }
+        if (pageTitle && currentPage !== 'phenology') {
+          pageTitle.textContent = farmLabel;
         }
 
         // Check alert status and update badge
@@ -188,6 +205,17 @@
       }
 
       async function loadPhenologySummary() {
+        const pageTitle = document.getElementById('pageTitle');
+        const pageFarmName = document.getElementById('pageFarmName');
+        if (pageTitle) {
+          pageTitle.textContent = 'Crop Phenology';
+          setTimeout(() => {
+            pageTitle.textContent = 'Crop Phenology';
+          }, 0);
+        }
+        if (pageFarmName) {
+          pageFarmName.style.display = 'inline-flex';
+        }
         const summary = await safeFetchJson('../api/getPhenologySummary');
         const cropNameEl = document.getElementById('pheno-crop-name');
         const plantingEl = document.getElementById('pheno-planting-date');
@@ -261,6 +289,11 @@
         const combinedLabels = histLabels.concat(predLabels);
         const histData = histSeries.concat(predLabels.map(() => null));
         const predData = histLabels.map(() => null).concat(predSeries);
+        const useDynamicThreshold = Boolean(predMeta?.use_dynamic_threshold);
+        const dynamicThresholdSeries = Array.isArray(predMeta?.threshold_series_dynamic) ? predMeta.threshold_series_dynamic : [];
+        const staticThresholdSeries = Array.isArray(predMeta?.threshold_series_static) ? predMeta.threshold_series_static : [];
+        const dynamicThresholdData = histLabels.map(() => null).concat(dynamicThresholdSeries);
+        const staticThresholdData = histLabels.map(() => null).concat(staticThresholdSeries);
 
         const datasets = [];
 
@@ -269,7 +302,11 @@
           const fcl = Number(predMeta.fieldCapacityLower);
           const fcu = Number(predMeta.fieldCapacityUpper);
           const pwp = Number(predMeta.permanentWiltingPoint);
-          const threshold = Number(predMeta.threshold_cbar_dynamic ?? predMeta.threshold_cbar);
+          const activeThreshold = Number(
+            useDynamicThreshold
+              ? (predMeta.threshold_cbar_dynamic ?? predMeta.threshold_cbar)
+              : (predMeta.threshold_cbar_static ?? predMeta.threshold_cbar)
+          );
 
           const hasBands = [saturation, fcl, fcu, pwp].every((val) => Number.isFinite(val));
           if (hasBands) {
@@ -286,12 +323,39 @@
             );
           }
 
-          if (Number.isFinite(threshold)) {
+          const hasDynamicSeries = dynamicThresholdSeries.some((value) => value !== null && value !== undefined);
+          const hasStaticSeries = staticThresholdSeries.some((value) => value !== null && value !== undefined);
+
+          if (hasStaticSeries) {
             datasets.push({
-              label: 'Threshold',
-              data: combinedLabels.map(() => threshold),
+              label: 'Static threshold',
+              data: staticThresholdData,
+              borderColor: '#94a3b8',
+              borderDash: [4, 4],
+              borderWidth: useDynamicThreshold ? 1.5 : 2.5,
+              pointRadius: 0,
+              fill: false,
+            });
+          }
+
+          if (hasDynamicSeries) {
+            datasets.push({
+              label: 'Dynamic threshold',
+              data: dynamicThresholdData,
               borderColor: '#ef4444',
-              borderDash: [6, 4],
+              borderDash: useDynamicThreshold ? [] : [6, 4],
+              borderWidth: useDynamicThreshold ? 2.75 : 1.75,
+              pointRadius: 0,
+              fill: false,
+            });
+          }
+
+          if (!hasDynamicSeries && !hasStaticSeries && Number.isFinite(activeThreshold)) {
+            datasets.push({
+              label: useDynamicThreshold ? 'Dynamic threshold' : 'Static threshold',
+              data: combinedLabels.map(() => activeThreshold),
+              borderColor: useDynamicThreshold ? '#ef4444' : '#94a3b8',
+              borderDash: useDynamicThreshold ? [] : [4, 4],
               borderWidth: 2,
               pointRadius: 0,
               fill: false,
@@ -329,6 +393,11 @@
 
       // Navigation and UI wiring
       function navigateTo(page, el) {
+        if (page === 'settings') {
+          window.location.href = 'settings.html';
+          return;
+        }
+        document.body.dataset.page = page;
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
         const target = document.getElementById('page-' + page);
         if (target) target.classList.add('active');
@@ -338,15 +407,20 @@
           const match = document.querySelector(`.nav-item[data-page="${page}"]`);
           if (match) match.classList.add('active');
         }
-        const titles = {dashboard:'Dashboard', tension:'Soil Tension', phenology:'Crop Growth', alerts:'Alerts', settings:'Settings'};
+        const titles = {dashboard:'Dashboard', tension:'Soil Tension', phenology:'Crop Phenology', alerts:'Alerts', settings:'Settings'};
         const pageTitle = document.getElementById('pageTitle');
-        if (pageTitle) pageTitle.textContent = titles[page] || '';
+        if (pageTitle) {
+          pageTitle.textContent = titles[page] || '';
+          setTimeout(() => {
+            pageTitle.textContent = titles[page] || '';
+          }, 0);
+        }
         if (page === 'dashboard') setTimeout(() => { loadCharts(); }, 200);
         if (page === 'phenology') setTimeout(() => { loadPhenologySummary(); }, 200);
       }
 
       function fetchThreshold() {
-        fetch("../api/getThreshold")
+        return fetch("../api/getThreshold")
           .then((response) => response.json())
           .then((timestamp_data) => {
             if (timestamp_data.threshold == false) {
@@ -355,6 +429,13 @@
             } else {
               document.getElementById("timestamp_txt").innerHTML =
                 "The threshold will be reached on " + timestamp_data.timestamp;
+            }
+          })
+          .catch((error) => {
+            console.error("Error fetching threshold:", error);
+            const timestampTxt = document.getElementById("timestamp_txt");
+            if (timestampTxt) {
+              timestampTxt.textContent = "Threshold data unavailable.";
             }
           });
       }
@@ -374,6 +455,7 @@
             const phenoGddEl = document.getElementById("pheno-gdd");
             const phenoKcEl = document.getElementById("pheno-kc");
             const phenoThresholdValue = document.getElementById("pheno-threshold-value");
+            const phenoEtcEl = document.getElementById("pheno-etc");
             const summaryStage = document.getElementById("summary-stage");
             const summaryGdd = document.getElementById("summary-gdd");
             const adviceEtc = document.getElementById("advice-etc");
@@ -392,6 +474,7 @@
               if (phenoKcEl) phenoKcEl.textContent = "--";
               if (summaryStage) summaryStage.textContent = "--";
               if (summaryGdd) summaryGdd.textContent = "--";
+              if (phenoEtcEl) phenoEtcEl.textContent = "--";
               if (adviceEtc) adviceEtc.textContent = "--";
               if (adviceRain) adviceRain.textContent = "--";
               if (adviceRec) adviceRec.textContent = "--";
@@ -469,10 +552,19 @@
                 typeof kcValue === "number" ? kcValue.toFixed(3) : "--";
             }
             if (phenoThresholdValue) {
-              const thresholdCbar = Number(data.threshold_cbar);
+              const dynamic = isDynamicThresholdMode(data);
+              const thresholdCbar = Number(
+                dynamic
+                  ? (data.threshold_cbar ?? data.threshold_cbar_static)
+                  : (data.threshold_cbar_static ?? data.threshold_cbar)
+              );
               phenoThresholdValue.textContent = Number.isFinite(thresholdCbar)
                 ? thresholdCbar.toFixed(1)
                 : "--";
+            }
+            if (phenoEtcEl) {
+              const etcDaily = Number(data.etc_daily_mm);
+              phenoEtcEl.textContent = Number.isFinite(etcDaily) ? `${etcDaily.toFixed(1)} mm` : "--";
             }
 
             if (summaryStage) {
@@ -571,26 +663,20 @@
             tokens.push(...values);
           }
         });
-        document.querySelectorAll('.growth-node').forEach((node) => {
-          const nodeStage = String(node.dataset.stage || '').toLowerCase();
-          const isMatch = tokens.some((token) => token.includes(nodeStage));
-          if (isMatch) {
-            node.classList.add('active');
-          } else {
-            node.classList.remove('active');
-          }
+
+        const nodes = document.querySelectorAll('.growth-node');
+        nodes.forEach((node) => {
+          const stage = String(node.dataset.stage || '').toLowerCase();
+          const isActive = tokens.some((token) => stage.includes(token));
+          node.classList.toggle('active', isActive);
         });
       }
 
-      function setPumpActuatorVisibility(isAuto) {
-        const pumpCard = document.querySelector('.pump-card');
-        if (pumpCard) {
-          pumpCard.dataset.actuator = isAuto ? 'auto' : 'manual';
-        }
-        const scheduleButton = document.getElementById("schedule_irrigation");
-        if (scheduleButton && isAuto === false) {
-          scheduleButton.disabled = true;
-        }
+      function isDynamicThresholdMode(payload) {
+        const mode = String(payload?.threshold_mode || '').toLowerCase();
+        if (mode === 'dynamic') return true;
+        if (mode === 'static') return false;
+        return Boolean(payload?.use_dynamic_threshold);
       }
 
       function syncIrrigationScheduleState() {
@@ -703,7 +789,7 @@
       function loadStuff() {
         currentIrrigationActuatorBased = null;
         console.log("Starting dashboard data load...");
-        const loadPromises = Promise.all([
+        const loadPromises = Promise.allSettled([
           updateMetrics(),
           fetchIrrigationRecommendation(),
           loadCharts(),
@@ -719,10 +805,22 @@
           } catch (e) {
             console.warn('Could not update loading indicator state', e);
           }
+          // After loading, ensure tooltip helpers are visible only if they contain text
+          try {
+            document.querySelectorAll('.tooltip').forEach(function(t){
+              const textEl = t.querySelector('.tooltiptext');
+              if (!textEl || !textEl.textContent.trim()) {
+                t.style.display = 'none';
+              } else {
+                t.style.display = '';
+                t.classList.add('has-tooltip');
+              }
+            });
+          } catch(e) { console.warn('Tooltip visibility update failed', e); }
         };
 
         loadPromises
-          .then(finishLoading)
+          .then(() => finishLoading())
           .catch((err) => {
             console.error("Error loading one or more resources:", err);
             finishLoading();
@@ -731,9 +829,42 @@
         return loadPromises;
       }
 
+      function hideLoadingIndicator() {
+        try {
+          const indicator = document.getElementById("loading-indicator");
+          if (indicator) {
+            indicator.style.display = "none";
+          }
+          const mainContent = document.querySelector(".main-content");
+          if (mainContent) {
+            mainContent.classList.add("loaded");
+          }
+        } catch (e) {
+          console.warn('Could not update loading indicator state', e);
+        }
+      }
+
+      window.setTimeout(hideLoadingIndicator, 2000);
+
       window.addEventListener('load', async () => {
-        await loadTopbar();
-        loadStuff();
+        const initialPage = (window.location.hash || '').replace('#', '').trim();
+        if (initialPage === 'dashboard' || initialPage === 'phenology') {
+          document.body.dataset.page = initialPage;
+        }
+        try {
+          await loadTopbar();
+          if (initialPage === 'phenology') {
+            navigateTo('phenology');
+          } else if (initialPage === 'dashboard') {
+            navigateTo('dashboard');
+          }
+          await loadStuff();
+        } catch (err) {
+          console.error('Initial dashboard load failed:', err);
+        } finally {
+          hideLoadingIndicator();
+          setTimeout(hideLoadingIndicator, 500);
+        }
         setInterval(updateMetrics, 30000);
         setInterval(loadTopbar, 60000);
       });
@@ -773,6 +904,19 @@
         <button id="addTabButton" class="add-tab-button">+ Add Plot</button>
       </div>
     </div>
+    <script>
+      // Hide tooltip elements with empty text and show has-tooltip when populated
+      document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.tooltip').forEach(function(t){
+          const textEl = t.querySelector('.tooltiptext');
+          if (!textEl || !textEl.textContent.trim()) {
+            t.style.display = 'none';
+          } else {
+            t.classList.add('has-tooltip');
+          }
+        });
+      });
+    </script>
 
     <!-- Loading Indicator -->
     <div id="loading-indicator" class="loading-indicator">
@@ -786,24 +930,14 @@
     </div>
 
     <!-- Topbar (farm selector + alerts) -->
-    <div class="topbar" style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px; background:white; border-bottom:1px solid #e6e6e6;">
-      <div style="display:flex; gap:12px; align-items:center;">
-        <div class="farm-selector" id="farmSelector">
-          <span class="material-symbols-outlined">agriculture</span>
-          <span id="farmName">Loading farm...</span>
-        </div>
+    <div class="topbar">
+      <div class="topbar-title-wrap">
+        <div id="pageTitle" class="topbar-title">Loading farm...</div>
+        <div id="pageFarmName" class="topbar-farm-name" style="display:none;"></div>
       </div>
-      <div style="display:flex; gap:8px; align-items:center;">
-        <button id="train_btn" class="btn btn-primary" onclick="startTraining()" title="Start training">
-          <span class="material-symbols-outlined">psychology</span>
-          <span class="btn-text">Start Training</span>
-        </button>
-        <button id="topAlertsBtn" class="btn btn-outline" onclick="navigateTo('alerts', this)" title="Open alerts">
-          <span class="material-symbols-outlined">notifications</span>
-          <span id="alertsBadge" class="nav-badge" style="display:none; margin-left:8px;">!</span>
-        </button>
-        <button id="settingsQuick" class="settings-button" onclick="navigateTo('settings', this)">
-          <span class="material-symbols-outlined">settings</span>
+      <div class="topbar-actions">
+        <button id="settingsQuick" class="settings-button icon-only" onclick="navigateTo('settings', this)" aria-label="Settings">
+          <span class="emoji-icon">⚙</span>
         </button>
       </div>
     </div>
@@ -812,15 +946,6 @@
     <div class="main-content">
       <div id="alert-notification" class="alert-notification"></div>
       <div id="data-staleness-notification" class="data-staleness-notification"></div>
-
-      <div class="page-switcher">
-        <button class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard', this)">
-          Dashboard
-        </button>
-        <button class="nav-item" data-page="phenology" onclick="navigateTo('phenology', this)">
-          Crop Growth
-        </button>
-      </div>
 
       <div id="page-dashboard" class="page active">
 
@@ -851,7 +976,7 @@
               <span class="material-symbols-outlined">water_drop</span>
               Irrigation Advice
             </div>
-            <div class="alert-pill ok">OK</div>
+            <div class="alert-pill" hidden></div>
           </div>
           <div class="advice-grid">
             <div class="advice-item">
@@ -878,37 +1003,35 @@
         </div>
 
         <div class="card pump-card">
-          <div class="metric-header">
-            <span class="material-symbols-outlined">water_pump</span>
-            <span class="metric-title">Water Pump</span>
-            <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationTooltip">help
-               <span class="tooltiptext" id="irrigationTooltip"></span>
-            </span>
-          </div>
-
-          <div class="pump-row">
-            <label class="pump-label">Irrigation amount:</label>
-            <div class="amount-input-group">
-              <button type="button" class="amount-btn decrease" onclick="adjustAmount(-0.1)">
-                <span class="material-symbols-outlined">remove</span>
-              </button>
-              <input id="irrigation_value_form" type="number" min="0.01" max="1000" value="1" class="amount-input" />
-              <button type="button" class="amount-btn increase" onclick="adjustAmount(0.1)">
-                <span class="material-symbols-outlined">add</span>
-              </button>
-              <span class="amount-unit">m³</span>
+            <div class="metric-header pump-header">
+              <div class="pump-title">Water Pump</div>
+              <div class="pump-help tooltip" data-tooltip-id="irrigationTooltip" aria-hidden="true">
+                <span class="tooltiptext" id="irrigationTooltip"></span>
+              </div>
             </div>
-          </div>
 
-          <div class="pump-row">
-            <div class="pump-status-section">
-              <div id="pump-status-off" class="status-off">OFF</div>
-              <div id="pump-status-on" class="status-on">ON</div>
+            <div class="pump-row amount-row">
+              <label class="pump-label">Irrigation Amount</label>
+              <div class="amount-input-group">
+                <button type="button" class="amount-btn decrease" onclick="adjustAmount(-1)">
+                  <span class="amount-symbol">−</span>
+                </button>
+                <input id="irrigation_value_form" type="number" min="0.01" max="1000" value="1" class="amount-input" />
+                <button type="button" class="amount-btn increase" onclick="adjustAmount(1)">
+                  <span class="amount-symbol">+</span>
+                </button>
+              </div>
             </div>
-            <button id="schedule_irrigation" class="schedule-btn" onclick="irrigateManually()">
-              Schedule Irrigation
-            </button>
-          </div>
+
+            <div class="pump-row status-row">
+              <div class="pump-status-section">
+                <div id="pump-status-on" class="status-indicator on">ON</div>
+                <div id="pump-status-off" class="status-indicator off">OFF</div>
+              </div>
+              <button id="schedule_irrigation" class="schedule-btn" onclick="irrigateManually()">
+                Schedule Irrigation
+              </button>
+            </div>
         </div>
       </div>
 
@@ -927,23 +1050,11 @@
         <p id="forecast_horizons_txt"></p>
       </div>
 
-      <div class="card growth-stage">
-        <div class="growth-title">Growth Stage</div>
-        <div class="growth-timeline">
-          <div class="growth-node active" data-stage="emergence">Emergence</div>
-          <div class="growth-node" data-stage="vegetative">Vegetative</div>
-          <div class="growth-node" data-stage="flowering">Flowering</div>
-          <div class="growth-node" data-stage="grain fill">Grain Fill</div>
-          <div class="growth-node" data-stage="maturity">Maturity</div>
-        </div>
-      </div>
-      </div>
-
       <div id="page-phenology" class="page">
         <div class="card phenology-hero">
           <div class="phenology-header">
             <div>
-              <h2>Crop Growth</h2>
+              <h2>Growth Stage Timeline</h2>
               <p class="phenology-subtitle">Stage tracking, crop coefficients, and threshold context.</p>
             </div>
             <div class="phenology-meta">
@@ -963,28 +1074,41 @@
           </div>
         </div>
 
+      <div class="page-switcher">
+        <button class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard', this)">
+          <span class="emoji-icon">▦</span>
+          <span>Dashboard</span>
+        </button>
+        <button class="nav-item" data-page="phenology" onclick="navigateTo('phenology', this)">
+          <span class="emoji-icon">🌿</span>
+          <span>Phenology</span>
+        </button>
+        <button class="nav-item" data-page="settings" onclick="navigateTo('settings', this)">
+          <span class="emoji-icon">⚙</span>
+          <span>Settings</span>
+        </button>
+      </div>
+
         <div class="phenology-metrics">
           <div class="phenology-metric">
-            <div class="metric-label">Current stage</div>
-            <div class="metric-value" id="pheno-stage">--</div>
+            <div class="metric-label">Threshold</div>
+            <div class="metric-value"><span id="pheno-threshold-value">--</span> <span class="metric-unit">cbar</span></div>
+            <div class="metric-subtext" id="pheno-threshold-source">Static threshold</div>
           </div>
           <div class="phenology-metric">
-            <div class="metric-label">GDD (cumulative)</div>
-            <div class="metric-value" id="pheno-gdd">--</div>
-          </div>
-          <div class="phenology-metric">
-            <div class="metric-label">Crop coefficient (Kc)</div>
+            <div class="metric-label">Kc today</div>
             <div class="metric-value" id="pheno-kc">--</div>
+            <div class="metric-subtext" id="pheno-stage">--</div>
           </div>
           <div class="phenology-metric">
-            <div class="metric-label">Stress threshold</div>
-            <div class="metric-value">
-              <span id="pheno-threshold-value">--</span>
-              <span class="metric-unit">cbar</span>
-            </div>
-            <div class="metric-subtext">
-              <span id="pheno-threshold-source" class="threshold-badge static">Static threshold</span>
-            </div>
+            <div class="metric-label">ETc today</div>
+            <div class="metric-value" id="pheno-etc">--</div>
+            <div class="metric-subtext" id="pheno-etc-subtext">Crop water need</div>
+          </div>
+          <div class="phenology-metric">
+            <div class="metric-label">GDD today</div>
+            <div class="metric-value" id="pheno-gdd">--</div>
+            <div class="metric-subtext">Cumulative heat units</div>
           </div>
         </div>
 
@@ -1022,6 +1146,21 @@
             </table>
           </div>
         </div>
+      </div>
+
+      <div class="page-switcher">
+        <button class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard', this)">
+          <span class="emoji-icon">▦</span>
+          <span>Dashboard</span>
+        </button>
+        <button class="nav-item" data-page="phenology" onclick="navigateTo('phenology', this)">
+          <span class="emoji-icon">🌿</span>
+          <span>Phenology</span>
+        </button>
+        <button class="nav-item" data-page="settings" onclick="navigateTo('settings', this)">
+          <span class="emoji-icon">⚙</span>
+          <span>Settings</span>
+        </button>
       </div>
     </div>
   </body>

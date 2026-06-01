@@ -9,11 +9,7 @@ Responsibilities:
   3. Provide a stale-prediction fallback.
   4. Expose the two entry points the threads call.
 
-NOTE: This file was partially ported from a separate farm-pipeline project
-that uses train_farm_models.py, build_farm_datasets.py, and manifest-based
-model loading. None of those are used in this project. create_model.py is
-the ML backend here.
-"""
+
 
 import logging
 from typing import Tuple
@@ -41,6 +37,9 @@ def _apply_dynamic_threshold(plot) -> None:
         return
     try:
         from actuation import compute_runtime_dynamic_threshold
+
+        if not hasattr(plot, 'threshold_static') or plot.threshold_static is None:
+            plot.threshold_static = getattr(plot, 'threshold', None)
 
         dyn = compute_runtime_dynamic_threshold(plot)
         if dyn and dyn != plot.threshold:
@@ -133,7 +132,7 @@ def _run_full_training(plot) -> Tuple[float, str, pd.DataFrame]:
 
 def _run_prediction_only(plot) -> Tuple[float, str, pd.DataFrame]:
     """
-    Prediction-only cycle (no retraining).
+    Prediction-only cycle(no retraining).
     Updates the dynamic threshold, then delegates to
     create_model.predict_with_updated_data().
     """
@@ -181,7 +180,7 @@ def expert_predict_with_updated_data(plot) -> Tuple[float, str, pd.DataFrame]:
     """
     Hybrid prediction cycle called by prediction_thread.PredictionThread.run().
 
-    Triggers a full retrain every train_period_days (same schedule as before).
+    Triggers a full retrain every train_period_days(same schedule as before).
     Between retrains uses the lighter predict_with_updated_data() path which
     re-fetches latest sensor data and runs the already-trained model.
     """

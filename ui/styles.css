@@ -65,25 +65,41 @@ body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #
 }
 
 .page-switcher {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+  margin-bottom: 0;
 }
 
 .page-switcher .nav-item {
   background: var(--white);
-  border: 1px solid var(--gray-200);
-  border-radius: 999px;
-  padding: 8px 14px;
-  font-size: 0.82rem;
-  color: var(--gray-600);
+  border: 1px solid #d9e1ea;
+  border-radius: 16px;
+  padding: 12px 14px;
+  font-size: 0.92rem;
+  color: var(--gray-700);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .page-switcher .nav-item.active {
-  background: var(--green-50);
-  color: var(--green-800);
-  border-color: var(--green-100);
+  background: #356c2c;
+  color: #ffffff;
+  border-color: #356c2c;
+}
+
+.page-switcher .nav-item .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.page-switcher .nav-item .emoji-icon {
+  font-size: 16px;
+  line-height: 1;
 }
 
 .summary-grid {
@@ -515,6 +531,12 @@ body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #
   font-size: 18px;
 }
 
+/* Icon-only buttons for compact topbar */
+.topbar-actions .icon-only { padding:6px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; }
+.topbar-actions .icon-only .emoji-icon { font-size:18px; line-height:1; }
+.topbar-actions .icon-only .material-symbols-outlined { font-size:20px; line-height:1; }
+.topbar-actions #train_btn { display:none; }
+
 .topbar .btn-primary {
   background: var(--green-800);
   color: white;
@@ -929,14 +951,6 @@ body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #
   background: #dee2e6;
 }
 
-.schedule-button::after {
-  content: ">";
-  font-size: 12px;
-  font-weight: bold;
-  color: #6c757d;
-  margin-left: auto;
-}
-
 /* Remove the material icon from the button in HTML */
 .schedule-btn .material-symbols-outlined {
   display: none;
@@ -1118,6 +1132,47 @@ body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #
   position: relative;
 }
 
+/* Make generic .tooltip render as a compact help icon (avoid literal 'help' text showing)
+   Uses a small question mark circle as a reliable fallback when icon fonts fail. */
+.tooltip { font-size: 0; cursor: help; display:inline-flex; align-items:center; }
+.tooltip.has-tooltip::before { content: '?'; font-size: 12px; color: var(--gray-600); display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:#f1f5f9; border:1px solid var(--gray-200); margin-left:6px; }
+.tooltip .tooltiptext { font-size: 12px; }
+
+/* Pump card header tweaks */
+.pump-card .pump-header { display:flex; align-items:center; gap:8px; justify-content:space-between; }
+.pump-card .pump-title { font-weight:800; font-size:1rem; text-transform:capitalize; }
+.pump-card .pump-help { margin-left:12px; }
+
+/* Amount controls */
+.pump-card .amount-row { display:flex; align-items:center; gap:12px; justify-content:space-between; }
+.pump-card .amount-input-group { display:flex; align-items:center; gap:8px; }
+.pump-card { padding:18px; }
+.pump-card .amount-btn { width:40px; height:40px; border-radius:20px; background:#ffffff; border:1px solid rgba(15,23,42,0.06); display:inline-flex; align-items:center; justify-content:center; font-size:18px; cursor:pointer; box-shadow: 0 1px 2px rgba(16,24,40,0.04); }
+.pump-card .amount-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(16,24,40,0.08); }
+.pump-card .amount-input { width:64px; height:44px; border-radius:22px; text-align:center; font-weight:800; border:1px solid rgba(15,23,42,0.06); font-size:18px; }
+.pump-card .amount-symbol { font-size:20px; line-height:1; }
+
+/* Status indicators inline */
+.pump-card .status-row { display:flex; align-items:center; gap:12px; justify-content:space-between; }
+.pump-card .pump-status-section { display:flex; gap:10px; align-items:center; }
+.pump-card .status-indicator { padding:6px 12px; border-radius:8px; font-weight:800; font-size:0.9rem; min-width:56px; text-align:center; }
+.pump-card .status-indicator.on { color:#0f5132; background: rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.18); }
+.pump-card .status-indicator.off { color:#6b1220; background: rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.12); }
+
+/* Schedule button styling tuned for pump card */
+.pump-card .schedule-btn { background: linear-gradient(180deg,#10b981,#059669); color:white; border:none; padding:10px 14px; border-radius:10px; font-weight:700; box-shadow: 0 6px 18px rgba(16,185,129,0.12); }
+.pump-card .schedule-btn:disabled { background: #e6e6e6; color:#9aa0a6; box-shadow:none; }
+
+/* Small responsive tweak so the pump card stacks cleanly */
+@media (max-width:640px) {
+  .pump-card .amount-input { width:56px; height:40px; }
+  .pump-card { padding:14px; }
+}
+
+/* Hide help by default unless tooltip text is populated (handled by DOM script) */
+.pump-card .pump-help { display:none; }
+.pump-card .pump-help.has-tooltip { display:inline-flex; }
+
 .chart-title-section .tooltiptext {
   visibility: hidden;
   width: 200px;
@@ -1255,6 +1310,304 @@ body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #
 
   .metric-card.compact .metric-unit {
     font-size: 14px;
+  }
+}
+
+/* Mobile app-shell override for dashboard and phenology views */
+body {
+  background: #e6e6e6;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #dddddd;
+  position: sticky;
+  top: 0;
+  z-index: 60;
+}
+
+.topbar-title-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.topbar-title {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-farm-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+#topAlertsBtn .material-symbols-outlined,
+#settingsQuick .material-symbols-outlined {
+  font-size: 0;
+  line-height: 1;
+  width: 1em;
+  height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#topAlertsBtn .material-symbols-outlined::before {
+  content: "\1F514";
+  font-size: 18px;
+}
+
+#settingsQuick .material-symbols-outlined::before {
+  content: "\2699";
+  font-size: 18px;
+}
+
+#train_btn .material-symbols-outlined {
+  font-size: 0;
+  line-height: 1;
+  width: 1em;
+  height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#train_btn .material-symbols-outlined::before {
+  content: "\1F9E0";
+  font-size: 18px;
+}
+
+.main-content {
+  padding: 0 0 112px;
+}
+
+.page-switcher {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  width: min(calc(100% - 24px), 480px);
+  padding: 0;
+  margin: 0;
+  z-index: 60;
+}
+
+.page {
+  padding: 12px 16px 0;
+}
+
+.page-switcher .nav-item {
+  border-radius: 999px;
+  padding: 9px 18px;
+  box-shadow: var(--shadow-sm);
+}
+
+.summary-grid {
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.summary-card {
+  min-height: 118px;
+  padding: 14px;
+  border-radius: 14px;
+}
+
+.summary-title {
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  color: #4b5563;
+}
+
+.summary-value {
+  font-size: 1.45rem;
+}
+
+.dashboard-row {
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.irrigation-advice {
+  grid-column: 1 / -1;
+}
+
+.card,
+.chart-card {
+  border-radius: 14px;
+}
+
+.chart-card {
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.chart-area {
+  min-height: 250px;
+}
+
+.growth-stage {
+  margin-top: 0;
+}
+
+.growth-timeline {
+  gap: 6px;
+}
+
+.growth-node {
+  padding: 10px 4px;
+  font-size: 0.72rem;
+}
+
+.phenology-hero {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0 0 10px;
+  margin-bottom: 8px;
+}
+
+.phenology-header {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.phenology-hero h2 {
+  font-size: 1.05rem;
+}
+
+.phenology-subtitle {
+  font-size: 0.82rem;
+}
+
+.phenology-meta {
+  gap: 12px;
+}
+
+.phenology-meta .meta-item span {
+  font-size: 0.62rem;
+}
+
+.phenology-meta .meta-item strong {
+  font-size: 0.82rem;
+}
+
+.phenology-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.phenology-metric {
+  min-height: 96px;
+  padding: 12px 14px;
+  border: none;
+  box-shadow: none;
+  background: #ffffff;
+}
+
+.phenology-metric .metric-label {
+  font-size: 0.78rem;
+}
+
+.phenology-metric .metric-value {
+  font-size: 1.12rem;
+}
+
+.phenology-metric .metric-subtext {
+  font-size: 0.72rem;
+}
+
+.phenology-timeline {
+  margin-bottom: 12px;
+}
+
+.phenology-table .table-header {
+  margin-bottom: 10px;
+}
+
+.phenology-table .table-header h3 {
+  font-size: 0.95rem;
+}
+
+.phenology-table .table-subtitle {
+  font-size: 0.8rem;
+}
+
+.phenology-table table {
+  min-width: 100%;
+}
+
+.phenology-table th,
+.phenology-table td {
+  padding: 8px 10px;
+  font-size: 0.75rem;
+}
+
+body[data-page="phenology"] .topbar-title {
+  color: #111827;
+}
+
+body[data-page="dashboard"] .topbar-farm-name {
+  display: none;
+}
+
+body[data-page="dashboard"] .topbar-title {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 680px) {
+  .tab-container {
+    display: none;
+  }
+
+  .topbar {
+    padding: 12px 14px;
+  }
+
+  .topbar .btn-primary {
+    display: none;
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dashboard-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .weather-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .growth-timeline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1590,14 +1943,6 @@ body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #
 .schedule-btn:active {
   transform: scale(0.98);
   background: #dee2e6;
-}
-
-.schedule-btn::after {
-  content: ">";
-  font-size: 12px;
-  font-weight: bold;
-  color: #6c757d;
-  margin-left: auto;
 }
 
 /* Remove the material icon from the button in HTML */

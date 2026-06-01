@@ -2,6 +2,7 @@
 
 
 #!/usr/bin/python
+import requests
 from crops import get_crop_params
 import training_thread
 from utils import NetworkUtils, TimeUtils
@@ -312,18 +313,31 @@ usock.routerPOST("/api/setPlot", setPlot)
 def getPlots(url, body):
     # Call function in plot manager
     plots = plot_manager.getPlots()
+    owner_filter = parse_qs(urlparse(url).query).get(
+        'owner', [''])[0].strip().lower()
 
     # Create array with names of tabs to return to frontend
     tab_name_array = []
     # for plot in plots:
     for i in range(1, len(plots)+1, 1):
         try:
+            owner_name = getattr(plots[i], 'owner', '') or ''
+            if owner_filter and owner_name.strip().lower() != owner_filter:
+                continue
             tab_name_array.append(plots[i].user_given_name)
         except KeyError:
             continue
 
+    # Include the currently selected plot for the UI to avoid an extra request
+    try:
+        current_plot_number = getattr(
+            plot_manager.getCurrentPlot(), 'tab_number', None)
+    except Exception:
+        current_plot_number = None
+
     response = {
         "tabnames": tab_name_array,
+        "currentPlot": current_plot_number,
         "status_code": 200
     }
 
@@ -436,6 +450,11 @@ def setConfig(url, body):
     if not currentPlot.user_given_name:
         errors["name"] = "Farm name is required."
 
+    currentPlot.owner = _get_first(
+        'owner', getattr(currentPlot, 'owner', '')).strip()
+    if not currentPlot.owner:
+        errors["owner"] = "Farm owner is required."
+
     currentPlot.zone_name = _get_first(
         'zone_name', currentPlot.user_given_name)
     if not currentPlot.zone_name:
@@ -457,8 +476,10 @@ def setConfig(url, body):
         errors["gps"] = "GPS must be 'lat, lon'."
 
     currentPlot.slope = _parse_float(_get_first('slope'), "slope", errors)
-    currentPlot.threshold = _parse_float(
+    threshold_value = _parse_float(
         _get_first('thres'), "threshold", errors)
+    currentPlot.threshold_static = threshold_value
+    currentPlot.threshold = threshold_value
     currentPlot.irrigation_amount = _parse_float(
         _get_first('amount'), "irrigation_amount", errors, 0.0)
     plot_area_raw = parsed_data.get(
@@ -605,6 +626,7 @@ def setConfig(url, body):
         return 400, bytes(json.dumps(response), "utf8"), []
 
     data = {
+        "Owner": currentPlot.owner,
         "DeviceAndSensorIdsMoisture": currentPlot.device_and_sensor_ids_moisture,
         "DeviceAndSensorIdsTemp": currentPlot.device_and_sensor_ids_temp,
         "DeviceAndSensorIdsFlow": currentPlot.device_and_sensor_ids_flow,
@@ -620,7 +642,7 @@ def setConfig(url, body):
             "lattitude": gps_lat,
         },
         "Slope": currentPlot.slope,
-        "Threshold": currentPlot.threshold,
+        "Threshold": getattr(currentPlot, 'threshold_static', currentPlot.threshold),
         "Irrigation_amount": currentPlot.irrigation_amount,
         "Plot_area_m2": currentPlot.plot_area_m2,
         "Irrigation_type": getattr(currentPlot, 'irrigation_type', 'unknown'),
@@ -638,6 +660,28 @@ def setConfig(url, body):
         "Planting_date": getattr(currentPlot, 'planting_date', ''),
         "Initial_gdd": float(getattr(currentPlot, 'initial_gdd', 0.0)),
         "Use_dynamic_threshold": getattr(currentPlot, 'use_dynamic_threshold', False),
+        "Farm_data_bundle": {
+            "owner": currentPlot.owner,
+            "crop": {
+                "type": getattr(currentPlot, 'crop_type', 'generic'),
+                "planting_date": getattr(currentPlot, 'planting_date', ''),
+                "initial_gdd": float(getattr(currentPlot, 'initial_gdd', 0.0)),
+            },
+            "soil": {
+                "type": currentPlot.soil_type,
+                "texture_class": getattr(currentPlot, 'soil_texture_class', None),
+                "threshold_mode": "dynamic" if getattr(currentPlot, 'use_dynamic_threshold', False) else "static",
+                "static_threshold": getattr(currentPlot, 'threshold_static', currentPlot.threshold),
+            },
+            "sensors": {
+                "moisture": currentPlot.device_and_sensor_ids_moisture,
+                "temperature": currentPlot.device_and_sensor_ids_temp,
+                "flow": currentPlot.device_and_sensor_ids_flow,
+            },
+            "weather_snapshot": getattr(currentPlot, 'weather_snapshot', None),
+            "satellite_snapshot": getattr(currentPlot, 'satellite_snapshot', None),
+            "model_snapshot": getattr(currentPlot, 'model_snapshot', None),
+        },
         "Pending_sensors": pending_sensors,
         "Pending_sensors_reason": (
             "Missing moisture or temperature sensors"
@@ -720,6 +764,7 @@ def getConfigsFromAllFiles():
 
             # Get data from forms
             plots[i].user_given_name = data.get('Name', [])
+            plots[i].owner = data.get('Owner', getattr(plots[i], 'owner', ''))
             plots[i].zone_name = data.get(
                 'Zone_name', plots[i].user_given_name)
             plots[i].sensor_kind = data.get('Sensor_kind', [])
@@ -736,6 +781,8 @@ def getConfigsFromAllFiles():
                 plots[i].gps_info = gps_info
             plots[i].slope = float(data.get('Slope', []))
             plots[i].threshold = float(data.get('Threshold', []))
+            plots[i].threshold_static = float(
+                data.get('Threshold', plots[i].threshold))
             plots[i].irrigation_amount = float(
                 data.get('Irrigation_amount', []))
             plots[i].plot_area_m2 = float(data.get('Plot_area_m2', 0))
@@ -767,6 +814,7 @@ def getConfigsFromAllFiles():
                 plots[i].initial_gdd = 0.0
             plots[i].use_dynamic_threshold = data.get(
                 'Use_dynamic_threshold', False)
+            plots[i].farm_data_bundle = data.get('Farm_data_bundle', None)
 
             # Sensor kind
             if plots[i].sensor_kind in ("tension", "both"):
@@ -782,6 +830,15 @@ def getConfigsFromAllFiles():
 def returnConfig(url, body):
     try:
         currentPlot = plot_manager.getCurrentPlot()
+        owner_filter = parse_qs(urlparse(url).query).get(
+            'owner', [''])[0].strip().lower()
+        current_owner = getattr(currentPlot, 'owner', '') or ''
+        if owner_filter and current_owner.strip().lower() != owner_filter:
+            response = {
+                "error": "Farm not available for the current owner.",
+                "status_code": 403,
+            }
+            return 403, bytes(json.dumps(response), "utf8"), []
         # Call the getConfigFromFile function to load variables
         if currentPlot.getConfigFromFile():
 
@@ -811,6 +868,7 @@ def returnConfig(url, body):
 
             # Construct the response data
             response_data = {
+                "Owner": getattr(currentPlot, 'owner', ''),
                 "DeviceAndSensorIdsMoisture": currentPlot.device_and_sensor_ids_moisture,
                 "DeviceAndSensorIdsTemp": currentPlot.device_and_sensor_ids_temp,
                 "DeviceAndSensorIdsFlow": currentPlot.device_and_sensor_ids_flow,
@@ -819,7 +877,7 @@ def returnConfig(url, body):
                 "Zone_name": getattr(currentPlot, 'zone_name', currentPlot.user_given_name),
                 "Gps_info": currentPlot.gps_info,
                 "Slope": currentPlot.slope,
-                "Threshold": currentPlot.threshold,
+                "Threshold": getattr(currentPlot, 'threshold_static', currentPlot.threshold),
                 "Irrigation_amount": currentPlot.irrigation_amount,
                 "Plot_area_m2": currentPlot.plot_area_m2,
                 "Irrigation_type": getattr(currentPlot, 'irrigation_type', 'unknown'),
@@ -836,7 +894,8 @@ def returnConfig(url, body):
                 "Crop_type": getattr(currentPlot, 'crop_type', 'generic'),
                 "Planting_date": getattr(currentPlot, 'planting_date', ''),
                 "Initial_gdd": float(getattr(currentPlot, 'initial_gdd', 0.0)),
-                "Use_dynamic_threshold": getattr(currentPlot, 'use_dynamic_threshold', False)
+                "Use_dynamic_threshold": getattr(currentPlot, 'use_dynamic_threshold', False),
+                "Farm_data_bundle": getattr(currentPlot, 'farm_data_bundle', None)
             }
 
             # If all is good, return a 200 status code and the data
@@ -1109,6 +1168,7 @@ def getValuesForDashboard(url, body):
     if not currentPlot.device_and_sensor_ids_temp or not currentPlot.device_and_sensor_ids_moisture:
         update_sensor_registry_status(currentPlot, online=False)
         response_data = {"available": False}
+        currentPlot.dashboard_snapshot = response_data
         status_code = 404
 
         return status_code, bytes(json.dumps(response_data), "utf8"), []
@@ -1167,6 +1227,14 @@ def getValuesForDashboard(url, body):
                 "unknown": len(unknown_ids),
             },
         }
+        # Cache dashboard and sensor snapshots on the Plot object so they are
+        # available to `setConfig()` and other endpoints.
+        currentPlot.dashboard_snapshot = dashboard_data
+        currentPlot.sensor_snapshot = {
+            "temperature_readings": temp_readings,
+            "moisture_readings": moisture_readings,
+            "dashboard": dashboard_data,
+        }
     else:
         moisture_average = _numeric_average(moisture_readings.values())
         if _is_tension_kind(currentPlot.sensor_kind):
@@ -1191,6 +1259,13 @@ def getValuesForDashboard(url, body):
                 "vwc_average": moisture_average,
                 "sensor_kind": currentPlot.sensor_kind,
             }
+
+        currentPlot.dashboard_snapshot = dashboard_data
+        currentPlot.sensor_snapshot = {
+            "temperature_readings": temp_readings,
+            "moisture_readings": moisture_readings,
+            "dashboard": dashboard_data,
+        }
 
     reading_map = {"moisture": {}, "temperature": {}, "flow": {}}
     for sensor_id, value in moisture_readings.items():
@@ -1231,6 +1306,7 @@ def getHistoricalChartData(url, body):
         # Make sure that the data is not empty
         if not f_data_moisture or not f_data_temp:
             response_data = {"available": False}
+            currentPlot.sensor_snapshot = response_data
             status_code = 404
 
             return status_code, bytes(json.dumps(response_data), "utf8"), []
@@ -1266,6 +1342,7 @@ def getHistoricalChartData(url, body):
 
         if not data_moisture or not data_temp:
             response_data = {"available": False}
+            currentPlot.sensor_snapshot = response_data
             status_code = 404
 
             return status_code, bytes(json.dumps(response_data), "utf8"), []
@@ -1278,6 +1355,8 @@ def getHistoricalChartData(url, body):
         "moistureSeries": f_data_moisture,
         "unit": currentPlot.sensor_unit
     }
+
+    currentPlot.sensor_snapshot = chart_data
 
     return 200, bytes(json.dumps(chart_data), "utf8"), []
 
@@ -1414,8 +1493,39 @@ def getPredictionChartData(url, body):
         "saturation": currentPlot.saturation,
         "threshold_cbar": currentPlot.threshold,
         "kind": "tension" if is_tension_kind else currentPlot.sensor_kind,
-        "unit": currentPlot.sensor_unit
+        "unit": currentPlot.sensor_unit,
+        "use_dynamic_threshold": bool(getattr(currentPlot, "use_dynamic_threshold", False)),
+        "threshold_mode": "dynamic" if getattr(currentPlot, "use_dynamic_threshold", False) else "static",
     }
+
+    static_threshold = getattr(
+        currentPlot, "threshold_static", currentPlot.threshold)
+    try:
+        static_threshold_value = float(static_threshold)
+    except (TypeError, ValueError):
+        static_threshold_value = None
+    if static_threshold_value is not None and np.isfinite(static_threshold_value):
+        chart_data["threshold_cbar_static"] = round(static_threshold_value, 1)
+    else:
+        chart_data["threshold_cbar_static"] = None
+
+    threshold_series_dynamic = []
+    if "dynamic_threshold" in data_pred.columns:
+        for value in data_pred["dynamic_threshold"].tolist():
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                threshold_series_dynamic.append(None)
+                continue
+            threshold_series_dynamic.append(
+                round(numeric_value, 1) if np.isfinite(numeric_value) else None)
+    chart_data["threshold_series_dynamic"] = threshold_series_dynamic
+    if chart_data["threshold_cbar_static"] is not None:
+        chart_data["threshold_series_static"] = [
+            chart_data["threshold_cbar_static"]
+        ] * len(data_pred.index)
+    else:
+        chart_data["threshold_series_static"] = []
 
     dynamic_threshold = None
     try:
@@ -1460,6 +1570,8 @@ def getPredictionChartData(url, body):
         f_data_moisture_vol = data_pred["smoothed_values_vol"].tolist()
         chart_data["moistureSeriesVol"] = f_data_moisture_vol
 
+    currentPlot.model_snapshot = chart_data
+
     return 200, bytes(json.dumps(chart_data), "utf8"), []
 
 
@@ -1497,11 +1609,13 @@ def getWeatherForecast(url, body):
         }), "utf8"), []
 
     if frame is None or frame.empty or "Rain" not in frame.columns:
-        return 200, bytes(json.dumps({
+        payload = {
             "available": False,
             "reason": "no_data",
             "days": [],
-        }), "utf8"), []
+        }
+        currentPlot.weather_snapshot = payload
+        return 200, bytes(json.dumps(payload), "utf8"), []
 
     try:
         frame.index = pd.to_datetime(frame.index)
@@ -1522,11 +1636,13 @@ def getWeatherForecast(url, body):
             "icon": _weather_icon_from_rain(float(rain)),
         })
 
-    return 200, bytes(json.dumps({
+    payload = {
         "available": True,
         "days": days,
         "unit": "mm",
-    }), "utf8"), []
+    }
+    currentPlot.weather_snapshot = payload
+    return 200, bytes(json.dumps(payload), "utf8"), []
 
 
 usock.routerGET("/api/getWeatherForecast", getWeatherForecast)
@@ -1608,6 +1724,8 @@ def getPhenologySummary(url, body):
         },
         "stage_rows": stage_rows,
     }
+
+    currentPlot.phenology_snapshot = payload
 
     return 200, bytes(json.dumps(payload), "utf8"), []
 
@@ -1809,6 +1927,30 @@ def getSensorRegistry(url, body):
 
 
 usock.routerGET("/api/getSensorRegistry", getSensorRegistry)
+
+
+def getDevices(url, body):
+    """Proxy endpoint to fetch `devices` from the configured WaziGate API.
+    This lets the UI request `../api/devices` without needing direct access
+    to the external gateway URL or handling tokens in the client.
+    """
+    api_base = NetworkUtils.ApiUrl or ""
+    if not api_base:
+        return 400, bytes(json.dumps({"error": "ApiUrl not configured"}), "utf8"), []
+
+    devices_url = api_base + "devices"
+    headers = {}
+    if getattr(NetworkUtils, 'Token', None):
+        headers['Authorization'] = f"Bearer {NetworkUtils.Token}"
+
+    try:
+        resp = requests.get(devices_url, headers=headers, timeout=10)
+        return resp.status_code, bytes(resp.text, "utf8"), []
+    except Exception as exc:
+        return 500, bytes(json.dumps({"error": str(exc)}), "utf8"), []
+
+
+usock.routerGET("/api/devices", getDevices)
 
 # Frontend polls this to reload page when training is ready => only active for first round of training TODO: different plots
 
