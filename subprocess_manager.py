@@ -504,6 +504,10 @@ import os, sys, json, gc
 import numpy as np
 import tensorflow as tf
 
+# Reduce TF overhead
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 # Add current working directory to path for imports
 sys.path.insert(0, os.getcwd())
 

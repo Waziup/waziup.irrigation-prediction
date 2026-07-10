@@ -223,7 +223,7 @@ Thats all, if you have those items, you will be able to deploy the devices.
 It is just a brief overview, to obtain more in detail information, consult the [Watermark 200SS installation guide](https://www.irrometer.com/pdf/701.pdf) (you can also find this guide in the provided box).
 
 #### Sensor Hydration Before Installation (RECOMMENDED)
-1. Wet the sensor the first time by submerging less than halfway for 30 minutes in the morning.k
+1. Wet the sensor the first time by submerging less than halfway for 30 minutes in the morning.
 2. Fully submerging the sensor will trap air inside it and will require drying the sensor completely and restarting this procedure. 
 3. Submerging it only halfway lets air escape out of the pores above the water. It allows the capillary action to pull water into the inner pores. It is the fastest way to get the sensor prepared for installation.
 4. Let it dry until the evening.
