@@ -30,8 +30,8 @@ class TrainingThread(threading.Thread):
 
     def calculate_retrain_interval(self, current_data_days):
         base_interval = 1       # Initial daily training
-        growth_factor = 0.25    # Adjusted from 0.15 to 0.25
-        max_interval = 30       # Maximum interval of 30 days
+        growth_factor = 0.7     # Adjusted from 0.15 to 2 for more aggressive growth
+        max_interval = 7        # Maximum interval of 7 days
         
         # Modified logarithmic growth curve
         interval = base_interval * math.exp(growth_factor * math.log1p(current_data_days/30))
@@ -94,7 +94,7 @@ class TrainingThread(threading.Thread):
                 if (
                     self.currentPlot.prediction_thread is None 
                     and not create_model.SkipDataPreprocessing
-                    and not create_model.SkipTraning
+                    and not create_model.SkipTraining
                 ):
                     prediction_thread.start(self.currentPlot)
                 else:

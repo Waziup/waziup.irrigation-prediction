@@ -40,7 +40,7 @@ class Plot:
         self.start_date = ""                                # Start date: use sensor and API data from this date
         self.period = 0                                     # Time period to include into the model
         self.train_period_days = 1                          # Frequencies in days inbeween train cycles
-        self.predict_period_hours = 6                       # Frequencies in hours inbeween predict cycles
+        self.predict_period_hours = 3                       # Frequencies in hours inbeween predict cycles
         self.soil_type = ""                                 # Soil type for current field                           
         self.permanent_wilting_point = 40                   # Soil is to dry, plant cannot access any water with its roots
         self.field_capacity_upper = 30                      # Upper bound of soil is getting to dry

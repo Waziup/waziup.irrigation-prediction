@@ -13,11 +13,16 @@ import gc
 import json
 import logging
 import os
+import pickle
+import shutil
 from dateutil import parser
 import subprocess
+#import joblib
+import joblib
 import pycaret 
 #from pycaret.time_series import *
 from pycaret.regression import *
+from pycaret.internal.pipeline import Pipeline
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,6 +31,7 @@ import sys
 import pytz
 import traceback
 import psutil
+from pathlib import Path
 
 # new imports nn
 import tensorflow
@@ -34,13 +40,12 @@ from tensorflow.keras.layers import Dense, Conv1D, MaxPooling1D, Flatten, Dense,
 from tensorflow.keras.optimizers import Adam, SGD, RMSprop, get as get_optimizer
 from tensorflow.keras.callbacks import Callback
 from tensorflow.keras.backend import floatx
-from keras.callbacks import Callback
 from tensorflow.keras.callbacks import EarlyStopping
 import tensorflow.keras.models as keras_models
 from scikeras.wrappers import KerasRegressor
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split, KFold
+from sklearn.model_selection import train_test_split, KFold, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import KNNImputer
 from scipy.interpolate import CubicSpline
@@ -50,11 +55,13 @@ from sklearn.linear_model import Ridge
 from keras_tuner import Hyperband, HyperParameters
 import time
 
-
 # local
 import main
 from utils import NetworkUtils, TimeUtils
 from tune_grids import PYCARET_REGRESSION_TUNE_GRIDS
+from subprocess_manager import run_tuning_and_ensemble_nn_with_subprocess, run_tuning_and_ensemble_with_subprocess, run_tuning_with_subprocess, run_ensemble_with_subprocess
+
+
 
 # Rolling mean window
 RollingMeanWindowData = 15
@@ -64,7 +71,12 @@ RollingMeanWindowGrouped = 5
 Sample_rate = 60
 
 # Forecast horizon TODO: add config or adjust automa !!!!
-Forcast_horizon = 5 #days
+Forecast_horizon = 5 #days
+
+# Number of resampled rows spanned by one forecast horizon (used as the CV gap below,
+# so cross-validation is scored on a true forecast-horizon-ahead split instead of the
+# next timestamp, which would be far easier to predict and overstate model quality)
+Forecast_horizon_periods = int(Forecast_horizon * 24 * 60 / Sample_rate)
 
 # Created features that are dropped later -> TODO: evaluate this!!!
 To_be_dropped = ['minute', 'Timestamp', 'gradient', 
@@ -72,6 +84,8 @@ To_be_dropped = ['minute', 'Timestamp', 'gradient',
                  'Winddirection', 'month', 'day_of_year', 
                  'date']
 
+# Pycaret regression setup config
+Config = {}
 
 # Mapping to identify models
 Model_mapping = {
@@ -109,9 +123,10 @@ Currently_active = False
 ## DEBUG -> is overwritten by .env
 # to skip data preprocessing and training, load data from file
 SkipDataPreprocessing = False       # if true, load dataset from static file
-SkipTraning = False                 # if true, load predictions from static file
+SkipTraining = False                 # if true, load predictions from static file
 # Load variables of training from file, that had been saved from former training/predictions to debug actuation part: DEBUG
 Perform_training = True             # kind of redundant, but automatically saves and loads former results of predictions
+Use_subprocess = True               # if true, parts of training is performed in subprocess, to prevent memory leaks and to ensure that resources are released after training
 
 # Wait time for resources to be released (recheck after busy in training or prediction for other plots)
 Resource_wait_time_seconds = 300    # seconds
@@ -134,12 +149,24 @@ class TimeLimitCallback(Callback):
             self.model.stop_training = True
             print(f"\nTraining stopped after {self.max_time_seconds} seconds") # will continue after epoch
 
-# Restrict memory usage, if more than 80% is used, stop training to prevent crashing of the device
+# Custom exception for memory limit reached
+class MemoryLimitReachedError(Exception):
+    """Custom exception to stop the entire tuning process."""
+    pass
+
+# Restrict memory usage, if more than 75% is used, stop training to prevent crashing of the device
 class MemoryLimitCallback(tensorflow.keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
-        if psutil.virtual_memory().percent > 80:
-            print("Memory limit reached, stopping training")
-            self.model.stop_training = True
+        if psutil.virtual_memory().percent > 99: #DEBUG was 75
+            print("!!! Memory limit reached (>75%). Terminating all tuning trials. !!!")
+            # Raising an error here breaks out of tuner.search() completely
+            raise MemoryLimitReachedError("System memory exhausted during tuning")
+
+class HardCleanupCallback(tensorflow.keras.callbacks.Callback):
+    def on_train_end(self, logs=None):
+        import gc
+        tensorflow.keras.backend.clear_session()
+        gc.collect()
 
 # Resample and interpolate
 def check_gaps(data):
@@ -478,7 +505,7 @@ def add_volumetric_col_to_df(df, col_name, plot):
 
 # Calculate a single soil tension value to VWC 
 def calc_volumetric_water_content_single_value(soil_tension_value, currentPlot):
-    # Check config beeing loaded, otherwise read it
+    # Check config being loaded, otherwise read it
     if not currentPlot.config:
         currentPlot.config = currentPlot.read_config() # this is just for the case of returning to index, after settings was created/changed
     # Iterate over the rows of the dataframe and calculate volumetric water content
@@ -492,13 +519,13 @@ def calc_volumetric_water_content_single_value(soil_tension_value, currentPlot):
 
 # This function will align values sensor values with weather data from API -> not used any more
 def align_retention_curve_with_api(data, data_weather_api, currentPlot):
-    # Check config beeing loaded, otherwise read it
+    # Check config being loaded, otherwise read it
     if not currentPlot.config:
         currentPlot.config = currentPlot.read_config() # this is just for the case of returning to index, after settings was created/changed
     soil_water_retention_tupel_list = [(float(dct['Soil tension']), float(dct['VWC'])) for dct in currentPlot.config['Soil_water_retention_curve']]
     # Sort the soil-water retention curve points by soil tension in ascending order => TODO: NOT EFFICIENT HERE, move out
     sorted_curve = sorted(soil_water_retention_tupel_list, key=lambda x: x[0])
-    # compare weatherdata from past against messured values more expressive:
+    # compare weatherdata from past against measured values more expressive:
     mean_recorded_sensor_values = data["rolling_mean_grouped_soil_vol"].mean()
     mean_open_meteo_past_vol = data_weather_api["Soil_moisture_0-7"].mean()
     factor = mean_open_meteo_past_vol / mean_recorded_sensor_values
@@ -715,7 +742,7 @@ def create_features(data, plot):
     # Calc gradient
     f = data.rolling_mean_grouped_soil
     data['gradient'] = np.gradient(f)
-    # Skip the pump state if there is a flow meter where the artificial irrigation amount is messured
+    # Skip the pump state if there is a flow meter where the artificial irrigation amount is measured
     if "DeviceAndSensorIdsFlow" in plot.config:
         data = include_irrigation_amount(data, plot)
     else:
@@ -760,15 +787,18 @@ def split_data_by_date(data, split_date):
            data[data['Time'] >  split_date].copy()
 
 # Split dataset into train and test set by ratio     
-def split_by_ratio(data, test_size_percent):
+def split_by_ratio(data):
     # Calculate the number of rows for the test set
-    test_size = int(len(data) * (test_size_percent / 100))
+    n = len(data)
 
-    # Split the DataFrame
-    train_set = data.iloc[:-test_size]
-    test_set = data.iloc[-test_size:]
+    train_end = int(n * 0.64) # hard coded, TODO: dynamically would be better
+    val_end   = int(n * 0.80)
 
-    return train_set, test_set
+    train_df = data.iloc[:train_end]
+    val_df   = data.iloc[train_end:val_end]
+    test_df  = data.iloc[val_end:]
+
+    return train_df, val_df, test_df
 
            
 # Delete the ones that are non consecutive
@@ -1062,7 +1092,7 @@ def create_and_compare_model_ts(cut_sub_dfs):
             cut_sub_dfs[i], 
             target = 'rolling_mean_grouped_soil', 
             enforce_exogenous = False, 
-            fold_strategy='sliding', 
+            fold_strategy='timeseries',
             fh = fh, 
             session_id = 123, 
             fold = 3,
@@ -1084,9 +1114,9 @@ def create_and_compare_model_ts(cut_sub_dfs):
             fold = 3, 
             sort = 'R2',
             verbose = Verbose_logging, 
-            #exclude=['lar_cds_dt','auto_arima','arima'],
-            include=['lr_cds_dt', 'br_cds_dt', 'ridge_cds_dt', 
-                     'huber_cds_dt', 'knn_cds_dt', 'catboost_cds_dt']
+            exclude=['lar_cds_dt','auto_arima','arima'],
+            #include=['lr_cds_dt', 'br_cds_dt', 'ridge_cds_dt', 
+            #        'huber_cds_dt', 'knn_cds_dt', 'catboost_cds_dt']
         ))
     
     with open('output.txt', 'a') as f:       
@@ -1104,6 +1134,8 @@ def custom_exception_hook(exctype, value, traceback):
 
 # Create and compare models
 def create_and_compare_model_reg(train):
+    global Config
+
     # Disable logging to a file
     #logging.basicConfig(filename=None, level=logging.INFO)
     logging.basicConfig(filename="logs.log", level=logging.INFO)
@@ -1122,25 +1154,55 @@ def create_and_compare_model_reg(train):
     # Run the following code with a custom exception hook
     sys.excepthook = custom_exception_hook
 
+    # Build a CV strategy whose gap matches the forecast horizon, so folds are scored on
+    # genuinely forecasting Forecast_horizon_periods ahead rather than the very next timestamp
+    # (which is far easier and would overstate model quality via short-term autocorrelation).
+    # n_splits is clamped to whatever stays feasible for the amount of data this plot has.
+    train_size = 0.9
+    cv_rows = int(len(train) * train_size)
+    gap = Forecast_horizon_periods
+    max_feasible_folds = max(2, (cv_rows - gap) // (gap + 5))
+    fold_count = min(10, max_feasible_folds)
+    if fold_count < 10:
+        print(f"[create_and_compare_model_reg] Only {cv_rows} rows available after the "
+              f"{train_size:.0%} train split; reduced CV folds from 10 to {fold_count} to "
+              f"keep the {gap}-period forecast-horizon gap feasible.")
+    cv_strategy = TimeSeriesSplit(n_splits=fold_count, gap=gap)
+
     # Run pycarets setup
-    s = re_exp.setup(train, 
+    s = re_exp.setup(train,
               target = 'rolling_mean_grouped_soil',
               session_id = 123,
               verbose = Verbose_logging,
-              ignore_features = To_be_dropped, 
-              train_size = 0.8,
-              n_jobs = None 
+              ignore_features = To_be_dropped,
+              train_size = train_size,
+              fold_strategy=cv_strategy,
+              data_split_shuffle=False,
+              fold_shuffle=False,
+              n_jobs = None
     )
     
     # Print available models
     print("Available models: ", re_exp.models())
+
+    # Save pycarets setup Config to be persistant
+    Config = {
+        "target": re_exp.target_param,
+        "session_id": 123,
+        "ignore_features": re_exp._fxs.get("Ignore", []),
+        "numeric_features": re_exp._fxs.get("Numeric", []),
+        "categorical_features": re_exp._fxs.get("Categorical", []),
+        "train_size": re_exp.train_size_param if hasattr(re_exp, "train_size_param") else 0.8,
+        "verbose": Verbose_logging
+    }
     
     # Run compare_models function TODO: configure setup accordingly
     best_re = re_exp.compare_models(
-        n_select = 19, 
-        fold = 10, 
+        n_select = 19,
+        fold = fold_count, # matches the gap-aware TimeSeriesSplit built above
         sort = 'R2',
-        verbose = Verbose_logging,
+        verbose = Verbose_logging,           
+        errors="raise",   # DEBUG: raise, ignore, warn
         exclude=['lar', 'dummy', 'lightgbm', 'lr', 'par'], # excluded those that do not perform well (bad R2 on testset)
         #include=['xgboost', 'catboost'] #DEBUG
     )
@@ -1204,10 +1266,10 @@ def evaluate_target_variable(series1, series2, model_name):
     mpe = np.mean(diff[non_zero_mask] / values1.values[non_zero_mask]) * 100 if np.any(non_zero_mask) else np.nan
 
 
-    # calculate R2 score
-    mean_series1 = np.mean(series1)
-    ss_total = np.sum((series1 - mean_series1) ** 2)
-    ss_residual = np.sum((series1 - series2) ** 2)
+    # calculate R2 score (on the same aligned, truncated values as the other metrics)
+    mean_values1 = np.mean(values1.values)
+    ss_total = np.sum((values1.values - mean_values1) ** 2)
+    ss_residual = np.sum((values1.values - values2.values) ** 2)
     r2_score = 1 - (ss_residual / ss_total)
 
     # print metrics
@@ -1289,7 +1351,7 @@ def create_future_values(data, plot):
     print("start: ", start)
     train_end = data.index[-1] #+ timedelta(minutes=sample_rate)
     print("train end before adding: ", train_end)
-    end = train_end+pd.Timedelta(days=Forcast_horizon)
+    end = train_end+pd.Timedelta(days=Forecast_horizon)
     print("end after adding: ", end,"\n")
     all_dates = pd.date_range(start=train_end, end=end, freq=str(Sample_rate)+'T')    
     print("all dates: ", all_dates,"\n")
@@ -1329,6 +1391,116 @@ def create_future_values(data, plot):
 
     return new_data
 
+# Evaluate PyCaret models on validation set
+def evaluate_against_validation(
+    exp,
+    models,
+    val_df
+):
+    print("[VALIDATION] Evaluating PyCaret models")
+
+    # ---------------------------------------
+    # COPY VALIDATION DATA
+    # ---------------------------------------
+    val_df = val_df.copy().reset_index(drop=True)
+
+    # ---------------------------------------
+    # REMOVE UNUSED FEATURES
+    # ---------------------------------------
+    to_be_dropped = [
+        item for item in To_be_dropped
+        if item != 'Timestamp'
+    ]
+
+    val_df = val_df.drop(
+        columns=to_be_dropped,
+        errors='ignore'
+    )
+
+    # ---------------------------------------
+    # SPLIT TARGET / FEATURES
+    # ---------------------------------------
+    ground_truth = val_df['rolling_mean_grouped_soil']
+
+    val_features = val_df.drop(
+        ['rolling_mean_grouped_soil'],
+        axis=1
+    )
+
+    # ---------------------------------------
+    # EVALUATE MODELS
+    # ---------------------------------------
+    results_for_model = []
+
+    for model in models:
+
+        model_name = model.__module__
+
+        print(f"[VALIDATION] Model: {model_name}")
+
+        try:
+
+            preds = exp.predict_model(
+                model,
+                data=val_features
+            )
+
+            y_true = ground_truth.reset_index(drop=True)
+
+            y_pred = preds[
+                'prediction_label'
+            ].reset_index(drop=True)
+
+            result = evaluate_target_variable(
+                y_true,
+                y_pred,
+                model_name
+            )
+
+            results_for_model.append(result)
+
+        except Exception as e:
+
+            print(
+                f"[VALIDATION] Error in "
+                f"{model_name}: {e}"
+            )
+
+    return results_for_model
+
+# eval model against formerly split validation set for NN models (custom evaluation)
+def evaluate_against_validation_nn(
+    nn_models,
+    X_val_scaled,
+    y_val
+):
+    print("[VALIDATION] Evaluating NN models")
+
+    results_for_model = []
+
+    for model in nn_models:
+        try:
+            if model.model_name == "lstm_model":
+                X_val_lstm = prepare_lstm_data(X_val_scaled)
+                pred = model.predict(X_val_lstm)
+            else:
+                pred = model.predict(adapt_X_for_model(model, X_val_scaled))
+
+            pred = pred.flatten()
+
+            results_for_model.append(
+                evaluate_target_variable(
+                    y_val.reset_index(drop=True),
+                    pd.Series(pred),
+                    model.model_name
+                )
+            )
+
+        except Exception as e:
+            print(f"[VALIDATION] Error in {model.model_name}: {e}")
+
+    return results_for_model
+
 # eval model against formerly split testset -> TODO: test has duplicates because of irrigation added formerly
 def evaluate_against_testset(currentPlot, test, exp, best):
     print("This is the evaluation against the split testset")
@@ -1343,7 +1515,10 @@ def evaluate_against_testset(currentPlot, test, exp, best):
     predictions = []
     results_for_model = []
 
-    # iterate best models 
+    if not isinstance(best, list):
+        best = [best]
+
+    # iterate best models
     for i in range(len(best)):
         model_name = best[i].__module__
         print("Current model: " + model_name)
@@ -1365,6 +1540,8 @@ def evaluate_against_testset(currentPlot, test, exp, best):
 
 # train the best model after eval with fulln dataset
 def train_best(best_model, data):
+    global Config
+
     # create regression exp
     re_exp = pycaret.regression.RegressionExperiment()
 
@@ -1373,11 +1550,25 @@ def train_best(best_model, data):
     data = data.rename(columns={'index': 'Timestamp'}, inplace=False)
 
     # old: to_be_dropped = ['minute', 'Timestamp','gradient','grouped_soil','grouped_resistance','grouped_soil_temp']
-
     print("Those are the remaining features after dropping:", list(set(data.columns.tolist()) - set(To_be_dropped)))
 
     # Run the following code with a custom exception hook => maybe only relevant in VSCode => TODO: test without in production
     sys.excepthook = custom_exception_hook
+
+    # Build a CV strategy whose gap matches the forecast horizon, so folds are scored on
+    # genuinely forecasting Forecast_horizon_periods ahead rather than the very next timestamp
+    # (which is far easier and would overstate model quality via short-term autocorrelation).
+    # n_splits is clamped to whatever stays feasible for the amount of data this plot has.
+    train_size = 0.9
+    cv_rows = int(len(data) * train_size)
+    gap = Forecast_horizon_periods
+    max_feasible_folds = max(2, (cv_rows - gap) // (gap + 5))
+    fold_count = min(10, max_feasible_folds)
+    if fold_count < 10:
+        print(f"[create_and_compare_model_reg] Only {cv_rows} rows available after the "
+              f"{train_size:.0%} train split; reduced CV folds from 10 to {fold_count} to "
+              f"keep the {gap}-period forecast-horizon gap feasible.")
+    cv_strategy = TimeSeriesSplit(n_splits=fold_count, gap=gap)
 
     # Run pycarets setup
     s = re_exp.setup(data, 
@@ -1385,22 +1576,44 @@ def train_best(best_model, data):
               session_id = 123,
               verbose = Verbose_logging,
               ignore_features = To_be_dropped, 
-              train_size = 0.8,
-              n_jobs = None
+              train_size = train_size,
+              fold_strategy=cv_strategy,
+              data_split_shuffle=False,
+              fold_shuffle=False,
+              n_jobs = None 
     )
+
+    # Save pycarets setup Config to be persistant
+    Config = {
+        "target": re_exp.target_param,
+        "session_id": 123,
+        "ignore_features": re_exp._fxs.get("Ignore", []),
+        "numeric_features": re_exp._fxs.get("Numeric", []),
+        "categorical_features": re_exp._fxs.get("Categorical", []),
+        "train_size": re_exp.train_size_param if hasattr(re_exp, "train_size_param") else 0.8,
+        "verbose": Verbose_logging
+    }
     
-    if not isinstance(best_model, list):   
-        # Create one model 
-        model = re_exp.create_model(Model_mapping[best_model.__class__.__name__])
-        
+    # Pass the already-tuned/ensembled estimator object straight to create_model() instead of
+    # looking its type up in Model_mapping. pycaret clones whatever estimator object it's given
+    # (sklearn's clone(), preserving its hyperparameters via get_params()) and fits that clone on
+    # this setup's training data - Model_mapping only covers pycaret's atomic base model IDs, so
+    # it raised KeyError for compound estimators (Pipeline, StackingRegressor, VotingRegressor from
+    # stack_models()/blend_models()). Worse, even for atomic models it was silently rebuilding a
+    # fresh DEFAULT-hyperparameter model of the same class instead of refitting the tuned one -
+    # discarding all tuning whenever it didn't outright crash.
+    if not isinstance(best_model, list):
+        # Create one model
+        model = re_exp.create_model(best_model)
+
         return model, re_exp
     else:
         # Create multiple models, for ensemble
         model = []
         for m in best_model:
-            # Create model 
-            model.append(re_exp.create_model(Model_mapping[m.__class__.__name__]))
-        
+            # Create model
+            model.append(re_exp.create_model(m))
+
         return model, re_exp
 
 # Create NN
@@ -1676,50 +1889,87 @@ def prepare_data_for_cnn(data, target_variable):
 
     return X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler
 
-def prepare_data_for_cnn2(data, target_variable, test_size=0.2, val_size=0.2, random_state=42):
-    # To RangeIndex => do not use timestamps as index
-    data = data.reset_index(drop=False, inplace=False)
+def prepare_data_for_cnn2(
+    plot,
+    train_df,
+    val_df,
+    test_df,
+    target_variable,
+    training=True
+):
+    """
+    Prepare already-split train/val/test datasets for NN models
+    WITHOUT introducing data leakage.
+    """
 
-    # Drop non-important columns
-    data_nn = data.drop(columns=To_be_dropped, axis=1, inplace=False)
+    # ---------------------------------------
+    # RESET INDEX
+    # ---------------------------------------
+    train_df = train_df.reset_index(drop=False, inplace=False)
+    val_df   = val_df.reset_index(drop=False, inplace=False)
+    test_df  = test_df.reset_index(drop=False, inplace=False)
 
-    # Split the dataset into features (X) and target variable (y)
-    X = data_nn.drop(columns=[target_variable])
-    y = data_nn[target_variable]
+    # ---------------------------------------
+    # DROP UNUSED COLUMNS
+    # ---------------------------------------
+    train_df = train_df.drop(columns=To_be_dropped, axis=1, errors='ignore')
+    val_df   = val_df.drop(columns=To_be_dropped, axis=1, errors='ignore')
+    test_df  = test_df.drop(columns=To_be_dropped, axis=1, errors='ignore')
 
-    # ---- First: Train+Val vs Test ----
-    X_train_full, X_test, y_train_full, y_test = train_test_split(
-        X, y,
-        test_size=test_size,
-        random_state=random_state,
-        shuffle=True  # set False if you want strict time-order split
-    )
+    # ---------------------------------------
+    # SPLIT FEATURES / TARGET
+    # ---------------------------------------
+    X_train = train_df.drop(columns=[target_variable])
+    y_train = train_df[target_variable]
 
-    # ---- Second: Train vs Val (from Train_full) ----
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_train_full, y_train_full,
-        test_size=val_size,
-        random_state=random_state,
-        shuffle=True
-    )
+    X_val = val_df.drop(columns=[target_variable])
+    y_val = val_df[target_variable]
 
-    # ---- Scaling: fit on TRAIN only ----
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_val_scaled   = scaler.transform(X_val)
-    X_test_scaled  = scaler.transform(X_test)
+    X_test = test_df.drop(columns=[target_variable])
+    y_test = test_df[target_variable]
 
-    # ---- CNN / sequence shaped versions ----
+    # ---------------------------------------
+    # SCALING
+    # FIT ONLY ON TRAIN
+    # ---------------------------------------
+    if training:
+        plot.data_scaler = StandardScaler()
+    else:
+        if not hasattr(plot, 'data_scaler'):
+            raise ValueError("Scaler not found in plot object.")
+
+    X_train_scaled = plot.data_scaler.fit_transform(X_train)
+
+    # IMPORTANT:
+    # NEVER FIT AGAIN
+    X_val_scaled = plot.data_scaler.transform(X_val)
+    X_test_scaled = plot.data_scaler.transform(X_test)
+
+    # ---------------------------------------
+    # CNN SHAPES
+    # ---------------------------------------
     X_train_cnn = X_train_scaled[..., np.newaxis]
-    X_val_cnn   = X_val_scaled[..., np.newaxis]
-    X_test_cnn  = X_test_scaled[..., np.newaxis]
+    X_val_cnn = X_val_scaled[..., np.newaxis]
+    X_test_cnn = X_test_scaled[..., np.newaxis]
 
     return (
-        X_train, X_val, X_test,
-        y_train, y_val, y_test,
-        X_train_scaled, X_val_scaled, X_test_scaled,
-        X_train_cnn, X_val_cnn, X_test_cnn,
-        scaler
+        X_train,
+        X_val,
+        X_test,
+
+        y_train,
+        y_val,
+        y_test,
+
+        X_train_scaled,
+        X_val_scaled,
+        X_test_scaled,
+
+        X_train_cnn,
+        X_val_cnn,
+        X_test_cnn,
+
+        plot.data_scaler
     )
 
 def default_hp_nn(): # TODO: wire those into training function
@@ -1967,6 +2217,8 @@ def save_models_nn(plot_name, nn_models, path_to_save, nn_hps = None):
     # Ensure the directory exists
     os.makedirs(os.path.dirname(path_to_save), exist_ok=True)
 
+    model_paths = []  # To keep track of saved model paths for reference
+
     # type check for array -> convert
     if not isinstance(nn_models, list):
         nn_models = [nn_models]
@@ -1981,18 +2233,20 @@ def save_models_nn(plot_name, nn_models, path_to_save, nn_hps = None):
         if isinstance(nn_models[i], tensorflow.keras.Model):
             try:
                 # Save the trained models for future use
-                nn_models[i].save(base_name + ".h5")
-                print(f"[OK] Saved Keras model: {base_name}.h5")
+                p = base_name + ".keras"
+                nn_models[i].save(p)
+                model_paths.append(p)
+                print(f"[OK] Saved Keras model: {p}")
             except Exception as e:
-                print(f"[FAIL] Could not save Keras model {nn_models[i].model_name}: {e}")
+                print(f"[FAIL] Could not save Keras model {p}: {e}")
 
             if nn_hps is not None:
                 try:
                     if nn_hps is not None and nn_hps[i] is not None:
-                        with open(path_to_save + str(i) + '_' + nn_models[i].model_name + '_' + plot_name + "_hps.json", "w") as f:
+                        with open(base_name + "_hps.json", "w") as f:
                             json.dump(nn_hps[i].values, f, indent=2)
                 except Exception as e:
-                    print(f"HP save failed ({nn_models[i].model_name}): {e}")
+                    print(f"[Fail] HP save failed ({model_name}): {e}")
 
         # Ensemble models
         elif isinstance(nn_models[i], EnsemblePredictor):
@@ -2003,52 +2257,93 @@ def save_models_nn(plot_name, nn_models, path_to_save, nn_hps = None):
                     "note": "This is a meta-predictor. Base models are saved separately."
                 }
 
-                with open(base_name + "_ensemble.json", "w") as f:
+                with open(base_name + "_ensemble_meta.json", "w") as f:
                     json.dump(ensemble_meta, f, indent=2)
 
-                print(f"[OK] Saved ensemble metadata: {base_name}_ensemble.json")
+                # Save the ensemble predictor itself
+                p = base_name + "_ensemble.joblib"
+                joblib.dump(nn_models[i], p)
+                model_paths.append(p)
+
+                print(f"[OK] Saved ensemble metadata: {p}")
 
             except Exception as e:
                 print(f"[FAIL] Could not save ensemble predictor: {e}")  
-    # Unknown model type
+        # Unknown model type
         else:
             print(
                 f"[SKIP] Object of type {type(nn_models[i])} cannot be saved "
                 f"(model_name={getattr(nn_models[i], 'model_name', 'unknown')})"
-            )  
+            ) 
+
+    return model_paths
 
 # Load NN models
-def load_models_nn(folder_path):
+def load_models_nn(input_path):
     models = []
     best_hps = []
 
-    # Sort to ensure model i matches hyperparameter i
-    for file in sorted(os.listdir(folder_path)):
-        if file.endswith(".h5"):
-            path = os.path.join(folder_path, file)
-            model = keras_models.load_model(path)
+    # should be capsulated in functions for loading single models and loading ensembles, but for now we keep it simple and just check if path is dir or file
+    if os.path.isdir(input_path):
+        # Sort to ensure model i matches hyperparameter i
+        for file in sorted(os.listdir(input_path)):
+            # Keras models
+            if file.endswith(".h5") or file.endswith(".keras"):
+                path = os.path.join(input_path, file)
+                model = keras_models.load_model(path)
 
-            # Parse name: index_modelname_plot.h5
-            parts = file.replace(".h5", "").split("_", 2)
-            if len(parts) >= 2:
-                model.model_name = parts[1]
+                # Parse name: index_modelname_plot.h5
+                parts = file.replace(".h5", "").replace(".keras", "").split("_", 2)
+                if len(parts) >= 2:
+                    model.model_name = parts[1]
 
-            models.append(model)
-            print(f"Loaded NN model: {file}")
+                models.append(model)
+                print(f"Loaded NN model: {file}")
 
-            # Attempt to load corresponding hyperparameters JSON
-            hp_file = file.replace(".h5", "_hps.json")
-            hp_path = os.path.join(folder_path, hp_file)
-            if os.path.exists(hp_path):
-                try:
-                    with open(hp_path, "r") as f:
-                        hps = json.load(f)
-                    best_hps.append(hps)
-                except Exception as e:
-                    print(f"Failed to load hyperparameters for {file}: {e}")
+                # Attempt to load corresponding hyperparameters JSON
+                base_name, _ = os.path.splitext(file)
+                hp_file = f"{base_name}_hps.json"
+                hp_path = os.path.join(input_path, hp_file)
+                if os.path.exists(hp_path):
+                    try:
+                        with open(hp_path, "r") as f:
+                            hps = json.load(f)
+                        best_hps.append(hps)
+                    except Exception as e:
+                        print(f"Failed to load hyperparameters for {file}: {e}")
+                        best_hps.append(None)
+                else:
                     best_hps.append(None)
-            else:
-                best_hps.append(None)
+            # Ensemble models
+            elif file.endswith(".joblib"):
+                path = os.path.join(input_path, file)
+                try:
+                    ensemble_model = joblib.load(path)
+                    models.append(ensemble_model)
+                    print(f"Loaded ensemble model: {file}")
+                except Exception as e:
+                    print(f"Failed to load ensemble model {file}: {e}")
+    else:
+        # Keras model
+        if input_path.endswith(".h5") or input_path.endswith(".keras"):
+                model = keras_models.load_model(input_path)
+
+                # Parse name: index_modelname_plot.h5
+                parts = input_path.replace(".h5", "").replace(".keras", "").split("_", 2)
+                if len(parts) >= 2:
+                    model.model_name = parts[1]
+
+                models.append(model)
+                print(f"Loaded NN model: {input_path}")
+                # Hyperparameters are not needed when loading single models
+        # Ensemble model
+        elif input_path.endswith(".joblib"):
+            try:
+                ensemble_model = joblib.load(input_path)
+                models.append(ensemble_model)
+                print(f"Loaded ensemble model from: {input_path}")
+            except Exception as e:
+                print(f"Failed to load ensemble model from: {input_path}: {e}")
 
     return models, best_hps
 
@@ -2056,6 +2351,10 @@ def load_models_nn(folder_path):
 def evaluate_against_testset_nn(currentPlot, nn_models, X_test_scaled, y_test):
     predictions = []
     results_for_model = []
+
+    if not isinstance(nn_models, list):
+        nn_models = [nn_models]
+        
     for i in range(len(nn_models)):
     #     # Evaluate the model on the test set
     #     try:
@@ -2425,6 +2724,75 @@ def analyze_performance_old(exp, best):
         exp[i].plot_model(best[i], plot = 'forecast', data_kwargs = {'fh' : 500}, save = True)
         #before.save("Plot_after_testset_"+str(i)+".png", format='png')
 
+# Extract model from pipeline
+def unwrap_model(m):
+    if isinstance(m, Pipeline):
+        return m.steps[-1][1]
+    return m
+
+def init_pycaret_subprocess_tuning(plot_name, exp, best_models):
+    #global Config
+
+    try:
+        # save data, model and exp to disk TODO: evaluate tmp folder-> overflow
+        temp_dir = Path("./tmp") / f"tuning_{plot_name}_{datetime.now().timestamp()}" #TODO: later cleanup old temp folders
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save full dataset
+        exp.dataset.to_csv(temp_dir / "data.csv", index=False)
+        # Save test set (optional but precise)
+        #plot.best_exp.X_test.to_csv(temp_dir / "X_test.csv", index=False)
+        #plot.best_exp.y_test.to_csv(temp_dir / "y_test.csv", index=False)
+        #plot.best_exp.save_experiment(str(temp_dir / "experiment.pkl")) # does not work
+
+        # # Save config -> TODO: init later globally 
+        # Config = {
+        #     "target": exp.target_param,
+        #     "session_id": 123,  # you defined this manually
+        #     "ignore_features": exp._fxs.get("Ignore", []),
+        #     "numeric_features": exp._fxs.get("Numeric", []),
+        #     "categorical_features": exp._fxs.get("Categorical", []),
+        #     "train_size": exp.train_size_param if hasattr(exp, "train_size_param") else 0.8,
+        # }
+        with open(temp_dir / "config.pkl", "wb") as f:
+            pickle.dump(Config, f)
+
+        # Save models to be available in subprocess   
+        list_of_model_names = save_models(plot_name, exp, best_models, str(temp_dir / "best_model_before_tuning_"))
+        best_tuned_models = []
+        for name in list_of_model_names:
+            print(f"Saved model {name} for tuning in {temp_dir / 'best_model.pkl'}")
+            # Run tuning in subprocess
+            best_model_path = run_tuning_with_subprocess(
+                str(temp_dir), 
+                name,
+                plot_name
+            )
+            # Load models from disk after tuning
+            m = load_model(best_model_path)
+            # Make sure to load the actual model if it was wrapped in a pipeline
+            m = unwrap_model(m)
+            # Add to list of best tuned models
+            best_tuned_models.append(m)
+        # If only one model, return it directly instead of a list
+        best_tuned_models = best_tuned_models if len(best_tuned_models) > 1 else best_tuned_models[0]
+
+        # Save best tuned pycaret model
+        model_names = save_models(plot_name, exp, best_models, f'models/{plot_name}/tuned_models/pycaret/best_soil_tension_prediction_')
+
+        return best_tuned_models
+
+    except Exception as e:
+        print(f"[{plot_name}] Error during tuning: {e}, using the original model.")
+        return best_models
+
+    finally:
+        # Cleanup method
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+            print(f"Deleted temp dir after successful tuning: {temp_dir}")         
+
+
 # Tune hyperparameters of one model
 def tune_one_model(exp, best):
     try: # double try, except
@@ -2488,7 +2856,7 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
         tuner = Hyperband(
             builder,
             objective='val_mae',
-            max_epochs=80,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
+            max_epochs=50,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
             factor=3,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
             hyperband_iterations=1,     # Limits the number full hyperband runs
             directory='hyperband_dir',
@@ -2502,12 +2870,20 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
         # Early stopping to avoid overfitting
         early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
-        tuner.search(
-            X_train_scaled,
-            y_train,
-            validation_data=(X_val_scaled, y_val),
-            callbacks=[time_limit_callback, early_stopping, MemoryLimitCallback()]  # Add the time limit callback here TODO: fix: it is not working
-        )
+        try:
+            tuner.search(
+                X_train_scaled,
+                y_train,
+                validation_data=(X_val_scaled, y_val),
+                callbacks=[ # Add the time limit callback here TODO: fix: it is not working
+                    time_limit_callback, 
+                    early_stopping, 
+                    MemoryLimitCallback(), 
+                    HardCleanupCallback()
+                ]  
+            )
+        except MemoryLimitReachedError as e:
+            print(f"Tuning aborted: {e}")
 
         gc.collect()
         tensorflow.keras.backend.clear_session()
@@ -2588,6 +2964,84 @@ def log_scores_csv(scores, filename="model_scores.csv"):
 
         for key, (r2, model) in scores.items():
             writer.writerow([ts, key, r2, type(model).__name__ if model else "None"])
+
+def init_pycaret_subprocess_ensemble(plot_name, exp, tuned_best_models):
+    try:
+        # save data, model and exp to disk TODO: evaluate tmp folder-> overflow
+        temp_dir = Path("./tmp") / f"tuning_{plot_name}_{datetime.now().timestamp()}" #TODO: later cleanup old temp folders
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save full dataset
+        exp.dataset.to_csv(temp_dir / "data.csv", index=False)
+
+        # Save config to file
+        with open(temp_dir / "config.pkl", "wb") as f:
+            pickle.dump(Config, f)
+        
+        # Save models to be available in subprocess   
+        list_of_model_names = save_models(plot_name, exp, tuned_best_models, str(temp_dir / "best_model_before_ensemble_"))
+
+        # Extract model
+        tuned_best_models = [unwrap_model(m) for m in tuned_best_models]
+    
+        # Run ensemble creation in subprocess
+        best_ensemble_model_path = run_ensemble_with_subprocess(
+            str(temp_dir),
+            list_of_model_names,
+            plot_name
+        )
+
+        # Load ensemble model from disk after creation
+        best_ensemble_model = unwrap_model(load_model(best_ensemble_model_path))
+
+         # Save best tuned pycaret model
+        model_names = save_models(plot_name, exp, best_ensemble_model, f'models/{plot_name}/ensemble_models/pycaret/best_soil_tension_prediction_')
+
+        return best_ensemble_model
+
+    except Exception as e:
+        print(f"[{plot_name}] Error during tuning: {e}, using the original model.")
+        return tuned_best_models
+
+
+def init_pycaret_subprocess_tuning_and_ensemble(plot_name, exp, tuned_best_models, ensemble=True):
+    try:
+        # save data, model and exp to disk TODO: evaluate tmp folder-> overflow
+        temp_dir = Path("./tmp") / f"tuning_{plot_name}_{datetime.now().timestamp()}" #TODO: later cleanup old temp folders
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save full dataset
+        exp.dataset.to_csv(temp_dir / "data.csv", index=False)
+
+        # Save config to file
+        with open(temp_dir / "config.pkl", "wb") as f:
+            pickle.dump(Config, f)
+        
+        # Save models to be available in subprocess   
+        list_of_model_names = save_models(plot_name, exp, tuned_best_models, str(temp_dir / "best_model_before_tuning and_ensemble_"))
+
+        # Extract model
+        tuned_best_models = [unwrap_model(m) for m in tuned_best_models]
+    
+        # Run ensemble creation in subprocess
+        best_ensemble_model_path = run_tuning_and_ensemble_with_subprocess(
+            str(temp_dir),
+            list_of_model_names,
+            plot_name
+        )
+
+        # Load ensemble model from disk after creation
+        best_ensemble_model = unwrap_model(load_model(best_ensemble_model_path))
+
+         # Save best ensemble pycaret model
+        model_names = save_models(plot_name, exp, best_ensemble_model, f'models/{plot_name}/ensemble_models/pycaret/best_soil_tension_prediction_')
+
+        return best_ensemble_model
+
+    except Exception as e:
+        print(f"[{plot_name}] Error during tuning: {e}, using the original model.")
+        return tuned_best_models
+    
 
 # Create and compare different ensemble model techniques for pycaret models
 def create_and_compare_ensemble(plot_name, exp, tuned_best_models):
@@ -2671,6 +3125,103 @@ def create_and_compare_ensemble(plot_name, exp, tuned_best_models):
         print(f"There was an error creating ensemble models. {e} "
               f"Fallback to best tuned model and perform prediction.")
         return tuned_best_models[0]
+
+def save_weights(model, temp_dir=None):
+    """
+    Save Keras model weights to disk and return path.
+
+    Args:
+        model: Keras model
+        temp_dir: Optional directory (Path or str)
+
+    Returns:
+        str: path to saved weights file
+    """
+    from pathlib import Path
+    import uuid
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Ensure temp_dir exists
+        if temp_dir is None:
+            temp_dir = Path("./tmp_weights")
+        else:
+            temp_dir = Path(temp_dir) / "weights"
+
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Unique filename (VERY important for parallel runs)
+        unique_id = uuid.uuid4().hex[:8]
+        model_name = getattr(model, "model_name", "model")
+
+        weight_path = temp_dir / f"{model_name}_{unique_id}.weights.h5"
+
+        # Ensure model is built (important for some TF models)
+        if not model.built:
+            try:
+                model.build(model.input_shape)
+            except Exception:
+                logger.warning(f"Could not explicitly build model {model_name}")
+
+        # Save weights
+        model.save_weights(weight_path)
+
+        return str(weight_path)
+
+    except Exception as e:
+        logger.error(f"Failed to save weights: {e}")
+        raise
+
+def init_nn_subprocess_tuning_and_ensemble(plot_name, X_train, y_train, X_val, y_val, models):
+    """
+    Orchestration wrapper to tune and create ensemble for neural networks in subprocess, 
+    since it is very resource intensive and can cause memory leaks, crashes, etc. 
+    It also allows to use different libraries and versions for tuning and ensemble creation, 
+    without affecting the main process. 
+    It saves data and models to disk, runs the tuning and ensemble creation in a separate process, 
+    and loads the final model back into the main process. 
+    It also handles exceptions and fallbacks gracefully. 
+    """
+    model_configs = []
+    
+    temp_dir = Path("./tmp") / f"nn_{plot_name}_{datetime.now().timestamp()}"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Extract config to file
+    for m in models:
+        model_configs.append({
+            "model_name": m.model_name,
+            "shape": m.shape,
+            "weights_path": save_weights(m, temp_dir),
+            "hp_values": m.hp.values if hasattr(m, "hp") and m.hp is not None else None
+        })
+        
+    # Save model configs (NOT models)
+    with open(temp_dir / "model_configs.json", "w") as f:
+        json.dump(model_configs, f)
+    
+    # Save data
+    np.save(temp_dir / "X_train.npy", X_train)
+    np.save(temp_dir / "y_train.npy", y_train)
+    np.save(temp_dir / "X_val.npy", X_val)
+    np.save(temp_dir / "y_val.npy", y_val)
+
+    # Run tuning and ensemble creation in subprocess
+    result_path = run_tuning_and_ensemble_nn_with_subprocess(temp_dir, model_configs, plot_name)
+
+    # return the best model (first in list)
+    model = load_models_nn(result_path)[0][0]
+
+    # Delete tmp folder and all containing files
+    try:
+        shutil.rmtree(temp_dir)
+        print(f"Deleted temp dir after successful tuning and ensemble creation: {temp_dir}")
+    except Exception as e:
+        print(f"Warning: Failed to delete temp dir {temp_dir}: {e}")
+
+    return model  
 
 # helper in case hp is dict or keras tuner object
 def hp_get(hp, key, default):
@@ -2791,9 +3342,9 @@ def compare_nn_ensembles(
     X_val,
     y_val,
     metric="r2",
-    bagging_rounds=5,
-    stacking_folds=5,
-    verbose=True
+    bagging_rounds=5,   # DEBUG, was 5
+    stacking_folds=5,   # DEBUG, was 5
+    verbose=Verbose_logging
 ):
     """
     Compare:
@@ -2994,13 +3545,13 @@ def generate_predictions(best, exp, features):
 
 # Generating predictions with neural network model
 def generate_predictions_nn(best_model_nn, features, start, end):
-    print("Generating predictions with NN model:", best_model_nn.model_name)
+    print("Generating predictions with NN model:", safe_model_name(best_model_nn))
 
     # Ensure features is a numpy array
     X_pred = np.asarray(features)
 
     # Adapt features to model input shape
-    #X_pred = adapt_X_for_model(best_model_nn, X_pred)
+    X_pred = adapt_X_for_model(best_model_nn, X_pred)
 
     # Generate predictions
     predictions = best_model_nn.predict(X_pred)
@@ -3088,7 +3639,7 @@ def predict_with_updated_data(plot):
     Currently_active = True
     
     # Run data pipeline to obtain latest data
-    train, test, X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = data_pipeline(plot)
+    train, val, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = data_pipeline(plot)
     # Create future value set to feed new data to model
     future_features = create_future_values(plot.data, plot)
     # Compare dataframes cols to be sure that they match, otherwise drop
@@ -3101,7 +3652,8 @@ def predict_with_updated_data(plot):
         plot.predictions = generate_predictions(plot.best_model, plot.best_exp, future_features)
     
     # Cut passed time from predictions
-    plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]
+    if not plot.load_data_from_csv:
+        plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]
         
     # Align predictions with historical data
     align_with_latest_sensor_values(plot)
@@ -3131,15 +3683,15 @@ def data_pipeline(plot):
         plot.data.dropna(inplace=True)
 
     # Split dataset  
-    train, test = split_by_ratio(plot.data, 20) # here a split is done to rule out the models that are overfitting
+    train, val, test = split_by_ratio(plot.data) # here a split is done to rule out the models that are overfitting
     
     # NN
-    X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = prepare_data_for_cnn2(plot.data, 'rolling_mean_grouped_soil')
+    X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = prepare_data_for_cnn2(plot, train, val, test, 'rolling_mean_grouped_soil')
 
-    return train, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler 
+    return train, val, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler 
 
-# Mighty main fuction ;) -> create some meaningful logs
-def main(plot) -> int:
+# Mighty main fuction ;) -> TODO: create more meaningful logs
+def main_old(plot) -> int:
     global Currently_active
     
     # Prevents multiple training or prediction at the same time
@@ -3159,15 +3711,15 @@ def main(plot) -> int:
         # Load data from disk
         plot.data = pd.read_csv('data/debug/debug_data.csv').set_index('Timestamp')
         plot.data.index = pd.to_datetime(plot.data.index, utc=True).tz_convert(TimeUtils.Timezone)
-        train, test = split_by_ratio(plot.data, 20)
+        train, val, test = split_by_ratio(plot.data)
         #X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled, X_train_cnn, X_test_cnn, scaler = prepare_data_for_cnn(plot.data, 'rolling_mean_grouped_soil')
-        X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = prepare_data_for_cnn2(plot.data, 'rolling_mean_grouped_soil') #testing consistant val dataset for comparison
+        train, val, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = prepare_data_for_cnn2(plot, train, val, test, 'rolling_mean_grouped_soil') #testing consistant val dataset for comparison
     else:
         # Data preparation pipeline: get config, fetch, align, clean, sample....
-        train, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = data_pipeline(plot)
+        train, val, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = data_pipeline(plot)
 
     # Debug mode -> skips training and uses debug.csv
-    if SkipTraning:
+    if SkipTraining:
         debug_df = pd.read_csv('data/debug/debug_predictions.csv').set_index('Timestamp')
         debug_df.index = pd.to_datetime(debug_df.index, utc=True).tz_convert(TimeUtils.Timezone)
 
@@ -3213,11 +3765,12 @@ def main(plot) -> int:
     # Train best model on whole dataset (without skipping "test-set")
     if plot.use_pycaret:
         # Classical regression
-        best_model, plot.best_exp = train_best(best_eval, plot.data)
+        plot.best_model, plot.best_exp = train_best(best_eval, plot.data)
     else:
         # NN
         best_model_nn, X_train_scaled, X_val_scaled, y_train, y_val = train_best_nn(best_eval_nn, plot.data, plot.user_given_name)
 
+    # TODO: Save "best" models here?
     
     # Create future value set to feed new data to model
     future_features = create_future_values(plot.data, plot)
@@ -3229,21 +3782,27 @@ def main(plot) -> int:
 
 
     if plot.use_pycaret:
-        # Before tuning
-        #best_model_before_tuning = plot.best_exp.compare_models()
-        
         # Tune hyperparameters of one or the 3 best models
         try:
-            if plot.ensemble:
-                plot.best_model = tune_models(plot.best_exp, best_model)
+            gc.collect()
+            # Store original best model before tuning, to fallback in case of error
+            best_model_before_tuning = plot.best_model
+        
+            if Use_subprocess:
+                # Perform entire tuning pipeline in subprocess
+                plot.best_model = init_pycaret_subprocess_tuning_and_ensemble(plot.user_given_name, plot.best_exp, plot.best_model, plot.ensemble)
             else:
-                plot.best_model = tune_one_model(plot.best_exp, best_model)
-            
-            # Save best tuned pycaret model
-            model_names = save_models(plot.user_given_name, plot.best_exp, plot.best_model, f'models/{plot.user_given_name}/tuned_models/pycaret/best_soil_tension_prediction_')
+                # Perform tuning in the main process
+                if plot.ensemble:
+                    plot.best_model = tune_models(plot.best_exp, plot.best_model)
+                else:
+                    plot.best_model = tune_one_model(plot.best_exp, plot.best_model)
+                
+                # Save best tuned pycaret model
+                model_names = save_models(plot.user_given_name, plot.best_exp, plot.best_model, f'models/{plot.user_given_name}/tuned_models/pycaret/best_soil_tension_prediction_')
         except Exception as e:
             print(f"[{plot.user_given_name}] Error during tuning: {e}, using the original model.")
-            plot.best_model = best_model  # Keep original model if tuning fails
+            plot.best_model = best_model_before_tuning  # Keep original model if tuning fails
 
         
         # After tuning
@@ -3263,11 +3822,12 @@ def main(plot) -> int:
         # print(compare_df)
         
         # Ensemble, Stacking & Blending
-        if plot.ensemble:
+        if plot.ensemble and not Use_subprocess:  # If ensemble is enabled and not using subprocess, create ensemble in main process
+            gc.collect()
             plot.best_model = create_and_compare_ensemble(plot.user_given_name, plot.best_exp, plot.best_model)
-
             # Save best pycaret ensemble model
             model_names = save_models(plot.user_given_name, plot.best_exp, plot.best_model, f'models/{plot.user_given_name}/ensemble_models/pycaret/best_soil_tension_prediction_')
+
 
         # Create predictions to forecast values
         future_features_without_index = future_features.reset_index(drop=True, inplace=False)
@@ -3278,7 +3838,12 @@ def main(plot) -> int:
     # Neural Networks
     else:
         # Tune and create ensemble model
-        if plot.ensemble:
+        if Use_subprocess and plot.ensemble:
+            # Perform entire tuning and ensemble pipeline in subprocess
+            plot.best_model = init_nn_subprocess_tuning_and_ensemble(plot.user_given_name, X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn)
+            # Save best ensemble model
+            #save_models_nn(plot.user_given_name, plot.best_model, f'models/{plot.user_given_name}/ensemble_models/nn/best_tuned_soil_tension_ensemble_prediction_nn_model_', None)
+        elif plot.ensemble and not Use_subprocess:
             tuned_best_models = []
             tuned_best_hps = []
 
@@ -3311,7 +3876,7 @@ def main(plot) -> int:
         # Generate predictions with NN model
         plot.predictions = generate_predictions_nn(plot.best_model, Z_scaled, future_features.index[0], future_features.index[-1])
 
-    # Cut passed time from predictions
+
     # Ensure the index of plot.predictions is datetime with the same timezone
     if plot.predictions.index.tz is None:
         #plot.predictions.index = pd.to_datetime(plot.predictions.index).tz_localize('UTC').tz_convert(TimeUtils.Timezone)
@@ -3324,13 +3889,13 @@ def main(plot) -> int:
     current_time = pd.Timestamp.now(tz=TimeUtils.Timezone).floor('H')
 
     # Now, slice the predictions DataFrame based on the timestamp
-
+    # Cut passed time from predictions
     if not plot.load_data_from_csv:
         plot.predictions = plot.predictions.loc[current_time:]
         #plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]    
     
     # Align predictions with historical data -> TODO: dodgy fix, only trigger in case of bad performance? DEBUG
-    #align_with_latest_sensor_values(plot)
+    align_with_latest_sensor_values(plot)
     plot.predictions['smoothed_values'] = plot.predictions['prediction_label']
 
     # Calculate when threshold will be meet
@@ -3345,6 +3910,265 @@ def main(plot) -> int:
 
     # Return last accumulated reading and threshold timestamp
     return plot.data['rolling_mean_grouped_soil'][-1], plot.threshold_timestamp, plot.predictions
+
+def main(plot) -> int:
+    global Currently_active
+
+    while Currently_active:
+        print(f"[{plot.user_given_name}] Waiting for resources...")
+        time.sleep(Resource_wait_time_seconds)
+
+    Currently_active = True
+
+    print("Check version of pycaret:", pycaret.__version__, "should be >= 3.0")
+    plot.config = plot.read_config()
+
+    # ---------------------------
+    # DATA PIPELINE
+    # ---------------------------
+    train, val, test, X_train, X_val, X_test, y_train, y_val, y_test, \
+    X_train_scaled, X_val_scaled, X_test_scaled, \
+    X_train_cnn, X_val_cnn, X_test_cnn, scaler = data_pipeline(plot)
+
+    # ---------------------------
+    # TRAIN BASE MODELS (TRAIN ONLY)
+    # ---------------------------
+    exp, best_pycaret = create_and_compare_model_reg(train)
+
+    nn_models = train_nn_models(
+        X_train, X_val,
+        y_train, y_val,
+        X_train_scaled, X_val_scaled,
+        X_train_cnn, X_val_cnn,
+        plot.user_given_name
+    )
+
+    # ---------------------------
+    # VALIDATION EVALUATION (NOT TEST!)
+    # ---------------------------
+    results_pycaret = evaluate_against_validation(
+        exp,
+        best_pycaret,
+        val
+    )
+
+    results_nn = evaluate_against_validation_nn(
+        nn_models,
+        X_val_scaled,
+        y_val
+    )
+
+    # ---------------------------
+    # MODEL SELECTION (VALIDATION ONLY)
+    # ---------------------------
+    index, plot.use_pycaret = eval_approach_mix(
+        results_pycaret,
+        results_nn
+    )
+
+    # DEBUG: Force pycaret or nn usage for testing purposes
+    plot.use_pycaret = False
+
+    # ---------------------------
+    # TUNING + ENSEMBLE (NO TEST!)
+    # ---------------------------
+    if plot.use_pycaret:
+        if Use_subprocess:
+            plot.best_model = init_pycaret_subprocess_tuning_and_ensemble(
+                plot.user_given_name,
+                exp,
+                best_pycaret,
+                plot.ensemble
+            )
+        else:
+            plot.best_model = tune_models(exp, best_pycaret)
+
+            if plot.ensemble:
+                plot.best_model = create_and_compare_ensemble(
+                    plot.user_given_name,
+                    exp,
+                    plot.best_model
+                )
+
+    else:
+        if Use_subprocess and plot.ensemble:
+            plot.best_model = init_nn_subprocess_tuning_and_ensemble(
+                plot.user_given_name,
+                X_train_scaled,
+                y_train,
+                X_val_scaled,
+                y_val,
+                nn_models
+            )
+        else:
+            tuned_models = []
+            tuned_hps = []
+
+            for m in nn_models:
+                tuned, hp = tune_model_nn(
+                    X_train_scaled, y_train,
+                    X_val_scaled, y_val,
+                    m
+                )
+                tuned_models.append(tuned)
+                tuned_hps.append(hp)
+
+            if plot.ensemble:
+                results_ensemble = compare_nn_ensembles(
+                    tuned_models,
+                    tuned_hps,
+                    X_train_scaled,
+                    y_train,
+                    X_val_scaled,
+                    y_val
+                )
+                plot.best_model = results_ensemble["best_predictor"]
+            else:
+                plot.best_model = tuned_models[0]
+
+    # ---------------------------
+    # FINAL TRAINING (TRAIN + VAL ONLY)
+    # ---------------------------
+    print("[INFO] Retraining best model on train + val...")
+
+    if plot.use_pycaret:
+        # Use the original `val` (not X_val/y_val) - X_val already had To_be_dropped columns
+        # and the target stripped out by prepare_data_for_cnn2, so concatenating it with the
+        # still-full `train` produced a column mismatch: every val-derived row ended up with
+        # NaN in those 9 ignored columns (visible as "Rows with missing values: 20.0%" in the
+        # setup summary). Harmless in practice since those columns are ignore_features anyway,
+        # but `val` already has the same columns as `train` and avoids it outright.
+        full_data = pd.concat([train, val], axis=0)
+
+        plot.best_model, plot.best_exp = train_best(plot.best_model, full_data)
+
+    else:
+        X_full = np.concatenate([X_train_scaled, X_val_scaled])
+        y_full = np.concatenate([y_train, y_val])
+
+        if isinstance(plot.best_model, EnsemblePredictor) and plot.best_model.method == "stacking":
+            # Do NOT refit the fold base models in place here: meta_model (Ridge) was fit on
+            # their out-of-fold predictions from CV on X_train. Refitting the base models on
+            # train+val without regenerating those out-of-fold predictions leaves meta_model
+            # calibrated against a distribution the base models no longer produce (in-sample-ish,
+            # overconfident predictions instead of honest out-of-fold ones) - this silently wrecks
+            # accuracy rather than improving it. Properly redoing this would mean rerunning the
+            # K-fold OOF + meta_model fit from compare_nn_ensembles on the combined data, which
+            # isn't exposed here. Leave the already-validly-trained stacking ensemble as-is instead.
+            print("[INFO] Skipping train+val refit for stacking ensemble (would decalibrate meta_model).")
+
+        elif isinstance(plot.best_model, EnsemblePredictor):
+            # average/bagging have no meta-model calibration to invalidate - refitting each
+            # base model in place is safe. predict() reads self.base_models at call time, so
+            # this "retrains the ensemble" without needing to rebuild the wrapper.
+            for m in plot.best_model.base_models:
+                X_full_for_model = adapt_X_for_model(m, X_full)
+                m.fit(
+                    X_full_for_model,
+                    y_full,
+                    epochs=50,
+                    batch_size=32,
+                    verbose=Verbose_logging
+                )
+        else:
+            X_full = adapt_X_for_model(plot.best_model, X_full)
+
+            plot.best_model.fit(
+                X_full,
+                y_full,
+                epochs=50,
+                batch_size=32,
+                verbose=Verbose_logging
+            )
+
+    # ---------------------------
+    # FINAL TEST EVALUATION (ONLY ONCE!)
+    # ---------------------------
+    print("[INFO] Final evaluation on TEST set...")
+
+    if plot.use_pycaret:
+        final_eval, _ = evaluate_against_testset(
+            plot,
+            test,
+            plot.best_exp,
+            plot.best_model
+        )
+    else:
+        final_eval, _ = evaluate_against_testset_nn(
+            plot,
+            plot.best_model,
+            X_test_scaled,
+            y_test
+        )
+
+    # ---------------------------
+    # FUTURE PREDICTIONS
+    # ---------------------------
+    future_features = create_future_values(plot.data, plot)
+    future_features = compare_train_predictions_cols(train, future_features)
+
+    if not plot.use_pycaret:
+        Z, Z_scaled, Z_cnn = prepare_future_values(
+            scaler, future_features, X_train.columns
+        )
+
+    if plot.use_pycaret:
+        preds = generate_predictions(
+            plot.best_model,
+            plot.best_exp,
+            future_features.reset_index(drop=True)
+        )
+        # generate_predictions doesn't reorder/filter rows, so the original datetime index
+        # (dropped above so predict_model() gets a plain-indexed frame) maps back 1:1 by position.
+        preds.index = future_features.index
+    else:
+        preds = generate_predictions_nn(
+            plot.best_model,
+            Z_scaled,
+            future_features.index[0],
+            future_features.index[-1]
+        )
+
+    plot.predictions = preds
+
+    # ---------------------------
+    # FINAL CLEANUP
+    # ---------------------------
+
+    # Ensure the index of plot.predictions is datetime with the same timezone
+    if plot.predictions.index.tz is None:
+        #plot.predictions.index = pd.to_datetime(plot.predictions.index).tz_localize('UTC').tz_convert(TimeUtils.Timezone)
+        plot.predictions.index = pd.to_datetime(plot.predictions.index).tz_localize(TimeUtils.Timezone)
+    else:
+        plot.predictions.index = plot.predictions.index.tz_convert(TimeUtils.Timezone)
+
+    # Create a Timestamp from the current date and time (without microseconds, seconds, and minutes)
+    current_time = pd.Timestamp.now(tz=TimeUtils.Timezone).floor('H')
+
+    # Now, slice the predictions DataFrame based on the timestamp
+    # Cut passed time from predictions
+    if not plot.load_data_from_csv:
+        plot.predictions = plot.predictions.loc[current_time:]
+
+    # Align predictions with historical data -> TODO: dodgy fix, only trigger in case of bad performance? DEBUG
+    align_with_latest_sensor_values(plot)
+    #plot.predictions['smoothed_values'] = plot.predictions['prediction_label']
+
+    # Calculate when threshold will be meet
+    plot.threshold_timestamp = calc_threshold(plot.predictions, 'smoothed_values', plot)
+
+    # Add volumetric water content
+    if plot.sensor_kind == 'tension':
+        plot.predictions = add_volumetric_col_to_df(plot.predictions, "smoothed_values", plot)
+
+    # After finished job set active to false
+    Currently_active = False
+
+    return (
+        plot.data['rolling_mean_grouped_soil'][-1],
+        plot.threshold_timestamp,
+        plot.predictions
+    )
 
 if __name__ == '__main__':
     sys.exit(main())

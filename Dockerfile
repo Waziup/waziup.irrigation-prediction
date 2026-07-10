@@ -41,7 +41,9 @@ RUN \
         python-dateutil \
         joblib==1.3 \
         xmlrunner \
-        psutil
+        psutil \
+        gevent
+        
 # keras tuner check usage, also xmlrunner for unittests, does not need to be included in the image
 
 COPY . /root/src/

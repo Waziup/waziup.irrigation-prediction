@@ -180,9 +180,15 @@ pipeline {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
                     script {
-                        // sh 'rm -f irrigation_prediction_docker_image.tar'
-                        sh "docker save ${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME} > irrigation_prediction_docker_image.tar"
-                        archiveArtifacts artifacts: 'irrigation_prediction_docker_image.tar', fingerprint: true
+                        sh '''
+                        echo "Saving and compressing Docker image..."
+
+                        docker save ${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME} | gzip -9 > irrigation_prediction_docker_image.tar.gz
+
+                        ls -lh irrigation_prediction_docker_image.tar.gz
+                        '''
+
+                        archiveArtifacts artifacts: 'irrigation_prediction_docker_image.tar.gz', fingerprint: true
                     }
                 }
             }

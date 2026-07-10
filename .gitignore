@@ -178,9 +178,14 @@ test-reports/
 
 # include models and subfolders
 !models/.gitkeep
-models/**/**/*.pkl
-models/**/**/*.h5
+models/**/**/**/*.pkl
+models/**/**/**/*.h5
+models/**/**/**/*.keras
+
 # exclude saved metrics
-models/**/**/*.png
-models/**/**/*.json
-models/**/**/*.csv
+models/**/**/**/*.png
+models/**/**/**/*.json
+models/**/**/**/*.csv
+
+# Exclude tmp models
+tmp/*

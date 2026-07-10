@@ -102,4 +102,4 @@ def start(currentPlot):
         currentPlot.prediction_thread.start()
         print("Prediction thread started for plot:", currentPlot.user_given_name)
     else:
-        print("Perdiction Thread: Currently training, prediction will be started after training is finished.")
+        print("Prediction Thread: Currently training, prediction will be started after training is finished.")

@@ -32,6 +32,8 @@ PATH = os.path.dirname(os.path.abspath(__file__))
 
 # Set the threshold to cleanup models to 3 months (approximately 90 days)
 THRESHOLD_DAYS_CLEANUP = 90
+
+Auto_start_training = False # TODO: set to false for production, then training is only started when user clicks on "start training" in UI, otherwise it is started directly when config is present, which can lead to long waiting times on page load if training is heavy
 #---------------------#
 
 
@@ -132,16 +134,17 @@ def schedule_log_cleanup():
         cleaner.start()
 
 class ModelCleanerThread(threading.Thread):
-    def __init__(self, folder_path, interval_days=7, name="ModelCleaner"):
+    def __init__(self, folder_paths, interval_days=7, name="ModelCleaner"):
         super().__init__(name=name)
-        self.folder_path = folder_path
+        self.folder_paths = folder_paths if isinstance(folder_paths, list) else [folder_paths]
         self.interval_days = interval_days
         self.daemon = True
         self.stop_event = threading.Event()
 
     def run(self):
         while not self.stop_event.is_set():
-            delete_old_files(self.folder_path)
+            for folder in self.folder_paths:
+                delete_old_files(folder)
             time.sleep(self.interval_days * 24 * 3600)
 
     def stop(self):
@@ -169,12 +172,14 @@ def delete_old_files(folder_path):
                     print(f"Error deleting file {file_path}: {e}")
 
 # setup function for model cleaner
-def schedule_model_cleanup(folder_path, interval_days=7):
+def schedule_model_cleanup(folder_paths, interval_days=7):
     """
     Periodically runs the delete_old_files function every interval_hours.
     """
-    cleaner = ModelCleanerThread(folder_path, interval_days)
+    cleaner = ModelCleanerThread(folder_paths, interval_days)
     cleaner.start()
+
+    return cleaner
 
 # Get URL of API from .env file => TODO: better with try catch than locals, getenv can still stop backend
 def getApiUrl(url, body):
@@ -1048,22 +1053,31 @@ if __name__ == "__main__":
     # Get saved config from all plots and save it in objects
     getConfigsFromAllFiles()
 
-    # Start thread that deletes old models
-    folder_to_check = "models"
-    schedule_model_cleanup(folder_to_check, interval_days=7)  # Check every week
+    # Start thread that deletes old models and data regularly to save memory
+    folders_to_check = ["models", "tmp", "hyperband_dir", "data/subprocess_temp", "catboost_info"]
+    schedule_model_cleanup(folders_to_check, interval_days=7)  # Check every week
 
     # Clean logs
     schedule_log_cleanup()
 
-    # Former Start serving
+    # Former Start serving -> obsolete, now start in thread with recovery mechanism
     # usock.sockAddr = NetworkUtils.Proxy
     # usock.start() # will be "stuck" in here, code afterwards is not executed
 
-        # Start serving in a dedicated thread
+    # Start serving in a dedicated thread -> no blocking, always 
     server_thread = threading.Thread(target=usock.start_with_recovery, name="HTTP_Server")
     server_thread.daemon = False  # Keep alive until shutdown
     server_thread.start()
     print("Server started and running in thread:", server_thread.name)
+
+    # DEBUG: directly start training for testing purposes, if production check configuration is present
+    #training_thread.start(plot_manager.getCurrentPlot())
+
+    # Start training for all untrained plots that have a config, heavy, only PRODUCTION, DEBUG
+    if Auto_start_training:
+        for p in plot_manager.getPlots().values():
+            if p.configPath and not p.training_finished:
+                training_thread.start(p)
 
     # Keep main thread alive
     try:
