@@ -96,6 +96,7 @@ try:
         session_id=config["session_id"],
         ignore_features=config["ignore_features"],
         train_size=config["train_size"],
+        normalize=config.get("normalize", False),
         verbose=False,
         log_experiment=False,
         html=False    
@@ -242,6 +243,7 @@ try:
         session_id=config["session_id"],
         ignore_features=config["ignore_features"],
         train_size=config["train_size"],
+        normalize=config.get("normalize", False),
         verbose=False,
         log_experiment=False,
         html=False
@@ -398,6 +400,7 @@ try:
         session_id=config["session_id"],
         ignore_features=config["ignore_features"],
         train_size=config["train_size"],
+        normalize=config.get("normalize", False),
         verbose=False,
         log_experiment=False,
         html=False

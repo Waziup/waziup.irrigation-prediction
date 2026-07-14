@@ -82,6 +82,11 @@ class TrainingThread(threading.Thread):
                 self.currentPlot.currently_training = False
                 self.startTrainingNow = False
 
+                # main() has returned: its train/val/test frames and scaled arrays are
+                # gone with its stack frame, so this trim hands their pages back to the
+                # OS before the days-long idle wait (no live objects are touched)
+                create_model.free_memory(label="training thread idle")
+
                 end_time = datetime.now().replace(microsecond=0)
                 duration = end_time - start_time
                 print("Training finished for plot: " + self.currentPlot.user_given_name + ", at: ", end_time, "Duration:", duration)

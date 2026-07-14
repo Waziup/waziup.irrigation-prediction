@@ -82,7 +82,12 @@ class Plot:
         self.use_pycaret = True                             # Flag can be switched to decide on model usage
         self.load_data_from_csv = False                     # Flag can be switched to decide on data source
         self.ensemble = True                                # Flag to use ensemble/stacking model
-        self.data_from_csv = "data/debug/binned_removed_new_for_app.csv"
+        # Synthetic but weather-consistent debug dataset: tension simulated from real ERA5
+        # weather at plot1's GPS (51.023591, 13.744087 / Dresden), Jun 2022 - Jun 2023, via a
+        # leaky soil-water bucket with ~15 irrigation events. The old file
+        # (binned_removed_new_for_app.csv) has 2 of 3 sensors failing (77%/28% zero-dropouts)
+        # which corrupts the grouped target and makes it unlearnable.
+        self.data_from_csv = "data/debug/synthetic_tension_dresden.csv"
         # Load former irrigations from file "data/irrigations.json" DEBUG
         self.load_irrigations_from_file = False
         self.irrigations_from_json = 'data/irrigations_plot_' + str(id)  + '.json'

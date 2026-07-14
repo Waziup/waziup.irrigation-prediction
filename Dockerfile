@@ -5,6 +5,9 @@ FROM python:3.9-slim-bullseye
 # Set environment variables to ensure non-interactive apt-get and prevent cache busting
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Cap glibc malloc arenas
+ENV MALLOC_ARENA_MAX=2
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     gcc \

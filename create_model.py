@@ -8,6 +8,7 @@ Created on Wed May  3 10:54:49 2023
 #TODO: clear imports
 
 import csv
+import ctypes
 from datetime import timedelta, datetime
 import gc
 import json
@@ -154,11 +155,14 @@ class MemoryLimitReachedError(Exception):
     """Custom exception to stop the entire tuning process."""
     pass
 
-# Restrict memory usage, if more than 75% is used, stop training to prevent crashing of the device
+# Restrict memory usage: stop training before the kernel OOM-killer kills the whole
+# process - on a 4GB RPi the 99% DEBUG setting never fires in time (was 75 originally)
+Memory_limit_percent = 85
+
 class MemoryLimitCallback(tensorflow.keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
-        if psutil.virtual_memory().percent > 99: #DEBUG was 75
-            print("!!! Memory limit reached (>75%). Terminating all tuning trials. !!!")
+        if psutil.virtual_memory().percent > Memory_limit_percent:
+            print(f"!!! Memory limit reached (>{Memory_limit_percent}%). Terminating all tuning trials. !!!")
             # Raising an error here breaks out of tuner.search() completely
             raise MemoryLimitReachedError("System memory exhausted during tuning")
 
@@ -167,6 +171,32 @@ class HardCleanupCallback(tensorflow.keras.callbacks.Callback):
         import gc
         tensorflow.keras.backend.clear_session()
         gc.collect()
+
+# Release RAM back to the OS after memory-intensive stages - essential on 4GB RPi.
+# gc.collect() alone is not enough: Python/NumPy return freed memory to glibc's
+# allocator, but glibc keeps the pages in its arenas, so process RSS stays high.
+# malloc_trim(0) is what actually hands the freed pages back to the kernel.
+def free_memory(clear_keras=False, label=""):
+    """
+    clear_keras=True additionally resets the global Keras/TF state (graphs, cached
+    tf.functions). Only pass it when NO already-built Keras model is needed afterwards
+    - models built before clear_session() are not reliably usable for further
+    fit/clone calls. Weights of unreferenced models are freed by gc either way.
+    """
+    if clear_keras:
+        tensorflow.keras.backend.clear_session()
+
+    gc.collect()
+
+    try:
+        # glibc only; harmless no-op guard elsewhere (e.g. musl-based images)
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+    if Verbose_logging:
+        rss_mb = psutil.Process().memory_info().rss / 1024 ** 2
+        print(f"[MEM] freed after {label or 'cleanup'}: RSS={rss_mb:.0f}MB, system={psutil.virtual_memory().percent:.0f}%")
 
 # Resample and interpolate
 def check_gaps(data):
@@ -457,7 +487,7 @@ def soil_tension_to_volumetric_water_content_log(soil_tension, soil_water_retent
     content_log = np.log10([point[1] for point in soil_water_retention_curve])
 
     # Interpolate in logarithmic space
-    interpolated_content_log = np.interp(np.log10(soil_tension), tensions_log, content_log)
+    interpolated_content_log = np.interpolate(np.log10(soil_tension), tensions_log, content_log)
 
     # Transform back to linear space
     interpolated_content = 10 ** interpolated_content_log
@@ -671,6 +701,71 @@ def include_irrigation_amount(df, plot):
     return df
 
 
+# Weather-derived features for irrigation timing. Soil tension has physical memory:
+# today's value depends on how wet the last days were, not just on the current hour.
+# Every input is a weather or clock column (never the target), so the same function can
+# run on the training frame (create_features) and on the forecast frame
+# (create_future_values) without leaking target information, and all features stay
+# computable at prediction time from the weather forecast alone.
+def add_weather_derived_features(df):
+    # Window sizes in rows (rows are resampled to Sample_rate minutes).
+    # min_periods=1 keeps partial sums at the start of the frame instead of NaN rows.
+    def rows(hours):
+        return max(1, int(hours * 60 / Sample_rate))
+
+    # Antecedent water supply and atmospheric demand
+    df['rain_sum_24h'] = df['Rain'].rolling(rows(24), min_periods=1).sum()
+    df['rain_sum_72h'] = df['Rain'].rolling(rows(72), min_periods=1).sum()
+    df['rain_sum_7d'] = df['Rain'].rolling(rows(168), min_periods=1).sum()
+    df['et0_sum_72h'] = df['Et0_evapotranspiration'].rolling(rows(72), min_periods=1).sum()
+
+    # Simplified running soil water balance over the last 7 days: supply - demand.
+    # Supply includes measured irrigation when a flow meter provides it (the forecast
+    # frame assigns irrigation_amount=0, i.e. "behavior without watering", which is the
+    # scenario the prediction is asking about).
+    water_in = df['Rain']
+    if 'irrigation_amount' in df.columns:
+        water_in = water_in + df['irrigation_amount'].fillna(0)
+    et0_sum_7d = df['Et0_evapotranspiration'].rolling(rows(168), min_periods=1).sum()
+    df['water_balance_7d'] = water_in.rolling(rows(168), min_periods=1).sum() - et0_sum_7d
+
+    # Vapour pressure deficit (kPa, Tetens formula): drives transpiration more directly
+    # than temperature or humidity alone
+    saturation_vp = 0.6108 * np.exp(17.27 * df['Temperature'] / (df['Temperature'] + 237.3))
+    df['vpd'] = saturation_vp * (1 - df['Humidity'] / 100)
+
+    # Hours since last significant rain (>0.5mm), capped at 7 days (also the fill value
+    # for leading rows before the first observed rain)
+    positions = np.arange(len(df))
+    rained = df['Rain'].to_numpy(dtype=float) > 0.5
+    last_rain_pos = pd.Series(np.where(rained, positions, np.nan)).ffill().to_numpy()
+    hours_since = (positions - last_rain_pos) * Sample_rate / 60
+    df['hours_since_rain'] = pd.Series(hours_since, index=df.index).fillna(168.0).clip(upper=168.0)
+
+    # Cumulative atmospheric demand since the soil was last wetted by rain - the classic
+    # dry-down signal: tension rises roughly with accumulated ET0 after wetting. Capped at
+    # the 7-day ET0 total so the value stays identical whether it is computed on the full
+    # training history or on the 7-day warmup prepended in create_future_values.
+    wetting_group = pd.Series(np.cumsum(rained), index=df.index)
+    et0_since = df['Et0_evapotranspiration'].groupby(wetting_group).cumsum()
+    df['et0_since_rain'] = np.minimum(et0_since, et0_sum_7d)
+
+    # Cyclical encoding of hour, so 23:00 and 00:00 are neighbours (mainly for the NNs;
+    # the raw 'hour' column stays available for the tree models)
+    df['hour_sin'] = np.sin(2 * np.pi * df['hour'] / 24)
+    df['hour_cos'] = np.cos(2 * np.pi * df['hour'] / 24)
+
+    return df
+
+# Column names produced by add_weather_derived_features - single source of truth so the
+# training and forecast frames cannot drift apart (compare_train_predictions_cols crashes
+# on a column mismatch between them)
+Weather_derived_feature_cols = [
+    'rain_sum_24h', 'rain_sum_72h', 'rain_sum_7d', 'et0_sum_72h',
+    'water_balance_7d', 'vpd', 'hours_since_rain', 'et0_since_rain',
+    'hour_sin', 'hour_cos'
+]
+
 # Augment the dataset creating new features
 def create_features(data, plot):
     # Create average cols
@@ -736,7 +831,7 @@ def create_features(data, plot):
     data = remove_large_gaps(data, 'rolling_mean_grouped_soil', 6)
 
     # Check gaps => TODO: not every col should interpolated (month?), some data is lost here
-    data = fill_gaps(data) 
+    data = fill_gaps(data)
 
     # Add calculated pump state or actual irrigation amount
     # Calc gradient
@@ -748,7 +843,12 @@ def create_features(data, plot):
     else:
         data['pump_state'] = int(0)
         data = add_pump_state(data, plot)
-        
+
+    # Add weather-derived features (antecedent rain/ET0 windows, water balance, VPD,
+    # hours since rain, ET0 since rain, cyclical hour) - after fill_gaps so the windows
+    # see complete series, and after the irrigation block so water_balance_7d can include
+    # measured irrigation amounts where a flow meter exists
+    data = add_weather_derived_features(data)
 
     # also add hours since last irrigation => TODO: check later, still an error, !!!!!questionable whether it is useful!!!!!
     #data = hours_since_pump_was_turned_on(data)
@@ -1170,12 +1270,16 @@ def create_and_compare_model_reg(train):
     cv_strategy = TimeSeriesSplit(n_splits=fold_count, gap=gap)
 
     # Run pycarets setup
+    # normalize=True: z-score inside pycaret's own pipeline (fit on the train split only,
+    # so leakage-safe). Irrelevant for the tree/boosting models but needed by the
+    # scale-sensitive ones (knn, svm, mlp, regularized linear) once the full model zoo runs.
     s = re_exp.setup(train,
               target = 'rolling_mean_grouped_soil',
               session_id = 123,
               verbose = Verbose_logging,
               ignore_features = To_be_dropped,
               train_size = train_size,
+              normalize = True,
               fold_strategy=cv_strategy,
               data_split_shuffle=False,
               fold_shuffle=False,
@@ -1193,6 +1297,7 @@ def create_and_compare_model_reg(train):
         "numeric_features": re_exp._fxs.get("Numeric", []),
         "categorical_features": re_exp._fxs.get("Categorical", []),
         "train_size": re_exp.train_size_param if hasattr(re_exp, "train_size_param") else 0.8,
+        "normalize": True,
         "verbose": Verbose_logging
     }
     
@@ -1389,6 +1494,24 @@ def create_future_values(data, plot):
     else:
         new_data = new_data.assign(pump_state=0)
 
+    # Compute the same weather-derived features as in training (create_features).
+    # The rolling windows need antecedent history: prepend the last 7 days of observed
+    # weather from the training data so the windows at the forecast start see the real
+    # recent conditions instead of an empty warmup, then cut the history rows off again.
+    feature_inputs = ['Temperature', 'Humidity', 'Rain', 'Et0_evapotranspiration', 'hour']
+    # Give water_balance_7d the measured irrigation history where a flow meter exists
+    # (forecast rows themselves carry irrigation_amount=0, assigned above)
+    if 'irrigation_amount' in new_data.columns and 'irrigation_amount' in data.columns:
+        feature_inputs.append('irrigation_amount')
+    first_forecast_ts = new_data['Timestamp'].iloc[0]
+    history = data.loc[data.index < first_forecast_ts, feature_inputs].tail(int(168 * 60 / Sample_rate))
+    combined = pd.concat(
+        [history.reset_index(drop=True), new_data[feature_inputs].reset_index(drop=True)],
+        axis=0, ignore_index=True
+    )
+    combined = add_weather_derived_features(combined)
+    new_data[Weather_derived_feature_cols] = combined[Weather_derived_feature_cols].tail(len(new_data)).to_numpy()
+
     return new_data
 
 # Evaluate PyCaret models on validation set
@@ -1571,12 +1694,13 @@ def train_best(best_model, data):
     cv_strategy = TimeSeriesSplit(n_splits=fold_count, gap=gap)
 
     # Run pycarets setup
-    s = re_exp.setup(data, 
+    s = re_exp.setup(data,
               target = 'rolling_mean_grouped_soil',
               session_id = 123,
               verbose = Verbose_logging,
-              ignore_features = To_be_dropped, 
+              ignore_features = To_be_dropped,
               train_size = train_size,
+              normalize = True,
               fold_strategy=cv_strategy,
               data_split_shuffle=False,
               fold_shuffle=False,
@@ -1591,6 +1715,7 @@ def train_best(best_model, data):
         "numeric_features": re_exp._fxs.get("Numeric", []),
         "categorical_features": re_exp._fxs.get("Categorical", []),
         "train_size": re_exp.train_size_param if hasattr(re_exp, "train_size_param") else 0.8,
+        "normalize": True,
         "verbose": Verbose_logging
     }
     
@@ -1930,15 +2055,19 @@ def prepare_data_for_cnn2(
 
     # ---------------------------------------
     # SCALING
-    # FIT ONLY ON TRAIN
+    # FIT ONLY ON TRAIN, AND ONLY WHEN TRAINING
     # ---------------------------------------
     if training:
         plot.data_scaler = StandardScaler()
+        X_train_scaled = plot.data_scaler.fit_transform(X_train)
     else:
-        if not hasattr(plot, 'data_scaler'):
-            raise ValueError("Scaler not found in plot object.")
-
-    X_train_scaled = plot.data_scaler.fit_transform(X_train)
+        # Prediction path: the frozen model learned under this scaler's statistics, so the
+        # stored scaler must be reused as-is. Refitting here (the old behavior - the fit ran
+        # unconditionally) fed the model inputs on a drifting scale as new data accumulated
+        # between retrainings.
+        if getattr(plot, 'data_scaler', None) is None or not hasattr(plot.data_scaler, 'mean_'):
+            raise ValueError("No fitted scaler found in plot object - run a training first.")
+        X_train_scaled = plot.data_scaler.transform(X_train)
 
     # IMPORTANT:
     # NEVER FIT AGAIN
@@ -2631,10 +2760,23 @@ def eval_approach(results, results_nn, metrics = 'mae'):
 
     return index, use_pycaret
 
-def eval_approach_mix(results_pycaret, results_nn, weights=None):
+# Decide which approach is the winning approach based on a weighted mixture of normalized MAE, MPE, and R2.
+def eval_approach_mix(results_pycaret, results_nn, weights=None, top_k=3):
     """
-    Compare pycaret and NN models using a weighted mixture of normalized MAE, MPE, R2.
-    Normalization uses min-max scaling across ALL models so each metric has comparable influence.
+    Compare the pycaret and NN approaches using a weighted mixture of normalized
+    MAE, |MPE| and R2 (scaled across ALL models so each metric has comparable influence).
+
+    The approaches are compared on the MEAN of their top_k combined scores, not on
+    their single best model: the winning side proceeds as a *group* into tuning and
+    ensembling (top 3), and a single lucky standout in the much larger pycaret pool
+    would otherwise win disproportionately often (a max over ~19 noisy candidates
+    beats a max over ~3 even when both families are equally good).
+
+    Normalization is winsorized at the 5th/95th percentile per metric, so one broken
+    candidate (e.g. an R2 of -9999) cannot stretch the scale and wash out the real
+    differences between the healthy models. Models with NaN metrics score worst.
+
+    Returns (best_model_index_within_winning_group, use_pycaret). Ties go to pycaret.
     """
 
     if weights is None:
@@ -2642,35 +2784,41 @@ def eval_approach_mix(results_pycaret, results_nn, weights=None):
 
     # Merge all results temporarily for normalization
     all_results = results_pycaret + results_nn
+    if not all_results:
+        raise ValueError("eval_approach_mix: both result lists are empty")
 
-    # Extract metrics into arrays
-    maes = np.array([r["results"][0] for r in all_results], dtype=float)          # MAE
-    mpes = np.abs(np.array([r["results"][2] for r in all_results], dtype=float))  # abs(MPE)
-    r2s  = np.array([r["results"][3] for r in all_results], dtype=float)          # R2
+    # Extract metrics into arrays; negate lower-is-better ones so higher is always better
+    maes = -np.array([r["results"][0] for r in all_results], dtype=float)          # MAE
+    mpes = -np.abs(np.array([r["results"][2] for r in all_results], dtype=float))  # abs(MPE)
+    r2s  = np.array([r["results"][3] for r in all_results], dtype=float)           # R2
 
-    # Convert lower-is-better to higher-is-better
-    inv_mae = maes.max() - maes
-    inv_mpe = mpes.max() - mpes
+    # Clip each metric to its 5th..95th percentile before scaling: a single broken
+    # model must lose, but must not distort how all the others compare to each other
+    def winsorize(x):
+        finite = x[np.isfinite(x)]
+        if len(finite) == 0:
+            return x
+        lo, hi = np.percentile(finite, 5), np.percentile(finite, 95)
+        return np.clip(x, lo, hi)
 
-    # R2 is already higher-is-better
-
-    # Min-max normalize each metric to [0..1]
+    # Min-max normalize each metric to [0..1] (NaN-tolerant)
     def minmax(x):
-        mn, mx = x.min(), x.max()
-        if mx == mn:
+        mn, mx = np.nanmin(x), np.nanmax(x)
+        if not np.isfinite(mx - mn) or mx == mn:
             return np.full_like(x, 0.5, dtype=float)
         return (x - mn) / (mx - mn)
 
-    s_mae = minmax(inv_mae)
-    s_mpe = minmax(inv_mpe)
-    s_r2  = minmax(r2s)
+    s_mae = minmax(winsorize(maes))
+    s_mpe = minmax(winsorize(mpes))
+    s_r2  = minmax(winsorize(r2s))
 
-    # Combined weighted scores
+    # Combined weighted scores; a model with NaN metrics gets the worst score
     combined_scores = (
         weights["mae"] * s_mae +
         weights["mpe"] * s_mpe +
         weights["r2"] * s_r2
     )
+    combined_scores = np.nan_to_num(combined_scores, nan=0.0)
 
     # Split back to pycaret and nn ranges
     n_pycaret = len(results_pycaret)
@@ -2678,18 +2826,25 @@ def eval_approach_mix(results_pycaret, results_nn, weights=None):
     scores_pycaret = combined_scores[:n_pycaret]
     scores_nn      = combined_scores[n_pycaret:]
 
-    # Best from each group
-    best_pycaret_idx = int(np.argmax(scores_pycaret))
-    best_nn_idx      = int(np.argmax(scores_nn))
+    # Group strength: mean of the top_k scores (an empty side loses outright)
+    def group_strength(scores):
+        if len(scores) == 0:
+            return -np.inf
+        k = min(top_k, len(scores))
+        return float(np.sort(scores)[-k:].mean())
 
-    best_pycaret_score = scores_pycaret[best_pycaret_idx]
-    best_nn_score      = scores_nn[best_nn_idx]
+    strength_pycaret = group_strength(scores_pycaret)
+    strength_nn      = group_strength(scores_nn)
+
+    if Verbose_logging:
+        print(f"[SELECTION] pycaret: top-{top_k} mean={strength_pycaret:.3f} (n={n_pycaret}) | "
+              f"nn: top-{top_k} mean={strength_nn:.3f} (n={len(scores_nn)})")
 
     # Compare approaches
-    if best_pycaret_score >= best_nn_score:
-        return best_pycaret_idx, True      # use pycaret
+    if strength_pycaret >= strength_nn:
+        return int(np.argmax(scores_pycaret)), True      # use pycaret
     else:
-        return best_nn_idx, False          # use NN
+        return int(np.argmax(scores_nn)), False          # use NN
 
 # Compare dataframes cols to be sure that they match, otherwise drop
 def compare_train_predictions_cols(train, future_features):
@@ -2885,8 +3040,9 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
         except MemoryLimitReachedError as e:
             print(f"Tuning aborted: {e}")
 
-        gc.collect()
-        tensorflow.keras.backend.clear_session()
+        # Same clear_session+gc as before, plus malloc_trim so the Hyperband trials'
+        # memory actually leaves the process (the final model is rebuilt after this)
+        free_memory(clear_keras=True, label="hyperband search")
 
         # Print the best hyperparameters
         best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
@@ -3638,8 +3794,9 @@ def predict_with_updated_data(plot):
     # Before training starts, lock the resource    
     Currently_active = True
     
-    # Run data pipeline to obtain latest data
-    train, val, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = data_pipeline(plot)
+    # Run data pipeline to obtain latest data. training=False: reuse the scaler the frozen
+    # model was trained under instead of refitting it on the newly accumulated data.
+    train, val, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = data_pipeline(plot, training=False)
     # Create future value set to feed new data to model
     future_features = create_future_values(plot.data, plot)
     # Compare dataframes cols to be sure that they match, otherwise drop
@@ -3664,15 +3821,19 @@ def predict_with_updated_data(plot):
     # Add volumetric water content
     if plot.sensor_kind == 'tension':
         plot.predictions = add_volumetric_col_to_df(plot.predictions, "smoothed_values", plot)
-        
+
+    # Runs every 3h on the RPi: return the freed frames to the OS before idling.
+    # No clear_keras - plot.best_model must stay usable for the next cycle.
+    free_memory(label="prediction run")
+
     # After finished job set active to false
     Currently_active = False
 
-    # Return last accumulated reading and threshold timestamp currentSoilTension, threshold_timestamp, predictions 
+    # Return last accumulated reading and threshold timestamp currentSoilTension, threshold_timestamp, predictions
     return plot.data['rolling_mean_grouped_soil'][-1], plot.threshold_timestamp, plot.predictions
 
 
-def data_pipeline(plot):
+def data_pipeline(plot, training=True):
     # Data preparation pipeline, calls other subfunction to perform the task
     # Classical regression
     plot.data = prepare_data(plot)
@@ -3682,11 +3843,11 @@ def data_pipeline(plot):
         #Data.drop(Data.index[-1], inplace=True)
         plot.data.dropna(inplace=True)
 
-    # Split dataset  
+    # Split dataset
     train, val, test = split_by_ratio(plot.data) # here a split is done to rule out the models that are overfitting
-    
+
     # NN
-    X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = prepare_data_for_cnn2(plot, train, val, test, 'rolling_mean_grouped_soil')
+    X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = prepare_data_for_cnn2(plot, train, val, test, 'rolling_mean_grouped_soil', training=training)
 
     return train, val, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler 
 
@@ -3943,6 +4104,9 @@ def main(plot) -> int:
         plot.user_given_name
     )
 
+    # keras models are still live - do not clear the session here
+    free_memory(label="base model training")
+
     # ---------------------------
     # VALIDATION EVALUATION (NOT TEST!)
     # ---------------------------
@@ -3967,12 +4131,19 @@ def main(plot) -> int:
     )
 
     # DEBUG: Force pycaret or nn usage for testing purposes
-    plot.use_pycaret = False
+    #plot.use_pycaret = False
 
     # ---------------------------
     # TUNING + ENSEMBLE (NO TEST!)
     # ---------------------------
     if plot.use_pycaret:
+        # NN lost the selection: drop all 5 keras models and the TF session state
+        # before the memory-heavy tuning stage (safe - no keras model is used again)
+        del nn_models
+        free_memory(clear_keras=True, label="discarding NN branch")
+
+        # only use best 3 models for tuning and ensemble creation
+        best_pycaret = best_pycaret[:3]
         if Use_subprocess:
             plot.best_model = init_pycaret_subprocess_tuning_and_ensemble(
                 plot.user_given_name,
@@ -3991,6 +4162,18 @@ def main(plot) -> int:
                 )
 
     else:
+        # Throw the worst architectures away before the expensive part: only the 3 best
+        # NN models by validation R2 go into Hyperband tuning and ensemble creation.
+        top_nn_models = evaluate_results_and_choose_top_n(
+            results_nn, nn_models, 3, pycaret_format=False
+        )
+
+        # pycaret lost the selection: release its experiment (holds the dataset plus
+        # every candidate pipeline) and the 2 losing keras models. NO clear_keras here -
+        # the top 3 keras models must stay usable for tuning/ensembling.
+        del exp, best_pycaret, nn_models
+        free_memory(label="discarding pycaret branch")
+
         if Use_subprocess and plot.ensemble:
             plot.best_model = init_nn_subprocess_tuning_and_ensemble(
                 plot.user_given_name,
@@ -3998,13 +4181,13 @@ def main(plot) -> int:
                 y_train,
                 X_val_scaled,
                 y_val,
-                nn_models
+                top_nn_models
             )
         else:
             tuned_models = []
             tuned_hps = []
 
-            for m in nn_models:
+            for m in top_nn_models:
                 tuned, hp = tune_model_nn(
                     X_train_scaled, y_train,
                     X_val_scaled, y_val,
@@ -4026,6 +4209,9 @@ def main(plot) -> int:
             else:
                 plot.best_model = tuned_models[0]
 
+    # plot.best_model may be a live keras model/ensemble - no clear_keras
+    free_memory(label="tuning + ensemble")
+
     # ---------------------------
     # FINAL TRAINING (TRAIN + VAL ONLY)
     # ---------------------------
@@ -4046,6 +4232,27 @@ def main(plot) -> int:
         X_full = np.concatenate([X_train_scaled, X_val_scaled])
         y_full = np.concatenate([y_train, y_val])
 
+        # The tuned model already converged against a real validation set during tuning
+        # (Hyperband + EarlyStopping). Continuing to fit it for a flat 50 unmonitored epochs
+        # on train+val overfits it right past that optimum - validation R2 looks fine but the
+        # final test evaluation tanks. Hold the trailing ~10% of train+val out of the refit
+        # purely as an early-stopping monitor: chronological slice (no shuffle), so the
+        # monitor stays a true "future" segment relative to the refit data.
+        monitor_size = max(1, int(len(X_full) * 0.1))
+        X_refit, X_monitor = X_full[:-monitor_size], X_full[-monitor_size:]
+        y_refit, y_monitor = y_full[:-monitor_size], y_full[-monitor_size:]
+
+        def refit_nn(m):
+            m.fit(
+                adapt_X_for_model(m, X_refit),
+                y_refit,
+                validation_data=(adapt_X_for_model(m, X_monitor), y_monitor),
+                epochs=50,
+                batch_size=32,
+                callbacks=[EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)],
+                verbose=Verbose_logging
+            )
+
         if isinstance(plot.best_model, EnsemblePredictor) and plot.best_model.method == "stacking":
             # Do NOT refit the fold base models in place here: meta_model (Ridge) was fit on
             # their out-of-fold predictions from CV on X_train. Refitting the base models on
@@ -4062,24 +4269,12 @@ def main(plot) -> int:
             # base model in place is safe. predict() reads self.base_models at call time, so
             # this "retrains the ensemble" without needing to rebuild the wrapper.
             for m in plot.best_model.base_models:
-                X_full_for_model = adapt_X_for_model(m, X_full)
-                m.fit(
-                    X_full_for_model,
-                    y_full,
-                    epochs=50,
-                    batch_size=32,
-                    verbose=Verbose_logging
-                )
+                refit_nn(m)
         else:
-            X_full = adapt_X_for_model(plot.best_model, X_full)
+            refit_nn(plot.best_model)
 
-            plot.best_model.fit(
-                X_full,
-                y_full,
-                epochs=50,
-                batch_size=32,
-                verbose=Verbose_logging
-            )
+    # plot.best_model may be a live keras model/ensemble - no clear_keras
+    free_memory(label="final training")
 
     # ---------------------------
     # FINAL TEST EVALUATION (ONLY ONCE!)
