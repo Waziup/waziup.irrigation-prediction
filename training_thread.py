@@ -58,7 +58,7 @@ class TrainingThread(threading.Thread):
 
                 file_path = pathlib.Path('data/debug/saved_variables_plot_' + str(self.currentPlot.id) + '.pkl')
 
-                if create_model.Perform_training:
+                if create_model.state.Perform_training:
                     # Call create model function
                     currentSoilTension, self.currentPlot.threshold_timestamp, self.currentPlot.predictions = create_model.main(self.currentPlot)
                     
@@ -98,8 +98,8 @@ class TrainingThread(threading.Thread):
                 # Start prediction process if not running
                 if (
                     self.currentPlot.prediction_thread is None 
-                    and not create_model.SkipDataPreprocessing
-                    and not create_model.SkipTraining
+                    and not create_model.state.SkipDataPreprocessing
+                    and not create_model.state.SkipTraining
                 ):
                     prediction_thread.start(self.currentPlot)
                 else:
@@ -108,7 +108,7 @@ class TrainingThread(threading.Thread):
             except Exception as e:
                 print(f"[{self.currentPlot.user_given_name }] Training thread error: {e}. Retrying after {Restart_time/60} minute.")
                 # Release resources
-                create_model.Currently_active = False
+                create_model.state.Currently_active = False
                 if self.stop_event.wait(timeout=Restart_time):
                     break
 

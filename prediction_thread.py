@@ -41,7 +41,7 @@ class PredictionThread(threading.Thread):
 
                 file_path = pathlib.Path('saved_variables_plot_' + str(self.currentPlot.id) +'.pkl')
 
-                if create_model.Perform_training: #same var is used here to preserve functionality
+                if create_model.state.Perform_training: #same var is used here to preserve functionality
                     # Call predict_with_updated_data function
                     currentSoilTension, self.currentPlot.threshold_timestamp, self.currentPlot.predictions = create_model.predict_with_updated_data(self.currentPlot)
 
@@ -80,7 +80,7 @@ class PredictionThread(threading.Thread):
             except Exception as e:
                 print(f"[{self.currentPlot.user_given_name }] Prediction thread error: {e}. Retrying after {Restart_time/60} minute.")
                 # Release resources
-                create_model.Currently_active = False
+                create_model.state.Currently_active = False
                 time.sleep(Restart_time)  # Retry after 30 minute if there is an error
 
     def stop(self):
