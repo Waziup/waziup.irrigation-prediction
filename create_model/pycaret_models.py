@@ -58,9 +58,9 @@ from .runtime import custom_exception_hook
 def create_and_compare_model_reg(train):
 # (flag now lives in state module)
 
-    # Disable logging to a file
-    #logging.basicConfig(filename=None, level=logging.INFO)
-    logging.basicConfig(filename="logs.log", level=logging.INFO)
+    # Logging is configured once at startup in main.setup_logging() (RotatingFileHandler,
+    # size-capped). Do not call logging.basicConfig here - it re-pointed the root logger at
+    # an uncapped logs.log on every training run.
 
     # create regression exp
     re_exp = pycaret.regression.RegressionExperiment()

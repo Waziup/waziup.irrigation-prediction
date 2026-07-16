@@ -429,7 +429,7 @@ try:
             m = m.steps[-1][1]
 
     # Save best tuned pycaret model
-    model_names = save_models("{plot_name}", exp, tuned_best_models, f'models/"{plot_name}"/tuned_models/pycaret/best_soil_tension_prediction_')
+    model_names = save_models("{plot_name}", exp, tuned_best_models, f'models/{plot_name}/tuned_models/pycaret/best_soil_tension_prediction_')
 
     # Run ensemble logic
     ensemble_best_model = create_and_compare_ensemble(

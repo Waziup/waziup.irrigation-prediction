@@ -14,10 +14,18 @@ from dotenv import load_dotenv
 import pandas as pd
 import usock
 import os
+import glob
+import shutil
+import logging
+from logging.handlers import RotatingFileHandler
 import pathlib
 import numpy as np
 from collections import defaultdict
 from dateutil import parser
+
+# Quiet pycaret's very chatty INFO logging - must be set BEFORE create_model imports pycaret
+os.environ.setdefault("PYCARET_CUSTOM_LOGGING_LEVEL", "CRITICAL")
+os.environ.setdefault("PYCARET_NO_LOGGING", "1")
 
 import create_model
 import actuation
@@ -32,6 +40,8 @@ PATH = os.path.dirname(os.path.abspath(__file__))
 
 # Set the threshold to cleanup models to 3 months (approximately 90 days)
 THRESHOLD_DAYS_CLEANUP = 90
+# Per-run scratch dirs in tmp/ are dead after the next run; set to 90 to match if preferred
+TMP_DIR_CLEANUP_DAYS = 2
 
 Auto_start_training = False # TODO: set to false for production, then training is only started when user clicks on "start training" in UI, otherwise it is started directly when config is present, which can lead to long waiting times on page load if training is heavy
 #---------------------#
@@ -120,6 +130,18 @@ class LogCleanerThread(threading.Thread):
         self.stop_thread.set()
 
 # setup function for log cleaner => TODO: changed function WITHOUT TESTING IT!!!!!!!!!!!!!!!!!
+# Bound logs.log by size via rotation. Age-based cleanup cannot bound an actively
+# written log (its mtime stays recent), so rotation is the real cap here. Configured
+# once on the root logger; pycaret's basicConfig call is then a no-op (root has a handler).
+def setup_logging():
+    handler = RotatingFileHandler("logs.log", maxBytes=30 * 1024 * 1024, backupCount=1)
+    handler.setFormatter(logging.Formatter("%(asctime)s:%(levelname)s:%(message)s"))
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(handler)
+    # runtime-effective even after pycaret is already imported
+    logging.getLogger("pycaret").setLevel(logging.WARNING)
+
 def schedule_log_cleanup():
     logs_to_clean = [
         ("logs.log", 90),       # Python log file
@@ -134,17 +156,27 @@ def schedule_log_cleanup():
         cleaner.start()
 
 class ModelCleanerThread(threading.Thread):
-    def __init__(self, folder_paths, interval_days=7, name="ModelCleaner"):
+    def __init__(self, file_paths, dir_globs=None, file_globs=None,
+                 interval_days=7, name="ModelCleaner"):
         super().__init__(name=name)
-        self.folder_paths = folder_paths if isinstance(folder_paths, list) else [folder_paths]
+        # file_paths: folders to walk, pruning old FILES but keeping the folder tree
+        self.file_paths = file_paths if isinstance(file_paths, list) else [file_paths]
+        # dir_globs: glob patterns whose WHOLE matching folders are deleted once old
+        self.dir_globs = dir_globs or []
+        # file_globs: glob patterns whose matching FILES are pruned (folder kept)
+        self.file_globs = file_globs or []
         self.interval_days = interval_days
         self.daemon = True
         self.stop_event = threading.Event()
 
     def run(self):
         while not self.stop_event.is_set():
-            for folder in self.folder_paths:
-                delete_old_files(folder)
+            for folder in self.file_paths:
+                delete_old_files(folder)                          # prune files, keep tree
+            for pattern in self.dir_globs:
+                delete_old_dirs(pattern, TMP_DIR_CLEANUP_DAYS)    # delete whole scratch dirs
+            for pattern in self.file_globs:
+                delete_old_glob_files(pattern)                    # prune specific files
             time.sleep(self.interval_days * 24 * 3600)
 
     def stop(self):
@@ -171,12 +203,37 @@ def delete_old_files(folder_path):
                 except Exception as e:
                     print(f"Error deleting file {file_path}: {e}")
 
+# Deletes WHOLE folders matching a glob once older than age_days (per-run scratch dirs).
+# Uses glob.glob because os.walk does NOT expand '*' - passing "tmp/tuning_*" to os.walk
+# silently matches nothing, which is why the old tmp cleanup never ran.
+def delete_old_dirs(pattern, age_days=THRESHOLD_DAYS_CLEANUP):
+    threshold_time = time.time() - age_days * 24 * 60 * 60
+    for path in glob.glob(pattern):
+        if os.path.isdir(path) and os.path.getmtime(path) < threshold_time:
+            try:
+                shutil.rmtree(path)
+                print(f"Deleted old dir: {path}")
+            except Exception as e:
+                print(f"Error deleting dir {path}: {e}")
+
+# Deletes only the files matching a glob (for folders shared with data we must keep,
+# e.g. data/debug holds datasets alongside cache files - never rmtree that folder).
+def delete_old_glob_files(pattern, age_days=THRESHOLD_DAYS_CLEANUP):
+    threshold_time = time.time() - age_days * 24 * 60 * 60
+    for file_path in glob.glob(pattern):
+        if os.path.isfile(file_path) and os.path.getmtime(file_path) < threshold_time:
+            try:
+                os.remove(file_path)
+                print(f"Deleted old file: {file_path}")
+            except Exception as e:
+                print(f"Error deleting file {file_path}: {e}")
+
 # setup function for model cleaner
-def schedule_model_cleanup(folder_paths, interval_days=7):
+def schedule_model_cleanup(file_paths, dir_globs=None, file_globs=None, interval_days=7):
     """
-    Periodically runs the delete_old_files function every interval_hours.
+    Periodically prunes old files/folders every interval_days.
     """
-    cleaner = ModelCleanerThread(folder_paths, interval_days)
+    cleaner = ModelCleanerThread(file_paths, dir_globs, file_globs, interval_days)
     cleaner.start()
 
     return cleaner
@@ -1050,12 +1107,23 @@ if __name__ == "__main__":
     if os.getenv("PERFORM_TRAINING") == "False":
         create_model.perform_training = False
 
+    # Bound logs.log by SIZE (an active log's mtime is always recent, so the age-based
+    # cleaner below never fires on it) - set up before anything logs
+    setup_logging()
+
     # Get saved config from all plots and save it in objects
     getConfigsFromAllFiles()
 
-    # Start thread that deletes old models and data regularly to save memory
-    folders_to_check = ["models", "tmp", "hyperband_dir", "data/subprocess_temp", "catboost_info"]
-    schedule_model_cleanup(folders_to_check, interval_days=7)  # Check every week
+    # Start thread that deletes old models and data regularly to save memory.
+    # file paths: prune old FILES, keep the folder tree (models/<plot>/... stays intact)
+    file_cleanup_paths = ["models", "hyperband_dir", "data/subprocess_temp",
+                          "catboost_info", "test-reports"]
+    # dir globs: delete the WHOLE matching folder once old (per-run scratch)
+    dir_cleanup_globs = ["tmp/tuning_*", "tmp/nn_*"]
+    # file globs: prune only these files (data/debug also holds datasets - never rmtree it)
+    file_cleanup_globs = ["data/debug/saved_variables_plot_*.pkl"]
+    schedule_model_cleanup(file_cleanup_paths, dir_cleanup_globs,
+                           file_cleanup_globs, interval_days=7)  # Check every week
 
     # Clean logs
     schedule_log_cleanup()

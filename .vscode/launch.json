@@ -12,7 +12,7 @@
             //"program": "${workspaceFolder}/unittests.py",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "subProcess": true
+            "subProcess": false
         }
     ]
 }
