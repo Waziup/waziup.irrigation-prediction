@@ -92,13 +92,10 @@ pipeline {
                         withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
 
                             // Push image
-                            // zstd -T0 -19: better ratio than gzip and multithreaded on the build host.
-                            // Requires `zstd` on BOTH the Jenkins agent and the Pi (apt install zstd);
-                            // fall back to `gzip` / `gzip -d` if it is not available on the gateway.
                             sh """
-                                docker save ${dockerImage} | zstd -T0 -19 | pv | \
+                                docker save ${dockerImage} | gzip | pv | \
                                 sshpass -p "$SSH_PASSWORD_WAZIGATE" \
-                                ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} 'zstd -d | docker load'
+                                ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} docker load
                             """
 
                             echo "Successfully pushed image ${dockerImage} to local gateway."
