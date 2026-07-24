@@ -33,19 +33,19 @@ class Plot:
         self.gps_info = ""                                  # Coordinates of sensors
         self.sensor_kind = "tension"                        # Type of humidity sensor
         self.sensor_unit = ""                               # Unit of humidity
-        self.slope = 0                                      # Slope to evaluate irrgation has taken place
+        self.slope = 0                                      # Slope to evaluate irrigation has taken place
         self.threshold = 0                                  # Threshold to irrigate plants
         self.irrigation_amount = 0                          # Amount in liters to irrigate plants
         self.look_ahead_time = 0                            # Time to look ahead in forecast how long soil tension threshold can be exceeded in hours
         self.start_date = ""                                # Start date: use sensor and API data from this date
         self.period = 0                                     # Time period to include into the model
-        self.train_period_days = 1                          # Frequencies in days inbeween train cycles
-        self.predict_period_hours = 3                       # Frequencies in hours inbeween predict cycles
+        self.train_period_days = 1                          # Frequencies in days in between train cycles
+        self.predict_period_hours = 3                       # Frequencies in hours in between predict cycles
         self.soil_type = ""                                 # Soil type for current field                           
         self.permanent_wilting_point = 40                   # Soil is to dry, plant cannot access any water with its roots
         self.field_capacity_upper = 30                      # Upper bound of soil is getting to dry
         self.field_capacity_lower = 10                      # Lower bound of wet soil, no more retention, water seeps through soil
-        self.saturation = 0                                 # Soil is completly saturated with water
+        self.saturation = 0                                 # Soil is completely saturated with water
         self.soil_water_retention_curve = [                 # Soil water retention curve init
             (0, 0.45),
             (5, 0.40),
@@ -101,7 +101,7 @@ class Plot:
                 f"prediction_active={self.prediction_thread is not None})"
             )
 
-    # Just print some class properies
+    # Just print some class properties
 
     def printPlotNumber(self):
         print("Current object is plot/tab number: " + str(self.tab_number),
@@ -119,11 +119,12 @@ class Plot:
                 data = json.load(file)
 
             if not self.load_data_from_csv:
-                # Get choosen sensors
+                # Get chosen sensors
                 self.device_and_sensor_ids_moisture = data.get('DeviceAndSensorIdsMoisture', [])
                 self.device_and_sensor_ids_temp = data.get('DeviceAndSensorIdsTemp', [])
                 self.device_and_sensor_ids_flow = data.get('DeviceAndSensorIdsFlow', [])
-                self.device_and_sensor_ids_flow_confirmation = data.get('DeviceAndSensorIdsFlowConfirmation', [])
+                flow_confirmation = data.get('DeviceAndSensorIdsFlowConfirmation', [])
+                self.device_and_sensor_ids_flow_confirmation = flow_confirmation if isinstance(flow_confirmation, list) else []
 
             # Get data from forms
             self.user_given_name = data.get('Name', [])
@@ -181,7 +182,7 @@ class Plot:
             )
         except requests.exceptions.RequestException as e:
             print("Request error:", e)
-            print(f"Determining the confirmation sensor of the actuator falied for plot {self.id}.")
+            print(f"Determining the confirmation sensor of the actuator failed for plot {self.id}.")
             return ""
         
         return device_id + "/" + sensor_id
@@ -245,7 +246,7 @@ class Plot:
         except requests.exceptions.RequestException as e:
             # Handle request exceptions (e.g., connection errors)
             print("Request error:", e)
-            return "Error in 'load_latest_data_api()'! ", e  # TODO: intruduce error handling!
+            return "Error in 'load_latest_data_api()'! ", e  # TODO: introduce error handling!
 
         return response_ok
     
@@ -328,7 +329,7 @@ class Plot:
         if not isinstance(from_timestamp, str):
             from_timestamp = from_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
-        # Get timezone if no information avalable
+        # Get timezone if no information available
         if TimeUtils.Timezone == '':
             TimeUtils.Timezone = TimeUtils.get_timezone(
                 self.config["Gps_info"]["lattitude"], self.config["Gps_info"]["longitude"])
@@ -387,7 +388,7 @@ class Plot:
         except requests.exceptions.RequestException as e:
             # Handle request exceptions (e.g., connection errors)
             print("Request error:", e)
-            return "", e  # TODO: intruduce error handling!
+            return "", e  # TODO: introduce error handling!
 
         return response_ok
         

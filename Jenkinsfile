@@ -209,4 +209,12 @@ pipeline {
             }
         }
     }
+
+
+    post {
+        always {
+            sh 'docker image prune -f || true'                     // dangling layers + builder intermediates
+            sh 'docker buildx prune -f --keep-storage 2GB || true' // cap buildx build cache
+        }
+    }
 }

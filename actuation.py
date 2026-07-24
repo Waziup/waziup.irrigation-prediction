@@ -54,7 +54,7 @@ def find_next_occurrences(df, column, threshold, timeSpanOverThreshold):
     # Convert the filtered DataFrame's index to a list
     next_lower_idx = filtered_lower.index.tolist()
     
-    # Take first occurance from list
+    # Take first occurrence from list
     if next_lower_idx:
         next_lower_idx = next_lower_idx[0]
     else:
@@ -71,12 +71,12 @@ def find_next_occurrences(df, column, threshold, timeSpanOverThreshold):
         # Convert the filtered DataFrame's index to a list
         next_higher_idx = filtered_higher.index.tolist()
 
-        # Take first occurance from list
+        # Take first occurrence from list
         if next_higher_idx:
             next_higher_idx = next_higher_idx[0]
         else:
             next_higher_idx = None
-    # Consequently if there is no occurance of lower, just take first one from inputdata
+    # Consequently if there is no occurrence of lower, just take first one from input data
     else:
         next_higher_idx = df.index[0]
 
@@ -120,7 +120,7 @@ def round_to_nearest_10_minutes(dt):
     
     return dt
 
-# to json file -> not needed because can just ask api, more consistant state
+# to json file -> not needed because can just ask api, more consistent state
 def save_irrigation_time(amount, plotid, status="not confirmed") -> int:
     # Load from file
     filename = 'data/irrigations_plot_' + str(plotid)  + '.json'
@@ -161,13 +161,14 @@ def update_irrigation_status(plot, status="not_confirmed"):
 def verify_irrigation(plot, amount):
     global Irrigation_retries
 
-    # Get sensor id of confirmation device
-    if len(plot.device_and_sensor_ids_flow_confirmation == 0):
+    # Get sensor id of confirmation device.
+    confirmation = plot.device_and_sensor_ids_flow_confirmation
+    if not isinstance(confirmation, list) or len(confirmation) == 0 or not isinstance(confirmation[0], str):
         print(f"No confirmation sensor configured for plot {plot.id}, cannot verify irrigation.")
         update_irrigation_status(plot, "no_confirmation_sensor_configured")
         return
     else:
-        sensor_id = plot.device_and_sensor_ids_flow_confirmation[0]
+        sensor_id = confirmation[0]
 
     # Example API call: curl -X GET "http://192.168.188.29/devices/689dad2768f319076487e4c7/sensors/689db4b868f319076487e500/value" -H "accept: application/json"
 
@@ -197,23 +198,23 @@ def verify_irrigation(plot, amount):
                 Irrigation_retries = 0
             else:
                 if Irrigation_retries == 0:
-                    print(f"Irrigation falied for plot {plot.id}: amount_given: {last_value}m³, expected amount: {amount}m³. Irrigation will be retried once.")
+                    print(f"Irrigation failed for plot {plot.id}: amount_given: {last_value}m³, expected amount: {amount}m³. Irrigation will be retried once.")
                     update_irrigation_status(plot, "irrigation failed, retrying once")
                     irrigate_amount(plot, amount)
                     Irrigation_retries += 1
                     # Here another action could be triggered, like sending notification
                 else:
                     update_irrigation_status(plot, "irrigation failed, twice, no more retries")
-                    print(f"Irrigation falied for plot {plot.id}: amount_given: {last_value}m³, expected amount: {amount}m³. Irrigation will not be retried.")
+                    print(f"Irrigation failed for plot {plot.id}: amount_given: {last_value}m³, expected amount: {amount}m³. Irrigation will not be retried.")
                     Irrigation_retries = 0
         else:
             print("Verification failed:", response.status_code, response.text)
             update_irrigation_status(plot, "verification_of_irrigation_failed")
-            print(f"Verification of irrigation falied for plot {plot.id}: expected amount: {amount}m³. Irrigation will not be retried.")
+            print(f"Verification of irrigation failed for plot {plot.id}: expected amount: {amount}m³. Irrigation will not be retried.")
     except requests.exceptions.RequestException as e:
         print("Request error:", e)
         update_irrigation_status(plot, "verification_failed_request_error")
-        print(f"Request of verification of irrigation falied for plot {plot.id}:s expected amount: {amount}m³. Irrigation will not be retried.")
+        print(f"Request of verification of irrigation failed for plot {plot.id}: expected amount: {amount}m³. Irrigation will not be retried.")
 
 
 # Load from wazigate API
@@ -272,7 +273,7 @@ def irrigate_amount(plot, amount=0): #TODO: renew the token, make function in Ne
     
     return response_ok
 
-# Mighty main function TODO: capsulate
+# Mighty main function TODO: encapsulate
 def main_old(currentSoilTension, threshold_timestamp, predictions, plot) -> int:
     # Get configuration
     threshold = plot.threshold
@@ -314,7 +315,7 @@ def main_old(currentSoilTension, threshold_timestamp, predictions, plot) -> int:
         return 0
 
 
-# Mighty main function TODO: capsulate
+# Mighty main function TODO: encapsulate
 def main(
     current_value, 
     threshold_timestamp, 
