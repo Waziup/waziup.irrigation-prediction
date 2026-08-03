@@ -43,6 +43,10 @@ class CropState:
     etc_daily_mm: float = 0.0
     recommended_volume_mm: Optional[float] = None
     recommended_volume_m3: Optional[float] = None
+    satellite_validation: Optional[dict] = None
+    et0_today_mm: Optional[float] = None
+    et0_baseline_mm: Optional[float] = None
+    et0_std_mm: Optional[float] = None
 
 
 def get_crop_state(

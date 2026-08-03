@@ -313,17 +313,12 @@ usock.routerPOST("/api/setPlot", setPlot)
 def getPlots(url, body):
     # Call function in plot manager
     plots = plot_manager.getPlots()
-    owner_filter = parse_qs(urlparse(url).query).get(
-        'owner', [''])[0].strip().lower()
 
     # Create array with names of tabs to return to frontend
     tab_name_array = []
     # for plot in plots:
     for i in range(1, len(plots)+1, 1):
         try:
-            owner_name = getattr(plots[i], 'owner', '') or ''
-            if owner_filter and owner_name.strip().lower() != owner_filter:
-                continue
             tab_name_array.append(plots[i].user_given_name)
         except KeyError:
             continue
@@ -449,11 +444,6 @@ def setConfig(url, body):
     currentPlot.user_given_name = name_list[0].strip() if name_list else ""
     if not currentPlot.user_given_name:
         errors["name"] = "Farm name is required."
-
-    currentPlot.owner = _get_first(
-        'owner', getattr(currentPlot, 'owner', '')).strip()
-    if not currentPlot.owner:
-        errors["owner"] = "Farm owner is required."
 
     currentPlot.zone_name = _get_first(
         'zone_name', currentPlot.user_given_name)
@@ -626,7 +616,7 @@ def setConfig(url, body):
         return 400, bytes(json.dumps(response), "utf8"), []
 
     data = {
-        "Owner": currentPlot.owner,
+
         "DeviceAndSensorIdsMoisture": currentPlot.device_and_sensor_ids_moisture,
         "DeviceAndSensorIdsTemp": currentPlot.device_and_sensor_ids_temp,
         "DeviceAndSensorIdsFlow": currentPlot.device_and_sensor_ids_flow,
@@ -661,7 +651,7 @@ def setConfig(url, body):
         "Initial_gdd": float(getattr(currentPlot, 'initial_gdd', 0.0)),
         "Use_dynamic_threshold": getattr(currentPlot, 'use_dynamic_threshold', False),
         "Farm_data_bundle": {
-            "owner": currentPlot.owner,
+
             "crop": {
                 "type": getattr(currentPlot, 'crop_type', 'generic'),
                 "planting_date": getattr(currentPlot, 'planting_date', ''),
@@ -830,15 +820,7 @@ def getConfigsFromAllFiles():
 def returnConfig(url, body):
     try:
         currentPlot = plot_manager.getCurrentPlot()
-        owner_filter = parse_qs(urlparse(url).query).get(
-            'owner', [''])[0].strip().lower()
-        current_owner = getattr(currentPlot, 'owner', '') or ''
-        if owner_filter and current_owner.strip().lower() != owner_filter:
-            response = {
-                "error": "Farm not available for the current owner.",
-                "status_code": 403,
-            }
-            return 403, bytes(json.dumps(response), "utf8"), []
+
         # Call the getConfigFromFile function to load variables
         if currentPlot.getConfigFromFile():
 
@@ -868,7 +850,7 @@ def returnConfig(url, body):
 
             # Construct the response data
             response_data = {
-                "Owner": getattr(currentPlot, 'owner', ''),
+
                 "DeviceAndSensorIdsMoisture": currentPlot.device_and_sensor_ids_moisture,
                 "DeviceAndSensorIdsTemp": currentPlot.device_and_sensor_ids_temp,
                 "DeviceAndSensorIdsFlow": currentPlot.device_and_sensor_ids_flow,

@@ -25,8 +25,6 @@ class Plot:
         self.id = int(re.search(r'(\d+)\.json$', self.configPath).group(1))
         # User given name is preset, but can be changed later
         self.user_given_name = "Plot " + str(self.id)
-        # Farm owner / account that controls this plot
-        self.owner = ""
 
         # Variables that were global before, now plot-specific
         # Device
@@ -173,7 +171,7 @@ class Plot:
 
             # Get data from forms
             self.user_given_name = data.get('Name', [])
-            self.owner = data.get('Owner', '')
+
             self.zone_name = data.get('Zone_name', self.user_given_name)
             self.sensor_kind = data.get('Sensor_kind', [])
             gps_info = data.get('Gps_info', {})

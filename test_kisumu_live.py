@@ -31,9 +31,9 @@ class TestKisumuLive(unittest.TestCase):
         lon = 34.7680
         planting_date = '2026-01-05'
 
-        # Fetch weather for the period 2026-01-05 .. 2026-05-18 (user requested)
+        # Fetch weather for the period 2026-01-05 .. 2026-05-30
         start_date = planting_date
-        end_date = '2026-05-18'
+        end_date = '2026-05-30'
 
         weather_frame = fetch_weather_frame(lat, lon, start_date, end_date)
 
@@ -48,12 +48,98 @@ class TestKisumuLive(unittest.TestCase):
             planting_date=planting_date,
             threshold=25.0,
             soil_texture_class='loam',
-            irrigation_type='drip',
+            irrigation_type='furrow',
             plot_area_m2=1000.0,
             initial_gdd=0.0,
         )
 
         recommendation = get_irrigation_recommendation(plot)
+
+        # Diagnostics / Audit Section
+
+        weather_audit = {
+            "requested_start": start_date,
+            "requested_end": end_date,
+            "returned_start": None,
+            "returned_end": None,
+            "rows": 0,
+            "columns": [],
+            "missing_by_column": {},
+            "coverage_by_column": {},
+            "date_range_matches_request": False,
+        }
+
+        try:
+            weather_audit["returned_start"] = str(weather_frame.index.min())
+            weather_audit["returned_end"] = str(weather_frame.index.max())
+            weather_audit["rows"] = int(len(weather_frame))
+            weather_audit["columns"] = list(weather_frame.columns)
+
+            returned_start_date = str(weather_frame.index.min())[:10]
+            returned_end_date = str(weather_frame.index.max())[:10]
+
+            weather_audit["date_range_matches_request"] = (
+                returned_start_date == start_date
+                and returned_end_date == end_date
+            )
+
+            for col in weather_frame.columns:
+                missing = int(weather_frame[col].isna().sum())
+                total = int(len(weather_frame))
+
+                weather_audit["missing_by_column"][col] = missing
+
+                weather_audit["coverage_by_column"][col] = round(
+                    ((total - missing) / total) * 100,
+                    2
+                ) if total else 0
+
+        except Exception as e:
+            weather_audit["error"] = str(e)
+
+        growth_stage_audit = {
+            "planting_date": planting_date,
+            "analysis_end_date": end_date,
+            "days_since_planting": None,
+            "gdd_cumulative": recommendation.get("gdd_cumulative"),
+            "growth_stage": recommendation.get("growth_stage"),
+            "sat_ndvi": recommendation.get("sat_ndvi"),
+            "warnings": [],
+        }
+
+        try:
+            growth_stage_audit["days_since_planting"] = (
+                date.fromisoformat(end_date)
+                - date.fromisoformat(planting_date)
+            ).days
+
+            ndvi = recommendation.get("sat_ndvi")
+            stage = recommendation.get("growth_stage")
+
+            if ndvi is not None and ndvi > 0.30 and stage == "Pre-emergence":
+                growth_stage_audit["warnings"].append(
+                    "NDVI indicates vegetation present but growth stage is Pre-emergence."
+                )
+
+            if (
+                growth_stage_audit["days_since_planting"] > 30
+                and stage == "Pre-emergence"
+            ):
+                growth_stage_audit["warnings"].append(
+                    "Crop is older than 30 days but still classified as Pre-emergence."
+                )
+
+            if (
+                recommendation.get("gdd_cumulative") is not None
+                and growth_stage_audit["days_since_planting"] > 90
+                and recommendation.get("gdd_cumulative", 0) < 100
+            ):
+                growth_stage_audit["warnings"].append(
+                    "Very low cumulative GDD for crop age. Weather history may be missing."
+                )
+
+        except Exception as e:
+            growth_stage_audit["error"] = str(e)
 
         # Also collect STAC/collection info to help surface scene availability
         try:
@@ -83,6 +169,8 @@ class TestKisumuLive(unittest.TestCase):
         weather_csv = out_dir / 'weather_frame.csv'
         satellite_csv = out_dir / 'satellite_snapshot.csv'
         recommendation_json = out_dir / 'recommendation.json'
+        weather_audit_json = out_dir / 'weather_audit.json'
+        growth_stage_audit_json = out_dir / 'growth_stage_audit.json'
 
         try:
             weather_frame.to_csv(weather_csv)
@@ -103,6 +191,17 @@ class TestKisumuLive(unittest.TestCase):
             with open(recommendation_json, 'w') as fh:
                 fh.write(repr(recommendation))
 
+        try:
+            with open(weather_audit_json, 'w') as fh:
+                json.dump(weather_audit, fh, indent=2, default=str)
+        except Exception:
+            pass
+
+        try:
+            with open(growth_stage_audit_json, 'w') as fh:
+                json.dump(growth_stage_audit, fh, indent=2, default=str)
+        except Exception:
+            pass
         # Save collection and STAC search metadata for debugging
         try:
             with open(out_dir / 'stac_collections.json', 'w') as fh:
@@ -134,12 +233,81 @@ class TestKisumuLive(unittest.TestCase):
         except Exception:
             print('unknown')
 
+            print('\n=== WEATHER REQUEST AUDIT ===')
+
+        try:
+            print("Requested Start :", start_date)
+            print("Requested End   :", end_date)
+            print("Returned Start  :", weather_audit["returned_start"])
+            print("Returned End    :", weather_audit["returned_end"])
+            print(
+                "Range Match     :",
+                weather_audit["date_range_matches_request"]
+            )
+        except Exception as e:
+            print(e)
+
+        print('\n=== WEATHER COVERAGE AUDIT ===')
+
+        try:
+            for col in weather_audit["coverage_by_column"]:
+                coverage = weather_audit["coverage_by_column"][col]
+                missing = weather_audit["missing_by_column"][col]
+
+                print(
+                    f"{col:<25} "
+                    f"coverage={coverage:>6}% "
+                    f"missing={missing}"
+                )
+        except Exception as e:
+            print(e)
+
         print('\n=== SATELLITE SNAPSHOT ===')
         print(satellite_snapshot)
 
         print('\n=== IRRIGATION RECOMMENDATION ===')
         print(recommendation)
+        print('\n=== GROWTH STAGE AUDIT ===')
 
+        try:
+            print(
+                "Days Since Planting:",
+                growth_stage_audit["days_since_planting"]
+            )
+
+            print(
+                "Cumulative GDD:",
+                growth_stage_audit["gdd_cumulative"]
+            )
+
+            print(
+                "Growth Stage:",
+                growth_stage_audit["growth_stage"]
+            )
+
+            print(
+                "Satellite NDVI:",
+                growth_stage_audit["sat_ndvi"]
+            )
+
+            if growth_stage_audit["warnings"]:
+                print("\nWarnings:")
+                for warning in growth_stage_audit["warnings"]:
+                    print(" -", warning)
+
+        except Exception as e:
+            print(e)
+
+        if not weather_audit["date_range_matches_request"]:
+            print(
+                "\nWARNING: Weather API did not return the requested "
+                "historical date range."
+            )
+
+        if growth_stage_audit["warnings"]:
+            print(
+                "\nWARNING: Growth stage consistency issues detected."
+            )
         # Basic sanity checks
         self.assertIsNotNone(weather_frame)
         self.assertIsNotNone(satellite_snapshot)

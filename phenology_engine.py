@@ -15,8 +15,9 @@ Satellite fusion strategy:
 
 import argparse
 import logging
+import re
 from datetime import datetime
-from typing import Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -30,6 +31,7 @@ from crops import (
     STAGE_MID_SEASON,
     STAGE_LATE_SEASON,
     STAGE_POST_MATURITY,
+    STAGE_NAMES,
 )
 
 log = logging.getLogger(__name__)
@@ -101,6 +103,9 @@ PLAUSIBILITY_DEV_FRAC = 0.10
 # Margin is a fraction of the Kc range (kc_mid - kc_ini).
 MIDSEASON_STRESS_KC_MARGIN = 0.05
 MIDSEASON_STRESS_PLAUSIBILITY = 0.7
+
+_FORECAST_HORIZON_RE = re.compile(
+    r"^(\d+(?:\.\d+)?)(?:h|hours?)?$", re.IGNORECASE)
 
 
 def compute_daily_gdd(
@@ -725,6 +730,315 @@ def sar_adjusted_ndvi_age(
             vv_canopy_threshold_db,
         )
     return adjusted
+
+
+def _stage_validation_delta(params: CropParams, stage: int) -> float:
+    delta_map = {
+        STAGE_PRE_EMERGENCE: params.delta_pre_emergence,
+        STAGE_DEVELOPMENT: params.delta_development,
+        STAGE_MID_SEASON: params.delta_mid_season,
+        STAGE_LATE_SEASON: params.delta_late_season,
+        STAGE_POST_MATURITY: 0.0,
+    }
+    return float(delta_map.get(stage, 0.0))
+
+
+def _stage_validation_sensitivity(params: CropParams, stage: int) -> float:
+    if stage == STAGE_POST_MATURITY:
+        return 0.0
+
+    stage_delta = _stage_validation_delta(params, stage)
+    all_deltas = [
+        params.delta_pre_emergence,
+        params.delta_development,
+        params.delta_mid_season,
+        params.delta_late_season,
+        0.0,
+    ]
+    positive_ceiling = max(0.0, max(all_deltas))
+    negative_floor = min(0.0, min(all_deltas))
+    span = positive_ceiling - negative_floor
+    if span <= 0:
+        return 0.5
+    return float(np.clip((positive_ceiling - stage_delta) / span, 0.0, 1.0))
+
+
+def _freshness_quality(age_hours: float, stage: int) -> float:
+    if np.isinf(age_hours):
+        return 0.0
+    if age_hours <= SAT_FRESH_HOURS:
+        quality = 1.0
+    elif age_hours <= SAT_REDUCED_HOURS:
+        quality = SAT_REDUCED_FACTOR
+    elif age_hours <= SAT_LOW_HOURS:
+        quality = SAT_LOW_FACTOR
+    else:
+        quality = 0.0
+
+    if stage == STAGE_MID_SEASON:
+        quality = max(quality, MIDSEASON_FRESHNESS_FLOOR)
+    return float(np.clip(quality, 0.0, 1.0))
+
+
+def _parse_forecast_horizon_hours(label: str) -> Optional[float]:
+    match = _FORECAST_HORIZON_RE.match(str(label).strip())
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def _fit_slope(points: List[Tuple[float, float]]) -> Optional[float]:
+    if len(points) < 2:
+        return None
+    x_values = np.asarray([point[0] for point in points], dtype=float)
+    y_values = np.asarray([point[1] for point in points], dtype=float)
+    if np.allclose(x_values, x_values[0]):
+        return 0.0
+    slope = np.polyfit(x_values, y_values, 1)[0]
+    if np.isnan(slope):
+        return None
+    return float(slope)
+
+
+def _select_satellite_validation_value(row: pd.Series, stage: int) -> Tuple[float, str]:
+    ndre = row.get("sat_ndre", np.nan)
+    ndvi = row.get("sat_ndvi", np.nan)
+
+    if stage == STAGE_MID_SEASON and not pd.isna(ndre):
+        return float(ndre), "ndre"
+    if not pd.isna(ndvi):
+        return float(ndvi), "ndvi"
+    if not pd.isna(ndre):
+        return float(ndre), "ndre"
+    return float("nan"), "none"
+
+
+def check_satellite_tension_consistency(
+    crop_type: str,
+    growth_stage: int,
+    gdd_cumulative: float,
+    current_tension: float,
+    stress_threshold_cbar: float,
+    tension_forecast: Dict[str, float],
+    satellite_history: Optional[pd.DataFrame] = None,
+    satellite_ndvi: float = np.nan,
+    satellite_ndre: float = np.nan,
+    satellite_ndvi_age_hours: float = np.inf,
+    satellite_data_age_hours: float = np.inf,
+    satellite_vv_db: float = np.nan,
+    et0_today_mm: Optional[float] = None,
+    et0_baseline_mm: Optional[float] = None,
+    et0_std_mm: Optional[float] = None,
+) -> Dict[str, object]:
+    """Compare tension-model direction against the satellite-observed canopy state.
+
+    The implementation is intentionally one-directional: it scores agreement and
+    logs explainability factors, but it does not feed back into the threshold or
+    the model.
+    """
+    params = get_crop_params(crop_type)
+    stage_name = STAGE_NAMES.get(growth_stage, str(growth_stage))
+
+    current_tension = float(current_tension)
+    stress_threshold_cbar = float(stress_threshold_cbar)
+    lag_hours = max(24.0, float(params.validation_lag_days) * 24.0)
+
+    forecast_points: List[Tuple[float, float]] = [(0.0, current_tension)]
+    for label, value in (tension_forecast or {}).items():
+        horizon_hours = _parse_forecast_horizon_hours(label)
+        if horizon_hours is None:
+            continue
+        try:
+            tension_value = float(value)
+        except (TypeError, ValueError):
+            continue
+        if not np.isfinite(tension_value):
+            continue
+        forecast_points.append((float(horizon_hours), tension_value))
+    forecast_points = sorted(forecast_points, key=lambda item: item[0])
+
+    latest_satellite_history = pd.DataFrame()
+    if satellite_history is not None and not satellite_history.empty:
+        latest_satellite_history = satellite_history.copy()
+        if "timestamp" in latest_satellite_history.columns:
+            latest_satellite_history["timestamp"] = pd.to_datetime(
+                latest_satellite_history["timestamp"], utc=True, errors="coerce")
+            latest_satellite_history = latest_satellite_history.dropna(subset=[
+                                                                       "timestamp"])
+            latest_satellite_history = latest_satellite_history.sort_values(
+                "timestamp")
+            latest_satellite_history = latest_satellite_history.reset_index(
+                drop=True)
+
+    satellite_points: List[Tuple[float, float]] = []
+    satellite_source = "none"
+    latest_satellite_age_hours = float(satellite_data_age_hours)
+    if not np.isfinite(latest_satellite_age_hours) or np.isinf(latest_satellite_age_hours):
+        latest_satellite_age_hours = float(satellite_ndvi_age_hours)
+
+    if not latest_satellite_history.empty:
+        ref_timestamp = latest_satellite_history["timestamp"].max()
+        lag_cutoff = ref_timestamp - pd.Timedelta(hours=lag_hours)
+        lagged_history = latest_satellite_history[latest_satellite_history["timestamp"] <= lag_cutoff]
+
+        for _, row in lagged_history.iterrows():
+            value, source = _select_satellite_validation_value(
+                row, growth_stage)
+            if np.isnan(value):
+                continue
+            timestamp = row.get("timestamp")
+            if not isinstance(timestamp, pd.Timestamp) or pd.isna(timestamp):
+                continue
+            satellite_points.append((timestamp.value / 3.6e12, float(value)))
+            satellite_source = source
+
+        if satellite_points:
+            latest_row = lagged_history.iloc[-1]
+            latest_age = latest_row.get(
+                "satellite_data_age", latest_satellite_age_hours)
+            try:
+                latest_satellite_age_hours = float(latest_age)
+            except (TypeError, ValueError):
+                pass
+
+    if np.isnan(satellite_ndvi) and np.isnan(satellite_ndre):
+        satellite_value = float("nan")
+    else:
+        satellite_value, satellite_source = _select_satellite_validation_value(
+            pd.Series({"sat_ndvi": satellite_ndvi,
+                      "sat_ndre": satellite_ndre}),
+            growth_stage,
+        )
+
+    if np.isnan(satellite_value) and not np.isnan(satellite_ndvi):
+        satellite_value = float(satellite_ndvi)
+        satellite_source = "ndvi"
+
+    satellite_kc = np.nan
+    if not np.isnan(satellite_value):
+        if satellite_source == "ndre":
+            satellite_kc = float(compute_kc_ndre(satellite_value, crop_type))
+        else:
+            satellite_kc = float(compute_kc_ndvi(satellite_value, crop_type))
+
+    kc_gdd = float(compute_kc_gdd(gdd_cumulative, crop_type))
+
+    satellite_deficit = float("nan")
+    if not np.isnan(satellite_kc):
+        satellite_deficit = kc_gdd - satellite_kc
+
+    tension_trend = _fit_slope(forecast_points)
+    satellite_trend = _fit_slope(satellite_points)
+
+    tension_scale = max(2.0, abs(stress_threshold_cbar) * 0.08)
+    kc_range = max(0.05, params.kc_mid - params.kc_ini)
+    satellite_scale = max(0.02, kc_range * 0.35)
+
+    tension_signal = 0.0
+    if tension_trend is not None:
+        tension_signal = float(
+            np.clip(tension_trend / tension_scale, -1.0, 1.0))
+
+    satellite_signal = 0.0
+    if satellite_trend is not None:
+        satellite_signal = float(
+            np.clip((-satellite_trend) / satellite_scale, -1.0, 1.0))
+
+    if tension_trend is None or satellite_trend is None:
+        direction_agreement = 0.5
+    else:
+        direction_agreement = 0.5 + 0.5 * tension_signal * satellite_signal
+
+    response_maturity = 1.0
+    if np.isfinite(latest_satellite_age_hours):
+        response_maturity = float(np.clip(
+            1.0 - (latest_satellite_age_hours / max(lag_hours * 2.0, lag_hours + 1.0)), 0.0, 1.0))
+
+    stage_sensitivity = _stage_validation_sensitivity(params, growth_stage)
+    et0_adjustment = 0.0
+    if et0_today_mm is not None and et0_baseline_mm is not None and et0_std_mm is not None:
+        try:
+            et0_today_mm = float(et0_today_mm)
+            et0_baseline_mm = float(et0_baseline_mm)
+            et0_std_mm = float(et0_std_mm)
+            if np.isfinite(et0_today_mm) and np.isfinite(et0_baseline_mm) and np.isfinite(et0_std_mm) and et0_std_mm > 0:
+                et0_z = (et0_today_mm - et0_baseline_mm) / et0_std_mm
+                et0_adjustment = float(np.clip(et0_z * 0.08, -0.18, 0.18))
+        except (TypeError, ValueError):
+            et0_adjustment = 0.0
+    adjusted_sensitivity = float(
+        np.clip(stage_sensitivity * (1.0 + et0_adjustment), 0.0, 1.0))
+
+    if np.isinf(latest_satellite_age_hours):
+        data_quality = 0.0
+    else:
+        data_quality = _freshness_quality(
+            latest_satellite_age_hours, growth_stage)
+
+    valid_forecast_points = [
+        point for point in forecast_points if np.isfinite(point[1])]
+    valid_satellite_points = [
+        point for point in satellite_points if np.isfinite(point[1])]
+    sufficient_data = len(valid_forecast_points) >= 3 and len(
+        valid_satellite_points) >= 3
+
+    validation_score = 0.5 + (direction_agreement - 0.5) * adjusted_sensitivity
+    overall_confidence = validation_score * \
+        data_quality if sufficient_data else None
+
+    if sufficient_data:
+        if direction_agreement >= 0.7:
+            direction_text = "agreement is strong"
+        elif direction_agreement >= 0.4:
+            direction_text = "agreement is moderate"
+        else:
+            direction_text = "agreement is weak"
+        reason = (
+            f"{stage_name} satellite check for {crop_type}: {direction_text}, "
+            f"{satellite_source} trend compared with the tension forecast."
+        )
+    else:
+        reason = (
+            f"Insufficient data for {stage_name} satellite validation: "
+            f"forecast_points={len(valid_forecast_points)}, satellite_points={len(valid_satellite_points)}."
+        )
+
+    factors = {
+        "stage_sensitivity": round(stage_sensitivity, 3),
+        "et0_adjustment": round(et0_adjustment, 3),
+        "direction_agreement": round(direction_agreement, 3),
+        "tension_trend": None if tension_trend is None else round(tension_trend, 4),
+        "satellite_trend": None if satellite_trend is None else round(satellite_trend, 4),
+        "satellite_source": satellite_source,
+        "satellite_value": None if np.isnan(satellite_value) else round(float(satellite_value), 4),
+        "satellite_kc": None if np.isnan(satellite_kc) else round(float(satellite_kc), 4),
+        "satellite_deficit": None if np.isnan(satellite_deficit) else round(float(satellite_deficit), 4),
+        "satellite_vv_db": None if np.isnan(satellite_vv_db) else round(float(satellite_vv_db), 2),
+        "lag_hours": round(lag_hours, 1),
+        "response_maturity": round(response_maturity, 3),
+        "latest_satellite_age_hours": None if np.isinf(latest_satellite_age_hours) else round(float(latest_satellite_age_hours), 1),
+        "tension_points": len(valid_forecast_points),
+        "satellite_points": len(valid_satellite_points),
+        "kc_gdd": round(kc_gdd, 4),
+        "data_quality": round(data_quality, 3),
+    }
+
+    return {
+        "available": True,
+        "insufficient_data": not sufficient_data,
+        "crop_type": crop_type,
+        "growth_stage": stage_name,
+        "growth_stage_code": int(growth_stage),
+        "direction_agreement": round(float(direction_agreement), 3),
+        "validation_score": round(float(validation_score), 3),
+        "data_quality": round(float(data_quality), 3),
+        "overall_confidence": None if overall_confidence is None else round(float(overall_confidence), 3),
+        "factors": factors,
+        "reason": reason,
+    }
 
 
 # BLENDED DYNAMIC Kc

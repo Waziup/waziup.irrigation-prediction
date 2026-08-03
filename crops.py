@@ -55,6 +55,10 @@ class CropParams:
     # date rather than at a planting event.
     is_perennial: bool = False
 
+    # Phase-0 validation lag between a soil-tension change and the satellite
+    # canopy response that should be visible in the validation signal.
+    validation_lag_days: float = 5.0
+
 
 CROP_PARAMS: Final[Dict[str, CropParams]] = {
     "maize": CropParams(
@@ -66,6 +70,7 @@ CROP_PARAMS: Final[Dict[str, CropParams]] = {
         delta_development=-5.0,     # leaf expansion — slightly proactive irrigation
         delta_mid_season=-15.0,     # flowering/grain fill — most proactive window
         delta_late_season=10.0,     # controlled deficit improves starch deposition
+        validation_lag_days=5.0,
     ),
     "beans": CropParams(
         name="Common Beans (Phaseolus vulgaris)",
@@ -76,6 +81,7 @@ CROP_PARAMS: Final[Dict[str, CropParams]] = {
         delta_development=-6.0,     # pod-set stage highly sensitive
         delta_mid_season=-16.0,     # flower drop under moderate stress
         delta_late_season=8.0,      # mild deficit OK for pod drying
+        validation_lag_days=4.0,
     ),
     "wheat": CropParams(
         name="Wheat (Triticum aestivum)",
@@ -86,6 +92,7 @@ CROP_PARAMS: Final[Dict[str, CropParams]] = {
         delta_development=-5.0,
         delta_mid_season=-12.0,     # anthesis window critical
         delta_late_season=8.0,      # grain hardening benefits from deficit
+        validation_lag_days=6.0,
     ),
     "tomato": CropParams(
         name="Tomato (Solanum lycopersicum)",
@@ -96,6 +103,7 @@ CROP_PARAMS: Final[Dict[str, CropParams]] = {
         delta_development=-8.0,     # fruit set requires consistent moisture
         delta_mid_season=-18.0,     # flower drop, blossom-end rot
         delta_late_season=10.0,     # deficit improves fruit Brix
+        validation_lag_days=3.0,
     ),
     "sorghum": CropParams(
         name="Sorghum (Sorghum bicolor)",
@@ -106,6 +114,7 @@ CROP_PARAMS: Final[Dict[str, CropParams]] = {
         delta_development=-4.0,
         delta_mid_season=-10.0,     # more drought-tolerant than maize
         delta_late_season=12.0,     # significant late-season deficit tolerated
+        validation_lag_days=6.0,
     ),
     "olive": CropParams(
         name="Olive (Olea europaea)",
@@ -117,6 +126,7 @@ CROP_PARAMS: Final[Dict[str, CropParams]] = {
         delta_mid_season=-7.0,      # less sensitive than annual crops
         delta_late_season=9.0,      # deficit irrigation standard practice
         is_perennial=True,
+        validation_lag_days=8.0,
     ),
     # Generic fallback — conservative mid-sensitivity.
     "generic": CropParams(
@@ -128,6 +138,7 @@ CROP_PARAMS: Final[Dict[str, CropParams]] = {
         delta_development=-6.0,
         delta_mid_season=-15.0,
         delta_late_season=4.0,
+        validation_lag_days=5.0,
     ),
 }
 

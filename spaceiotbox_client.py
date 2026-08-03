@@ -282,6 +282,7 @@ def fetch_weather_frame(lat: float, lon: float, start_date=None, end_date=None) 
         params["end_date"] = end_bound.strftime("%Y-%m-%d")
 
     frames = []
+    available_windows = []
     auth_errors = []
     for endpoint in ("land",):
         try:
@@ -293,7 +294,18 @@ def fetch_weather_frame(lat: float, lon: float, start_date=None, end_date=None) 
             except ValueError as exc:
                 if "no rows within requested window" not in str(exc).lower():
                     raise
-                frame = normalize_weather_frame(payload)
+                # Keep date-bounded calls strict: do not silently return
+                # out-of-window rows when the API ignores range parameters.
+                full_frame = normalize_weather_frame(payload)
+                if not full_frame.empty:
+                    available_windows.append(
+                        (
+                            endpoint,
+                            str(full_frame.index.min())[:10],
+                            str(full_frame.index.max())[:10],
+                        )
+                    )
+                continue
             if not frame.empty:
                 frames.append(frame)
         except requests.HTTPError as exc:
@@ -314,28 +326,21 @@ def fetch_weather_frame(lat: float, lon: float, start_date=None, end_date=None) 
                 f"SpaceIoTBox authentication failed ({statuses}). "
                 "Check SPACEIOTBOX_API_KEY (or API_KEY/api_key) and token validity."
             )
-        # If the caller requested a date window but the filtered responses
-        # contained no rows, attempt an unfiltered request to the
-        # agro_climate/land endpoint and normalize without date bounds.
         if start_bound is not None or end_bound is not None:
-            try:
-                payload = fetch_agro_climate("land", lat, lon, params=None)
-                frame = normalize_weather_frame(payload)
-                if not frame.empty:
-                    frames.append(frame)
-                    # proceed to combine/return below
-                else:
-                    start_label = start_bound.date() if start_bound is not None else "-"
-                    end_label = end_bound.date() if end_bound is not None else "-"
-                    raise ValueError(
-                        f"No weather data returned within requested window {start_label}..{end_label}"
-                    )
-            except requests.HTTPError:
-                start_label = start_bound.date() if start_bound is not None else "-"
-                end_label = end_bound.date() if end_bound is not None else "-"
-                raise ValueError(
-                    f"No weather data returned within requested window {start_label}..{end_label}"
+            start_label = start_bound.date() if start_bound is not None else "-"
+            end_label = end_bound.date() if end_bound is not None else "-"
+            if available_windows:
+                availability = "; ".join(
+                    f"{endpoint} returned {min_date}..{max_date}"
+                    for endpoint, min_date, max_date in available_windows
                 )
+                raise ValueError(
+                    f"No weather data returned within requested window {start_label}..{end_label}. "
+                    f"Available range(s): {availability}."
+                )
+            raise ValueError(
+                f"No weather data returned within requested window {start_label}..{end_label}"
+            )
         else:
             return pd.DataFrame(columns=LEGACY_WEATHER_COLUMNS)
 

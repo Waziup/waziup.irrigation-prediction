@@ -30,6 +30,7 @@ else:
 
 fetch_weather_frame = _spaceiotbox_client.fetch_weather_frame
 fetch_satellite_snapshot = _spaceiotbox_satellite.fetch_satellite_snapshot
+fetch_satellite_history = _spaceiotbox_satellite.fetch_satellite_history
 WEATHER_FIELDS = tuple(_spaceiotbox_client.LEGACY_WEATHER_COLUMNS)
 SATELLITE_FIELDS = tuple(_spaceiotbox_satellite.SATELLITE_COLUMNS)
 
@@ -38,6 +39,7 @@ try:
     from crop_model import get_stress_threshold, compute_gdd_from_weather, get_crop_state
     from phenology_engine import compute_kc_gdd_series
     from phenology_engine import get_growth_stage
+    from phenology_engine import check_satellite_tension_consistency
     from crops import STAGE_NAMES
     HAS_CROP_MODEL = True
 except ImportError:
@@ -284,6 +286,55 @@ def _parse_plot_coordinates(plot):
     raise ValueError('Cannot parse plot coordinates')
 
 
+def _compute_satellite_validation(plot, runtime_state, current_tension, tension_forecast):
+    if runtime_state is None or not HAS_CROP_MODEL:
+        return None
+
+    try:
+        lat, lon = _parse_plot_coordinates(plot)
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+    now_ts = pd.Timestamp.now(tz="UTC")
+    try:
+        validation_lookback_days = max(
+            30, int(getattr(runtime_state, "sat_ndvi_age_hours", 0.0) // 24) + 45)
+    except (TypeError, ValueError):
+        validation_lookback_days = 60
+
+    try:
+        satellite_history = fetch_satellite_history(
+            lat,
+            lon,
+            as_of=now_ts,
+            lookback_days=validation_lookback_days,
+        )
+    except Exception as exc:
+        log.warning("Satellite validation history fetch failed: %s", exc)
+        satellite_history = pd.DataFrame()
+
+    return check_satellite_tension_consistency(
+        crop_type=runtime_state.crop_type,
+        growth_stage=getattr(runtime_state, "growth_stage", get_growth_stage(
+            runtime_state.gdd_cumulative, runtime_state.crop_type)),
+        gdd_cumulative=runtime_state.gdd_cumulative,
+        current_tension=float(current_tension),
+        stress_threshold_cbar=float(runtime_state.stress_threshold_cbar),
+        tension_forecast=dict(tension_forecast or {}),
+        satellite_history=satellite_history,
+        satellite_ndvi=getattr(runtime_state, "sat_ndvi", float("nan")),
+        satellite_ndre=getattr(runtime_state, "sat_ndre", float("nan")),
+        satellite_ndvi_age_hours=getattr(
+            runtime_state, "sat_ndvi_age_hours", float("inf")),
+        satellite_data_age_hours=getattr(
+            runtime_state, "sat_data_age_hours", float("inf")),
+        satellite_vv_db=getattr(runtime_state, "sat_vv_db", float("nan")),
+        et0_today_mm=getattr(runtime_state, "et0_today_mm", None),
+        et0_baseline_mm=getattr(runtime_state, "et0_baseline_mm", None),
+        et0_std_mm=getattr(runtime_state, "et0_std_mm", None),
+    )
+
+
 def _compute_runtime_crop_state(plot):
     """Fetch weather once and build the runtime crop state for actuation."""
     if not HAS_CROP_MODEL:
@@ -431,6 +482,22 @@ def _compute_runtime_crop_state(plot):
         state.weather_data_age_hours = weather_age_hours
         state.weather_data_summary = weather_summary
         state.satellite_data_summary = satellite_summary
+        historical_et0 = et0_daily.loc[:latest_weather_ts] if latest_weather_ts is not None else et0_daily
+        historical_et0 = pd.to_numeric(
+            historical_et0, errors="coerce").dropna()
+        if len(historical_et0) > 0:
+            state.et0_today_mm = float(historical_et0.iloc[-1])
+            baseline_window = historical_et0.tail(min(len(historical_et0), 8))
+            if len(baseline_window) > 1:
+                baseline_series = baseline_window.iloc[:-1]
+            else:
+                baseline_series = baseline_window
+            state.et0_baseline_mm = float(baseline_series.mean()) if len(
+                baseline_series) > 0 else None
+            state.et0_std_mm = float(baseline_series.std(
+                ddof=0)) if len(baseline_series) > 1 else 0.0
+        state.satellite_validation = getattr(
+            plot, "satellite_validation", None)
         state._computed_at_utc = pd.Timestamp(pd.Timestamp.now(
             tz="UTC").to_pydatetime().replace(tzinfo=None))
         et0_today = float(et0_daily.iloc[-1]) if len(et0_daily) > 0 else 0.0
@@ -657,8 +724,6 @@ def get_irrigation_recommendation(plot):
         "actuator_based": actuator_based,
         "crop_type": runtime_state.crop_type,
         "growth_stage": runtime_state.growth_stage_name,
-        "use_dynamic_threshold": bool(getattr(plot, "use_dynamic_threshold", False)),
-        "threshold_mode": "dynamic" if getattr(plot, "use_dynamic_threshold", False) else "static",
         "kc": round(float(runtime_state.kc), 3) if getattr(runtime_state, "kc", None) is not None else None,
         "etc_daily_mm": round(float(runtime_state.etc_daily_mm), 2),
         "recommended_depth_mm": round(float(getattr(runtime_state, "recommended_volume_mm", runtime_state.etc_daily_mm)), 2),
@@ -668,7 +733,6 @@ def get_irrigation_recommendation(plot):
         "efficiency": round(float(efficiency), 2),
         "plot_area_m2": round(float(area_m2), 1) if area_m2 is not None else None,
         "threshold_cbar": round(float(runtime_state.stress_threshold_cbar), 1),
-        "threshold_cbar_static": round(float(getattr(plot, "threshold_static", plot.threshold)), 1),
         "gdd_cumulative": round(float(runtime_state.gdd_cumulative), 1),
         "rain_since_planting_mm": round(float(getattr(runtime_state, "rain_since_planting_mm", 0.0)), 2),
         "rain_last_24h_mm": round(float(getattr(runtime_state, "rain_last_24h_mm", 0.0)), 2),
@@ -684,6 +748,7 @@ def get_irrigation_recommendation(plot):
         "sat_vv_db": (None if pd.isna(getattr(runtime_state, "sat_vv_db", float("nan")))
                       else round(float(runtime_state.sat_vv_db), 2)),
         "sat_data_age_hours": _finite_or_none(getattr(runtime_state, "sat_data_age_hours", float("nan")), 1),
+        "satellite_validation": getattr(runtime_state, "satellite_validation", None),
         "weather_data_age_hours": _finite_or_none(weather_age, 1),
         "weather_data_summary": getattr(runtime_state, "weather_data_summary", None),
         "satellite_data_summary": getattr(runtime_state, "satellite_data_summary", None),
@@ -735,6 +800,8 @@ def _persist_alert_record(
     tension_forecast,
     threshold,
     current_tension,
+    satellite_validation=None,
+    runtime_state=None,
 ):
     if recommendation is None:
         return
@@ -744,12 +811,23 @@ def _persist_alert_record(
         plot_name = getattr(plot, "user_given_name", "")
         now_utc = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
+        validation_factors = {}
+        if isinstance(satellite_validation, dict):
+            validation_factors = dict(
+                satellite_validation.get("factors") or {})
+
+        should_irrigate = bool(
+            getattr(recommendation, "should_irrigate", False))
+        urgency = getattr(recommendation, "urgency", "unknown")
+        irrigation_event_occurred = should_irrigate or urgency == "critical"
+
         payload = {
             "timestamp_utc": now_utc,
             "plot_id": plot_id,
             "plot_name": plot_name,
-            "urgency": getattr(recommendation, "urgency", "unknown"),
-            "should_irrigate": bool(getattr(recommendation, "should_irrigate", False)),
+            "urgency": urgency,
+            "should_irrigate": should_irrigate,
+            "irrigation_event_occurred": irrigation_event_occurred,
             "first_breach_horizon": getattr(recommendation, "first_breach_horizon", None),
             "first_breach_timestamp": (
                 recommendation.first_breach_timestamp.isoformat()
@@ -758,9 +836,23 @@ def _persist_alert_record(
             ),
             "current_tension": float(current_tension) if current_tension is not None else None,
             "stress_threshold": float(threshold) if threshold is not None else None,
+            "growth_stage": getattr(runtime_state, "growth_stage", None),
+            "growth_stage_name": getattr(runtime_state, "growth_stage_name", None),
+            "gdd_cumulative": getattr(runtime_state, "gdd_cumulative", None),
+            "stage_sensitivity": validation_factors.get("stage_sensitivity"),
+            "et0_adjustment": validation_factors.get("et0_adjustment"),
+            "et0_today_mm": getattr(runtime_state, "et0_today_mm", None),
+            "et0_baseline_mm": getattr(runtime_state, "et0_baseline_mm", None),
+            "et0_std_mm": getattr(runtime_state, "et0_std_mm", None),
+            "rain_last_24h_mm": getattr(runtime_state, "rain_last_24h_mm", None),
+            "rain_since_planting_mm": getattr(runtime_state, "rain_since_planting_mm", None),
+            "sat_ndvi": getattr(runtime_state, "sat_ndvi", None),
+            "sat_ndre": getattr(runtime_state, "sat_ndre", None),
+            "sat_vv_db": getattr(runtime_state, "sat_vv_db", None),
             "forecast_summary": dict(getattr(recommendation, "forecast_summary", {}) or {}),
             "breach_horizons": list(getattr(recommendation, "breach_horizons", []) or []),
             "tension_forecast": dict(tension_forecast or {}),
+            "satellite_validation": satellite_validation,
             "inference_source": getattr(plot, "_inference_source", "live"),
         }
 
@@ -1106,11 +1198,9 @@ def main(
     actuator_supported = _has_actuator_support(plot)
 
     # Layer 3: Decision engine — compare current/forecast vs threshold
-    is_tension_kind = str(
-        plot.sensor_kind or "").lower() in ("tension", "both")
     if (
         HAS_DECISION_ENGINE
-        and is_tension_kind
+        and plot.sensor_kind == "tension"
         and getattr(plot, "_inference_source", "live") == "live"
     ):
         # Build forecast dict from predictions if available
@@ -1161,6 +1251,19 @@ def main(
             advise_horizon_hours=float(timeSpanOverThreshold),
         )
 
+        satellite_validation = _compute_satellite_validation(
+            plot=plot,
+            runtime_state=runtime_state,
+            current_tension=float(current_value),
+            tension_forecast=tension_forecast,
+        )
+        if satellite_validation is not None:
+            runtime_state.satellite_validation = satellite_validation
+            try:
+                setattr(plot, "satellite_validation", satellite_validation)
+            except (AttributeError, TypeError):
+                pass
+
         print(f"  [Decision Engine] {plot.user_given_name}: "
               f"tension={current_value:.1f}, threshold={threshold:.1f}, "
               f"urgency={recommendation.urgency}, "
@@ -1172,6 +1275,8 @@ def main(
             tension_forecast=tension_forecast,
             threshold=threshold,
             current_tension=current_value,
+            satellite_validation=satellite_validation,
+            runtime_state=runtime_state,
         )
 
         if not actuator_supported:
@@ -1216,13 +1321,13 @@ def main(
         return 0
 
     # Fallback: capacitive sensors or no decision engine — use legacy comparison
-    comparison_fn = (lambda value, thresh: value > thresh) if is_tension_kind else (
+    comparison_fn = (lambda value, thresh: value > thresh) if plot.sensor_kind == "tension" else (
         lambda value, thresh: value < thresh
     )
 
     over_threshold_fn = (
         (lambda value, thresh: value > thresh * OverThresholdAllowed)
-        if is_tension_kind
+        if plot.sensor_kind == "tension"
         else (lambda value, thresh: value < thresh / OverThresholdAllowed)
     )
 
@@ -1247,7 +1352,7 @@ def main(
             predictions, 'smoothed_values', threshold, timeSpanOverThreshold)
 
         # No recovery predicted within forecast horizon
-        if (is_tension_kind and not next_lower_idx) or (plot.sensor_kind == "humidity" and not next_higher_idx):
+        if (plot.sensor_kind == "tension" and not next_lower_idx) or (plot.sensor_kind == "humidity" and not next_higher_idx):
             print(
                 f"No recovery predicted within {timeSpanOverThreshold} hours on {plot.user_given_name}, irrigate now!")
             volume = _resolve_runtime_irrigation_volume(plot, runtime_state)
@@ -1259,7 +1364,7 @@ def main(
 
         # Otherwise, delay irrigation
         else:
-            target_time = next_lower_idx if is_tension_kind else next_higher_idx
+            target_time = next_lower_idx if plot.sensor_kind == "tension" else next_higher_idx
             print(
                 f"Irrigation can wait. Recovery expected at: {target_time} on {plot.user_given_name}")
             return 0

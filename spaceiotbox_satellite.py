@@ -623,3 +623,57 @@ def fetch_satellite_snapshot(
     frame.index.name = "Timestamp"
     frame = frame[SATELLITE_COLUMNS]
     return frame
+
+
+def fetch_satellite_history(
+    lat: float,
+    lon: float,
+    as_of: Optional[object] = None,
+    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    limit: int = DEFAULT_LIMIT,
+) -> pd.DataFrame:
+    """Fetch a short satellite observation history for validation.
+
+    The frame keeps per-observation timestamps so the validation engine can
+    fit a trend over recent scenes instead of relying on a single latest row.
+    """
+    as_of_ts = _normalize_timestamp(as_of) or pd.Timestamp.now(tz="UTC")
+    start_ts = as_of_ts - pd.Timedelta(days=int(lookback_days))
+
+    items = _search_items(lat, lon, start_ts, as_of_ts, limit=limit)
+    if not items:
+        items = _items_from_collections(lat, lon, start_ts, as_of_ts)
+
+    rows: List[dict] = []
+    for item in items:
+        row = _feature_row(item, lat, lon, as_of_ts)
+        if row is not None:
+            rows.append(row)
+
+    if not rows:
+        agro_veg = _fetch_agro_climate_vegetation(lat, lon, as_of_ts)
+        if not agro_veg:
+            return pd.DataFrame(columns=["timestamp", "source"] + SATELLITE_COLUMNS)
+
+        fallback_row = dict(agro_veg)
+        fallback_row.setdefault("source", "agro_climate")
+        fallback_row.setdefault("timestamp", as_of_ts)
+        for column in SATELLITE_COLUMNS:
+            fallback_row.setdefault(column, np.nan)
+        frame = pd.DataFrame([fallback_row])
+        frame["timestamp"] = pd.to_datetime(
+            frame["timestamp"], utc=True, errors="coerce")
+        frame = frame.dropna(subset=["timestamp"]).sort_values("timestamp")
+        return frame
+
+    frame = pd.DataFrame(rows)
+    frame["timestamp"] = pd.to_datetime(
+        frame["timestamp"], utc=True, errors="coerce")
+    frame = frame.dropna(subset=["timestamp"])
+    frame = frame.sort_values(["timestamp", "source"]).reset_index(drop=True)
+
+    for column in SATELLITE_COLUMNS:
+        if column not in frame.columns:
+            frame[column] = np.nan
+
+    return frame

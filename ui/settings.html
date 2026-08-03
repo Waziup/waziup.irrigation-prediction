@@ -355,14 +355,11 @@
       let plotNames = [];
       let currentPlotIndex = 1;
 
-      function getActiveOwner() {
-        return (localStorage.getItem("waziup.currentFarmOwner") || "").trim();
-      }
+
 
       async function loadPlotList() {
         try {
-          const owner = getActiveOwner();
-          const response = await fetch(owner ? `../api/getPlots?owner=${encodeURIComponent(owner)}` : "../api/getPlots");
+          const response = await fetch("../api/getPlotList");
           const data = await response.json();
           plotNames = Array.isArray(data.tabnames) ? data.tabnames : [];
           const currentPlot = parseInt(data.currentPlot, 10);
@@ -399,7 +396,7 @@
         }
 
         const activeName = plotNames[currentPlotIndex - 1] || document.getElementById("name_form")?.value || "";
-        const ownerName = document.getElementById("owner_form")?.value || getActiveOwner() || "";
+
         const cropType = (document.getElementById("crop_type_form")?.value || "").replace(/^./, (char) => char.toUpperCase());
         const plantingDate = document.getElementById("planting_date_form")?.value || document.getElementById("starting_timestamp_form")?.value || "";
         const area = document.getElementById("plot_area_m2_form")?.value || "";
@@ -416,7 +413,7 @@
             >
               <div class="plot-card-copy">
                 <div class="plot-card-title">${label}</div>
-                <div class="plot-card-subtitle">${ownerName ? `Owner: ${ownerName} · ` : ""}${cropType} · Planted ${plantingDate} · ${area} m²</div>
+                <div class="plot-card-subtitle">${cropType} · Planted ${plantingDate} · ${area} m²</div>
               </div>
               <div class="plot-card-actions">
                 ${isActive ? '<span class="plot-badge">ACTIVE</span><span class="plot-edit">Edit</span>' : '<span class="plot-switch">Switch</span>'}
@@ -444,10 +441,7 @@
           if (draft.name && document.getElementById("name_form")) {
             document.getElementById("name_form").value = draft.name;
           }
-          if (draft.owner && document.getElementById("owner_form")) {
-            document.getElementById("owner_form").value = draft.owner;
-            localStorage.setItem("waziup.currentFarmOwner", draft.owner);
-          }
+
           if (draft.cropType && document.getElementById("crop_type_form")) {
             document.getElementById("crop_type_form").value = draft.cropType;
           }
@@ -551,8 +545,8 @@
       // Get formerly saved config from backend
       function getFormerConfig() {
         const owner = getActiveOwner();
-        return fetch(owner ? `../api/returnConfig?owner=${encodeURIComponent(owner)}` : `../api/returnConfig`)
-          .then((response) => response.json())
+        return fetch(`../api/returnConfig`)
+
           .then((data) => {
             if (data.status_code == 200) {
               // Create a reference
@@ -579,12 +573,7 @@
               // Assignment for Sensor_kind
               document.getElementById(response_data.Sensor_kind).checked = true;
 
-              // Assignment for a user given plot name
-              document.getElementById("name_form").value = response_data.Name;
-              if (response_data.Owner && document.getElementById("owner_form")) {
-                document.getElementById("owner_form").value = response_data.Owner;
-                localStorage.setItem("waziup.currentFarmOwner", response_data.Owner);
-              }
+
 
               if (response_data.Zone_name) {
                 document.getElementById("zone_name_form").value = response_data.Zone_name;
@@ -900,7 +889,7 @@
       // Parse data from forms after "Save"
       function parseForms() {
         var name = document.getElementById("name_form").value;
-        var owner = document.getElementById("owner_form")?.value || getActiveOwner();
+
         var zone_name = document.getElementById("zone_name_form").value;
         var selectedSensorKind = document.querySelector(
           'input[name="sensor_kind_radio"]:checked'
@@ -946,8 +935,7 @@
         const Params =
           "&name=" +
           encodeURIComponent(name) +
-          "&owner=" +
-          encodeURIComponent(owner) +
+
           "&zone_name=" +
           encodeURIComponent(zone_name) +
           "&sensor_kind=" +
@@ -1242,7 +1230,7 @@
 
       // Live-update plot header when user edits the form fields
       document.addEventListener("DOMContentLoaded", function () {
-        ["name_form", "owner_form", "crop_type_form", "starting_timestamp_form", "planting_date_form", "plot_area_m2_form"].forEach((id) => {
+        ["name_form", "crop_type_form", "starting_timestamp_form", "planting_date_form", "plot_area_m2_form"].forEach((id) => {
           const el = document.getElementById(id);
           if (!el) return;
           el.addEventListener("input", function () {
@@ -1387,16 +1375,6 @@
               </select>
             </div>
 
-            <div class="form-group">
-              <label for="owner_form">Owner *</label>
-              <p class="form-hint">The person or account that owns this farm</p>
-              <input
-                type="text"
-                id="owner_form"
-                class="form-control"
-                value=""
-              />
-            </div>
 
             <div class="form-row">
               <div class="form-group">
