@@ -6,8 +6,8 @@ phenology_engine.py — Growing Degree Days, crop growth stage tracking,
 
 Satellite fusion strategy:
     NDVI  — best for sparse canopy (pre-emergence, development, senescence)
-    NDRE  — best for dense canopy (mid-season); does not saturate like NDVI
-    SAR   — cloud-cover backup; confirms canopy presence when optical is stale
+    NDRE  — preferred for dense canopy when supplied by the EO/STAC proxy
+    SAR   — optional future input; not supplied by the current runtime source
     GDD   — biological plausibility check; caps satellite weight when the
             observed Kc implies a stage the thermal budget cannot support
 
@@ -66,18 +66,9 @@ NDVI_WEIGHT_CAP = 0.75
 # Empirical: NDRE 0.1–0.6 ≈ NDVI 0.15–0.90 for annual field crops.
 NDRE_NDVI_PROXY = 1.5
 
-# Freshness decay thresholds (hours since last observation)
-SAT_FRESH_HOURS = 360     # ≤ 15 days  → quality_factor = 1.0
-SAT_REDUCED_HOURS = 720     # 15–30 days → quality_factor = 0.7
-SAT_LOW_HOURS = 1080    # 30–45 days → quality_factor = 0.4
-SAT_REDUCED_FACTOR = 0.7
-SAT_LOW_FACTOR = 0.4
-# > 45 days -> quality_factor = 0.0 by default.
-# Mid-season applies a floor (see MIDSEASON_FRESHNESS_FLOOR).
-
-# Mid-season canopy changes slowly; avoid over-penalizing stale but still
-# informative imagery during cloud-cover windows.
-MIDSEASON_FRESHNESS_FLOOR = 0.6
+# Satellite freshness is supplied as a 0..1 quality score derived from the
+# provider's observed acquisition gaps. Crop response timing remains relevant
+# to tension-trend validation, but no crop-specific imagery expiry is encoded.
 
 # SAR cloud-cover correction
 # VV backscatter above this threshold confirms an established crop canopy.
@@ -763,21 +754,44 @@ def _stage_validation_sensitivity(params: CropParams, stage: int) -> float:
     return float(np.clip((positive_ceiling - stage_delta) / span, 0.0, 1.0))
 
 
-def _freshness_quality(age_hours: float, stage: int) -> float:
-    if np.isinf(age_hours):
+def _freshness_quality(
+    age_hours: float,
+    stage: int,
+    observation_quality: Optional[float] = None,
+) -> float:
+    """Use source-derived freshness; unknown cadence trusts only an exact observation."""
+    del stage  # Freshness is an acquisition property, not a crop-stage duration.
+    if not np.isfinite(age_hours):
         return 0.0
-    if age_hours <= SAT_FRESH_HOURS:
-        quality = 1.0
-    elif age_hours <= SAT_REDUCED_HOURS:
-        quality = SAT_REDUCED_FACTOR
-    elif age_hours <= SAT_LOW_HOURS:
-        quality = SAT_LOW_FACTOR
-    else:
-        quality = 0.0
+    if observation_quality is None or not np.isfinite(observation_quality):
+        return 1.0 if age_hours <= 0 else 0.0
+    return float(np.clip(observation_quality, 0.0, 1.0))
 
-    if stage == STAGE_MID_SEASON:
-        quality = max(quality, MIDSEASON_FRESHNESS_FLOOR)
-    return float(np.clip(quality, 0.0, 1.0))
+
+def _history_freshness_quality(
+    history: pd.DataFrame,
+    source: str,
+    age_hours: float,
+) -> float:
+    """Build an empirical freshness score from source acquisition intervals."""
+    if history.empty or not np.isfinite(age_hours):
+        return 0.0
+    availability_column = f"has_{source}"
+    value_column = f"sat_{source}"
+    if availability_column in history.columns:
+        mask = history[availability_column].fillna(False).astype(bool)
+    elif value_column in history.columns:
+        mask = pd.to_numeric(history[value_column], errors="coerce").notna()
+    else:
+        return 0.0
+    dates = pd.DatetimeIndex(history.loc[mask, "timestamp"].dropna().unique()).sort_values()
+    if age_hours <= 0:
+        return 1.0
+    if len(dates) < 2:
+        return 0.0
+    gaps = np.diff(dates.asi8) / 3.6e12
+    gaps = gaps[gaps > 0]
+    return float(np.mean(gaps >= age_hours)) if len(gaps) else 0.0
 
 
 def _parse_forecast_horizon_hours(label: str) -> Optional[float]:
@@ -827,6 +841,9 @@ def check_satellite_tension_consistency(
     satellite_ndvi: float = np.nan,
     satellite_ndre: float = np.nan,
     satellite_ndvi_age_hours: float = np.inf,
+    satellite_ndre_age_hours: float = np.inf,
+    satellite_ndvi_quality: Optional[float] = None,
+    satellite_ndre_quality: Optional[float] = None,
     satellite_data_age_hours: float = np.inf,
     satellite_vv_db: float = np.nan,
     et0_today_mm: Optional[float] = None,
@@ -972,11 +989,24 @@ def check_satellite_tension_consistency(
     adjusted_sensitivity = float(
         np.clip(stage_sensitivity * (1.0 + et0_adjustment), 0.0, 1.0))
 
-    if np.isinf(latest_satellite_age_hours):
-        data_quality = 0.0
+    # The catalog's real acquisition gaps determine freshness. This avoids
+    # treating crop growth duration as if it were satellite revisit cadence.
+    if satellite_source == "ndre":
+        latest_satellite_age_hours = float(satellite_ndre_age_hours)
+        source_quality = satellite_ndre_quality
     else:
-        data_quality = _freshness_quality(
-            latest_satellite_age_hours, growth_stage)
+        latest_satellite_age_hours = float(satellite_ndvi_age_hours)
+        source_quality = satellite_ndvi_quality
+    empirical_quality = _history_freshness_quality(
+        latest_satellite_history,
+        satellite_source if satellite_source in ("ndvi", "ndre") else "ndvi",
+        latest_satellite_age_hours,
+    )
+    data_quality = _freshness_quality(
+        latest_satellite_age_hours,
+        growth_stage,
+        empirical_quality if not latest_satellite_history.empty else source_quality,
+    )
 
     valid_forecast_points = [
         point for point in forecast_points if np.isfinite(point[1])]
@@ -1048,6 +1078,9 @@ def compute_kc_dynamic(
     ndvi: float = np.nan,
     ndvi_age_hours: float = np.inf,
     ndre: float = np.nan,
+    ndre_age_hours: float = np.inf,
+    ndvi_quality: Optional[float] = None,
+    ndre_quality: Optional[float] = None,
 ) -> float:
     """
     Compute the blended dynamic crop coefficient.
@@ -1060,16 +1093,16 @@ def compute_kc_dynamic(
         w             is a quality weight combining three factors:
                           signal strength  -- scales with NDVI magnitude
                                              (more canopy -> more confident)
-                          freshness decay  -- reduces w as observation ages
+                          freshness       -- empirical provider cadence score
                           plausibility     -- zeros w when satellite implies
                                              a stage GDD says is impossible
 
     Falls back entirely to GDD-based Kc when satellite data is absent
     or biologically inconsistent with thermal development.
 
-    For stale observations, satellite influence decays by age, with a
-    conservative freshness floor applied during mid-season where canopy
-    state changes more slowly.
+    Satellite influence follows the actual acquisition intervals reported by
+    the provider. When cadence quality is absent, only a current observation
+    is trusted and the calculation otherwise falls back to GDD.
 
     Args:
         cumulative_gdd:  Current accumulated GDD
@@ -1078,16 +1111,14 @@ def compute_kc_dynamic(
         crop_type:       Key into CROP_PARAMS
         ndre:            Latest NDRE value (NaN if unavailable).
                          Used instead of NDVI during STAGE_MID_SEASON.
+        ndre_age_hours:  Hours since the NDRE observation.
+        ndvi_quality:    NDVI freshness score derived from observed cadence.
+        ndre_quality:    NDRE freshness score derived from observed cadence.
 
     Returns:
         Kc_dynamic in range [Kc_ini, ~1.35].
     """
     kc_gdd = compute_kc_gdd(cumulative_gdd, crop_type)
-
-    # Age information is required for any satellite blending: without it we
-    # cannot assess freshness, so we fall back to GDD entirely.
-    if np.isinf(ndvi_age_hours):
-        return kc_gdd
 
     # Determine which satellite source is usable at the current stage.
     # NDRE is only meaningful at mid-season (other stages → fall back to NDVI).
@@ -1098,10 +1129,20 @@ def compute_kc_dynamic(
     if not ndvi_usable and not ndre_usable:
         return kc_gdd
 
-    kc_sat, _ = _select_satellite_kc(
+    kc_sat, satellite_source = _select_satellite_kc(
         cumulative_gdd, ndvi, ndre, crop_type)
     if np.isnan(kc_sat):
         return kc_gdd
+
+    # A listed but stale NDRE must not suppress a usable NDVI observation.
+    # NDRE remains preferred at mid-season whenever its own cadence score is
+    # positive; otherwise the established NDVI path is the transparent fallback.
+    if satellite_source == "ndre" and ndvi_usable:
+        ndre_freshness = _freshness_quality(ndre_age_hours, stage, ndre_quality)
+        ndvi_freshness = _freshness_quality(ndvi_age_hours, stage, ndvi_quality)
+        if ndre_freshness <= 0.0 < ndvi_freshness:
+            kc_sat = float(compute_kc_ndvi(ndvi, crop_type))
+            satellite_source = "ndvi"
 
     # Signal-strength weight.
     # Primary: NDVI (all stages). Its magnitude tracks fractional cover and
@@ -1118,20 +1159,9 @@ def compute_kc_dynamic(
 
     w_base = np.clip(ndvi_for_weight * NDVI_WEIGHT_SLOPE, 0.0, NDVI_WEIGHT_CAP)
 
-    # Freshness decay.
-    if ndvi_age_hours <= SAT_FRESH_HOURS:       # <= 15 days: full trust
-        quality_factor = 1.0
-    elif ndvi_age_hours <= SAT_REDUCED_HOURS:   # 15-30 days: reduced
-        quality_factor = SAT_REDUCED_FACTOR
-    elif ndvi_age_hours <= SAT_LOW_HOURS:       # 30-45 days: low
-        quality_factor = SAT_LOW_FACTOR
-    else:                           # > 45 days: no trust
-        quality_factor = 0.0
-
-    # Stage-conditional floor: retain minimum freshness confidence at
-    # mid-season where canopy state is relatively stable.
-    if stage == STAGE_MID_SEASON:
-        quality_factor = max(quality_factor, MIDSEASON_FRESHNESS_FLOOR)
+    selected_age = ndre_age_hours if satellite_source == "ndre" else ndvi_age_hours
+    selected_quality = ndre_quality if satellite_source == "ndre" else ndvi_quality
+    quality_factor = _freshness_quality(selected_age, stage, selected_quality)
 
     # GDD plausibility check.
     plausibility = _gdd_plausibility_weight(kc_sat, cumulative_gdd, crop_type)
@@ -1146,6 +1176,9 @@ def compute_kc_dynamic_series(
     age_series: pd.Series,
     crop_type: str,
     ndre_series: Optional[pd.Series] = None,
+    ndvi_quality_series: Optional[pd.Series] = None,
+    ndre_age_series: Optional[pd.Series] = None,
+    ndre_quality_series: Optional[pd.Series] = None,
 ) -> pd.Series:
     """
     Vectorized Kc_dynamic computation for entire DataFrame columns.
@@ -1157,6 +1190,7 @@ def compute_kc_dynamic_series(
         crop_type:    Key into CROP_PARAMS
         ndre_series:  NDRE observations (NaN where unavailable). When
                       provided, NDRE replaces NDVI during STAGE_MID_SEASON.
+        *_quality_series: Source-derived empirical freshness values.
 
     Returns:
         Series of Kc_dynamic values with same index as gdd_series.
@@ -1177,9 +1211,11 @@ def compute_kc_dynamic_series(
 
     # Replace with NDRE during mid-season where available.
     ndre_vals = None
+    ndre_selected_mask = np.zeros(len(gdd_series), dtype=bool)
     if ndre_series is not None:
         ndre_vals = ndre_series.values.astype(float)
         mid_mask = mid_mask_base & ~np.isnan(ndre_vals)
+        ndre_selected_mask = mid_mask
         if mid_mask.any():
             kc_sat[mid_mask] = compute_kc_ndre(ndre_vals, crop_type)[mid_mask]
             log.info(
@@ -1203,19 +1239,31 @@ def compute_kc_dynamic_series(
         ndvi_for_weight = np.where(np.isnan(ndvi_vals), 0.0, ndvi_vals)
     w_base = np.clip(ndvi_for_weight * NDVI_WEIGHT_SLOPE, 0.0, NDVI_WEIGHT_CAP)
 
-    # Freshness decay
-    quality = np.where(
-        age_vals <= SAT_FRESH_HOURS, 1.0,
-        np.where(age_vals <= SAT_REDUCED_HOURS, SAT_REDUCED_FACTOR,
-                 np.where(age_vals <= SAT_LOW_HOURS, SAT_LOW_FACTOR, 0.0))
+    # Quality comes from the observed acquisition process. For older datasets
+    # without this column, retain only rows that are exact observations.
+    if ndvi_quality_series is not None:
+        ndvi_quality_vals = np.clip(
+            ndvi_quality_series.reindex(gdd_series.index).fillna(0.0).values.astype(float), 0.0, 1.0)
+    else:
+        ndvi_quality_vals = np.where(age_vals <= 0, 1.0, 0.0)
+    if ndre_age_series is not None:
+        ndre_age_vals = ndre_age_series.reindex(gdd_series.index).fillna(np.inf).values.astype(float)
+    else:
+        ndre_age_vals = age_vals
+    if ndre_quality_series is not None:
+        ndre_quality_vals = np.clip(
+            ndre_quality_series.reindex(gdd_series.index).fillna(0.0).values.astype(float), 0.0, 1.0)
+    else:
+        ndre_quality_vals = np.where(ndre_age_vals <= 0, 1.0, 0.0)
+    stale_ndre_fallback = (
+        ndre_selected_mask & (ndre_quality_vals <= 0.0)
+        & ~np.isnan(ndvi_vals) & (ndvi_quality_vals > 0.0)
     )
-
-    # Match scalar behavior: floor freshness during mid-season.
-    quality = np.where(
-        mid_mask_base,
-        np.maximum(quality, MIDSEASON_FRESHNESS_FLOOR),
-        quality,
-    )
+    if stale_ndre_fallback.any():
+        kc_sat[stale_ndre_fallback] = compute_kc_ndvi(
+            ndvi_vals, crop_type)[stale_ndre_fallback]
+        ndre_selected_mask[stale_ndre_fallback] = False
+    quality = np.where(ndre_selected_mask, ndre_quality_vals, ndvi_quality_vals)
 
     # GDD plausibility (vectorized) — mirrors _gdd_plausibility_weight scalar logic.
     # Uses proportional thresholds so narrow-Kc crops (olive) behave correctly.
@@ -1248,7 +1296,8 @@ def compute_kc_dynamic_series(
     # Zero out weight where: NDVI is absent AND no NDRE proxy was used,
     # age is unknown (inf), or no valid satellite Kc could be derived.
     # The NDRE-proxy rows already have non-zero w_base, so they are not zeroed here.
-    w[np.isinf(age_vals) | np.isnan(kc_sat)] = 0.0
+    selected_age_vals = np.where(ndre_selected_mask, ndre_age_vals, age_vals)
+    w[np.isinf(selected_age_vals) | np.isnan(kc_sat)] = 0.0
     # For rows where both NDVI and NDRE-proxy are absent, w_base is already 0,
     # but be explicit: zero weight where ndvi is NaN and ndre proxy wasn't applied.
     if ndre_vals is not None:

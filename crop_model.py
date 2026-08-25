@@ -47,6 +47,11 @@ class CropState:
     et0_today_mm: Optional[float] = None
     et0_baseline_mm: Optional[float] = None
     et0_std_mm: Optional[float] = None
+    # Per-index source age/quality are kept separate because NDRE cadence can
+    # differ materially from NDVI cadence in the EO catalog.
+    sat_ndvi_quality: float = 0.0
+    sat_ndre_quality: float = 0.0
+    sat_ndre_age_hours: float = float("inf")
 
 
 def get_crop_state(
@@ -55,6 +60,9 @@ def get_crop_state(
     ndvi: float = float("nan"),
     ndre: float = float("nan"),
     ndvi_age_hours: float = float("inf"),
+    ndre_age_hours: float = float("inf"),
+    ndvi_quality: Optional[float] = None,
+    ndre_quality: Optional[float] = None,
     etc_daily_mm: float = 0.0,
 ) -> CropState:
     crop_type = farm.crop_type
@@ -70,6 +78,9 @@ def get_crop_state(
         ndvi_age_hours=ndvi_age_hours,
         crop_type=crop_type,
         ndre=ndre,
+        ndre_age_hours=ndre_age_hours,
+        ndvi_quality=ndvi_quality,
+        ndre_quality=ndre_quality,
     )
     return CropState(
         growth_stage=stage,
@@ -81,6 +92,11 @@ def get_crop_state(
         etc_daily_mm=etc_daily_mm,
         recommended_volume_mm=etc_daily_mm,
         recommended_volume_m3=None,
+        sat_ndvi_quality=(float(ndvi_quality)
+                          if ndvi_quality is not None and np.isfinite(ndvi_quality) else 0.0),
+        sat_ndre_quality=(float(ndre_quality)
+                          if ndre_quality is not None and np.isfinite(ndre_quality) else 0.0),
+        sat_ndre_age_hours=float(ndre_age_hours),
     )
 
 
@@ -221,7 +237,9 @@ def compute_phenology_features(
                 else pd.Series(np.nan, index=df.index))
     ndre_col = df["sat_ndre"] if "sat_ndre" in df.columns else None
     df["kc_dynamic"] = compute_kc_dynamic_series(
-        df["gdd_cumulative"], ndvi_col, ndvi_age, crop_type, ndre_col
+        df["gdd_cumulative"], ndvi_col, ndvi_age, crop_type, ndre_col,
+        df.get("sat_ndvi_quality"), df.get("sat_ndre_age"),
+        df.get("sat_ndre_quality"),
     )
 
     if "Et0_evapotranspiration" in df.columns:

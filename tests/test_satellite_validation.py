@@ -93,10 +93,9 @@ class TestSatelliteValidation(unittest.TestCase):
 
         self.assertTrue(resp["insufficient_data"])
 
-    def test_freshness_floor_midseason(self):
+    def test_unknown_cadence_rejects_stale_midseason_observation(self):
         q = pe._freshness_quality(age_hours=2000, stage=pe.STAGE_MID_SEASON)
-        # When extremely stale, mid-season should still apply the floor
-        self.assertAlmostEqual(q, pe.MIDSEASON_FRESHNESS_FLOOR)
+        self.assertEqual(q, 0.0)
 
     def test_flat_trend_neutral_in_low_sensitivity_stage(self):
         now = pd.Timestamp.utcnow()
