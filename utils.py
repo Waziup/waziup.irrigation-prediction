@@ -4,11 +4,20 @@ from dotenv import load_dotenv
 import pytz
 #from geopy.geocoders import Nominatim
 import requests
-from timezonefinder import TimezoneFinder
 import urllib.parse
 
 class TimeUtils:
     Timezone = ''
+
+    @staticmethod
+    def for_plot(plot, fallback="UTC"):
+        """Return a validated per-plot timezone without sharing farm state."""
+        value = getattr(plot, "timezone", None) or TimeUtils.Timezone or fallback
+        try:
+            pytz.timezone(value)
+        except pytz.UnknownTimeZoneError as exc:
+            raise ValueError(f"Invalid timezone {value!r}") from exc
+        return value
 
     @staticmethod
     def get_timezone_offset(timezone_str):
@@ -34,6 +43,7 @@ class TimeUtils:
         #location = geolocator.reverse((latitude, longitude), language="en")
         
         # Determine the timezone using TimezoneFinder
+        from timezonefinder import TimezoneFinder
         timezone_finder = TimezoneFinder()
         timezone_str = timezone_finder.timezone_at(lng=longitude, lat=latitude)
         
@@ -94,7 +104,8 @@ class NetworkUtils:
 
             try:
                 # Send a GET request to the API
-                response = requests.post(encoded_url, headers=headers, json=data)
+                response = requests.post(
+                    encoded_url, headers=headers, json=data, timeout=30)
 
                 # Check if the request was successful (status code 200)
                 if response.status_code == 200:
