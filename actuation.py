@@ -1,19 +1,21 @@
 import json
+import hashlib
 import logging
 import os
-import sys
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 import pytz
 
-from dotenv import load_dotenv
 import numpy as np
 import pandas as pd
 import requests
+import runtime_config
 
 # import create_model
 from utils import NetworkUtils, TimeUtils
 import threading
+from recommendation_contract import compose_recommendation
+from operations_store import get_operations_store, MODES
 
 if __package__:
     from importlib import import_module
@@ -36,7 +38,7 @@ SATELLITE_FIELDS = tuple(_spaceiotbox_satellite.SATELLITE_COLUMNS)
 
 # Crop model — computes stress threshold from phenology
 try:
-    from crop_model import get_stress_threshold, compute_gdd_from_weather, get_crop_state
+    from crop_model import compute_gdd_from_weather, get_crop_state
     from phenology_engine import compute_kc_gdd_series
     from phenology_engine import get_growth_stage
     from phenology_engine import check_satellite_tension_consistency
@@ -47,28 +49,32 @@ except ImportError:
 
 # Decision engine — compares forecast vs threshold
 try:
-    from decision_engine import evaluate_forecast, IrrigationRecommendation
+    from decision_engine import evaluate_forecast
     HAS_DECISION_ENGINE = True
 except ImportError:
     HAS_DECISION_ENGINE = False
 
 
 # Globals
-# 20% allowed, fixed value TODO: make configurable
-OverThresholdAllowed = 1.2
-# 3 hours until verification of irrigation is done, should be more than 1 h, fixed value TODO: make configurable DEBUG
-Irrigation_confirmation_sec = 10800
 WEATHER_STALE_HOURS = 6.0
-SATELLITE_STALE_HOURS = 72.0
 # Per-plot irrigation retry counts (thread-safe: keyed by plot.id)
 # Prevents cross-plot interference when multiple plots verify concurrently.
 _irrigation_retries: dict = {}
+# Tracks in-flight requests per plot so repeated recommendations cannot send
+# duplicate actuator commands before confirmation completes.
+_active_irrigations = set()
+_irrigation_lock = threading.Lock()
+
+
+def _release_active_irrigation(plot_id):
+    """Release a plot's in-flight reservation under the shared lock."""
+    with _irrigation_lock:
+        _active_irrigations.discard(plot_id)
 
 # Cache for dynamic threshold (recomputed at most once per day)
 # key: (crop_type, planting_date, lat, lon) -> (date, cumulative_gdd)
 _runtime_crop_state_cache = {}
 
-FORECAST_HORIZON_HOURS = [24, 48, 120, 168]
 
 IRRIGATION_EFFICIENCY = {
     "drip": 0.90,
@@ -158,6 +164,98 @@ def _has_actuator_support(plot):
     return len(flow_ids) > 0
 
 
+def resolve_irrigation_mode(plot):
+    """Return an explicit mode, preserving legacy actuator behavior once."""
+    configured = str(getattr(plot, "irrigation_mode", "") or "").strip().lower()
+    if configured in MODES:
+        return configured
+    # Legacy JSON did not distinguish method from operating mode. Existing
+    # actuator-backed installations behaved automatically; non-actuator plots
+    # were advisory-only.
+    return "automatic" if _has_actuator_support(plot) else "advisory_only"
+
+
+def _recommendation_operation(plot, pipeline_result, recommendation, runtime_state,
+                              current_tension, threshold, satellite_validation):
+    """Persist one idempotent operational record per model forecast cycle."""
+    stable_id = getattr(plot, "stable_id", None)
+    if not stable_id:
+        return None, True
+    forecast_timestamps = list(getattr(pipeline_result, "forecast_timestamps", []) or [])
+    anchor = forecast_timestamps[0] if forecast_timestamps else getattr(
+        recommendation, "first_breach_timestamp", None)
+    if hasattr(anchor, "isoformat"):
+        anchor = anchor.isoformat()
+    if not anchor:
+        cadence = max(1, int(float(getattr(plot, "predict_period_hours", 3) or 3)))
+        anchor = pd.Timestamp.now(tz="UTC").floor(f"{cadence}h").isoformat()
+    amount = _resolve_runtime_irrigation_volume(plot, runtime_state)
+    mode = resolve_irrigation_mode(plot)
+    should_irrigate = bool(getattr(recommendation, "should_irrigate", False))
+    status = "pending_approval" if should_irrigate and mode == "approval_required" else "planned"
+    decision = {
+        "urgency": getattr(recommendation, "urgency", "unknown"),
+        "should_irrigate": should_irrigate,
+        "first_breach_horizon": getattr(recommendation, "first_breach_horizon", None),
+        "first_breach_timestamp": getattr(recommendation, "first_breach_timestamp", None),
+        "current_tension_cbar": current_tension,
+        "threshold_cbar": threshold,
+        "satellite_validation": satellite_validation,
+    }
+    key_material = _json_for_key({"plot": stable_id, "anchor": anchor,
+                                  "urgency": decision["urgency"], "amount": amount})
+    key = "recommendation:" + hashlib.sha256(key_material.encode()).hexdigest()[:32]
+    store = get_operations_store()
+    operation, created = store.create_operation(
+        idempotency_key=key, plot_id=stable_id, farm_id=getattr(plot, "farm_id", None),
+        plot_name=getattr(plot, "user_given_name", ""), source="recommendation",
+        mode=mode, status=status, amount_m3=amount, planned_start=(
+            getattr(recommendation, "first_breach_timestamp", None).isoformat()
+            if hasattr(getattr(recommendation, "first_breach_timestamp", None), "isoformat") else None),
+        recommendation=decision)
+    urgency = decision["urgency"]
+    alert_key = f"alert:{key}"
+    store.record_alert(
+        idempotency_key=alert_key, operation_id=operation["operation_id"],
+        farm_id=getattr(plot, "farm_id", None), plot_id=stable_id,
+        urgency=urgency, payload=decision)
+    return operation, created
+
+
+def _json_for_key(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _transition_operation(operation, status, detail=None):
+    if operation is None:
+        return None
+    try:
+        return get_operations_store().transition(
+            operation["operation_id"], status, detail)[0]
+    except (KeyError, ValueError) as exc:
+        log.warning("Operation transition failed for %s: %s",
+                    operation.get("operation_id"), exc)
+        return operation
+
+
+def execute_operation_command(plot, operation):
+    """Issue one command for a persisted operation and record the outcome."""
+    if operation is None:
+        return None
+    if operation.get("status") not in {"planned", "approved"}:
+        return None
+    amount = operation.get("amount_m3")
+    if amount is None:
+        _transition_operation(operation, "failed", {"error": "missing_irrigation_amount"})
+        return None
+    response = irrigate_amount(plot, float(amount), authorized=True)
+    if response is True:
+        _transition_operation(operation, "active", {"command": "accepted"})
+    else:
+        _transition_operation(operation, "failed", {"error": "actuator_command_failed"})
+    return response
+
+
 def _sum_rainfall_mm(frame):
     if frame is None or frame.empty or "Rain" not in frame.columns:
         return 0.0
@@ -167,7 +265,7 @@ def _sum_rainfall_mm(frame):
     return float(rain.sum())
 
 
-def _build_rainfall_summary(plot, weather=None):
+def _build_rainfall_summary(plot, weather=None, forecast_weather=None):
     rain_since_planting_mm = 0.0
     rain_last_24h_mm = 0.0
     rain_forecast_mm = 0.0
@@ -180,22 +278,29 @@ def _build_rainfall_summary(plot, weather=None):
                                      latest_index - timedelta(days=1)]
             rain_last_24h_mm = _sum_rainfall_mm(recent_weather)
 
-    try:
-        lat, lon = _parse_plot_coordinates(plot)
-        today = datetime.now().date()
+    if forecast_weather is not None:
         look_ahead_hours = float(getattr(plot, 'look_ahead_time', 24) or 24)
-        forecast_days = max(1, int(np.ceil(look_ahead_hours / 24.0)))
-        start_date = today.strftime("%Y-%m-%d")
-        end_date = (today + timedelta(days=forecast_days)).strftime("%Y-%m-%d")
-        forecast_frame = fetch_weather_frame(
-            lat,
-            lon,
-            start_date=start_date,
-            end_date=end_date,
-        )
-        rain_forecast_mm = _sum_rainfall_mm(forecast_frame)
-    except (ValueError, TypeError, AttributeError, requests.RequestException):
-        rain_forecast_mm = 0.0
+        forecast_window = forecast_weather
+        if isinstance(forecast_weather, pd.DataFrame) and isinstance(
+                forecast_weather.index, pd.DatetimeIndex):
+            now = pd.Timestamp.now(tz=forecast_weather.index.tz) if forecast_weather.index.tz else pd.Timestamp.now()
+            forecast_window = forecast_weather[
+                (forecast_weather.index > now)
+                & (forecast_weather.index <= now + pd.Timedelta(hours=look_ahead_hours))]
+        rain_forecast_mm = _sum_rainfall_mm(forecast_window)
+    else:
+        try:
+            lat, lon = _parse_plot_coordinates(plot)
+            today = datetime.now().date()
+            look_ahead_hours = float(getattr(plot, 'look_ahead_time', 24) or 24)
+            forecast_days = max(1, int(np.ceil(look_ahead_hours / 24.0)))
+            start_date = today.strftime("%Y-%m-%d")
+            end_date = (today + timedelta(days=forecast_days - 1)).strftime("%Y-%m-%d")
+            forecast_weather = fetch_weather_frame(
+                lat, lon, start_date=start_date, end_date=end_date)
+            rain_forecast_mm = _sum_rainfall_mm(forecast_weather)
+        except (ValueError, TypeError, AttributeError, requests.RequestException):
+            rain_forecast_mm = 0.0
 
     return {
         "rain_since_planting_mm": float(rain_since_planting_mm),
@@ -297,17 +402,12 @@ def _compute_satellite_validation(plot, runtime_state, current_tension, tension_
 
     now_ts = pd.Timestamp.now(tz="UTC")
     try:
-        validation_lookback_days = max(
-            30, int(getattr(runtime_state, "sat_ndvi_age_hours", 0.0) // 24) + 45)
-    except (TypeError, ValueError):
-        validation_lookback_days = 60
-
-    try:
+        # Request the available catalog; source cadence, not a crop-day window,
+        # determines whether each observation is fresh enough to influence Kc.
         satellite_history = fetch_satellite_history(
             lat,
             lon,
             as_of=now_ts,
-            lookback_days=validation_lookback_days,
         )
     except Exception as exc:
         log.warning("Satellite validation history fetch failed: %s", exc)
@@ -326,6 +426,12 @@ def _compute_satellite_validation(plot, runtime_state, current_tension, tension_
         satellite_ndre=getattr(runtime_state, "sat_ndre", float("nan")),
         satellite_ndvi_age_hours=getattr(
             runtime_state, "sat_ndvi_age_hours", float("inf")),
+        satellite_ndre_age_hours=getattr(
+            runtime_state, "sat_ndre_age_hours", float("inf")),
+        satellite_ndvi_quality=getattr(
+            runtime_state, "sat_ndvi_quality", None),
+        satellite_ndre_quality=getattr(
+            runtime_state, "sat_ndre_quality", None),
         satellite_data_age_hours=getattr(
             runtime_state, "sat_data_age_hours", float("inf")),
         satellite_vv_db=getattr(runtime_state, "sat_vv_db", float("nan")),
@@ -447,13 +553,15 @@ def _compute_runtime_crop_state(plot):
             lat,
             lon,
             as_of=pd.Timestamp.now(tz="UTC"),
-            lookback_days=max(days_ago + 14, 30),
         )
         ndvi = float("nan")
         ndre = float("nan")
         ndvi_age_hours = float("inf")
         vv_db = float("nan")
         sat_age_hours = float("inf")
+        ndre_age_hours = float("inf")
+        ndvi_quality = 0.0
+        ndre_quality = 0.0
         if isinstance(satellite, pd.DataFrame) and not satellite.empty:
             latest_sat = satellite.iloc[-1]
             ndvi = float(latest_sat.get("sat_ndvi", float("nan")))
@@ -463,6 +571,9 @@ def _compute_runtime_crop_state(plot):
             vv_db = float(latest_sat.get("sat_vv_db", float("nan")))
             sat_age_hours = float(latest_sat.get(
                 "satellite_data_age", float("inf")))
+            ndre_age_hours = float(latest_sat.get("sat_ndre_age", float("inf")))
+            ndvi_quality = float(latest_sat.get("sat_ndvi_quality", 0.0))
+            ndre_quality = float(latest_sat.get("sat_ndre_quality", 0.0))
 
         satellite_summary = _summarize_data_frame(satellite, SATELLITE_FIELDS)
 
@@ -472,6 +583,9 @@ def _compute_runtime_crop_state(plot):
             ndvi=ndvi,
             ndre=ndre,
             ndvi_age_hours=ndvi_age_hours,
+            ndre_age_hours=ndre_age_hours,
+            ndvi_quality=ndvi_quality,
+            ndre_quality=ndre_quality,
             etc_daily_mm=0.0,
         )
         state.sat_ndvi = ndvi
@@ -479,9 +593,28 @@ def _compute_runtime_crop_state(plot):
         state.sat_ndvi_age_hours = ndvi_age_hours
         state.sat_vv_db = vv_db
         state.sat_data_age_hours = sat_age_hours
+        state.sat_ndre_age_hours = ndre_age_hours
+        state.sat_ndvi_quality = ndvi_quality
+        state.sat_ndre_quality = ndre_quality
         state.weather_data_age_hours = weather_age_hours
+        # Preserve source selection for API diagnostics and production audits.
+        state.weather_provider = weather.attrs.get("provider", "unknown")
+        state.satellite_provider = satellite.attrs.get(
+            "provider", "unavailable")
         state.weather_data_summary = weather_summary
         state.satellite_data_summary = satellite_summary
+        try:
+            forecast_days = max(1, int(np.ceil(float(
+                getattr(plot, "forecast_horizon_days", 5) or 5))))
+            forecast_weather = fetch_weather_frame(
+                lat, lon, start_date=today.strftime("%Y-%m-%d"),
+                end_date=(today + timedelta(days=forecast_days)).strftime("%Y-%m-%d"))
+            if not isinstance(forecast_weather, pd.DataFrame):
+                forecast_weather = pd.DataFrame()
+        except Exception as exc:
+            log.warning("Forecast weather fetch failed: %s", exc)
+            forecast_weather = pd.DataFrame()
+        state.weather_forecast_frame = forecast_weather
         historical_et0 = et0_daily.loc[:latest_weather_ts] if latest_weather_ts is not None else et0_daily
         historical_et0 = pd.to_numeric(
             historical_et0, errors="coerce").dropna()
@@ -503,7 +636,7 @@ def _compute_runtime_crop_state(plot):
         et0_today = float(et0_daily.iloc[-1]) if len(et0_daily) > 0 else 0.0
         state.etc_daily_mm = float(max(0.0, et0_today * state.kc))
 
-        rainfall_summary = _build_rainfall_summary(plot, weather)
+        rainfall_summary = _build_rainfall_summary(plot, weather, forecast_weather)
         state.rain_since_planting_mm = rainfall_summary["rain_since_planting_mm"]
         state.rain_last_24h_mm = rainfall_summary["rain_last_24h_mm"]
         state.rain_forecast_mm = rainfall_summary["rain_forecast_mm"]
@@ -545,65 +678,13 @@ def _compute_runtime_crop_state(plot):
         return _runtime_state_fail(plot, 'runtime_crop_state_exception', exc)
 
 
-def compute_runtime_dynamic_threshold(plot) -> float:
-    """
-    Crop Model at runtime: compute the growth-stage-aware
-    irrigation threshold for the current moment.
-
-    Uses the crop model to:
-            1. Fetch daily temperature data from SpaceIoTBox (cached per day)
-      2. Accumulate GDD from planting date to today
-      3. Determine current growth stage
-      4. Return the crop stress threshold (PWP_base + Δ_offset)
-
-    Falls back to plot.threshold (static) if:
-      - Crop model not available
-      - No planting date configured
-      - Weather API fails
-      - use_dynamic_threshold is False
-
-    Args:
-        plot: Plot object with crop_type, planting_date, permanent_wilting_point,
-              gps_info (lat/lon), use_dynamic_threshold, threshold (static fallback)
-
-    Returns:
-        Threshold value in cbar (or humidity units for capacitive sensors)
-    """
-    state = _compute_runtime_crop_state(plot)
-    if state is None:
-        return plot.threshold
-
-    threshold = state.stress_threshold_cbar
-    print(f"  [Crop Model] GDD={state.gdd_cumulative:.0f}, "
-          f"stage={state.growth_stage_name}, threshold={threshold:.1f} cbar "
-          f"(crop={state.crop_type})")
-    return threshold
-
-# Find global max and min => not used any more
-
-
-def get_max_min(df, target_col='smoothed_values'):
-    # reset "new" index
-    df = df.reset_index(inplace=False)
-
-    # index
-    global_min_index = df[target_col].idxmin()
-    global_max_index = df[target_col].idxmax()
-    # value
-    global_min = df[target_col].min()
-    global_max = df[target_col].max()
-
-    print(global_min_index, "value:", global_min, global_max_index,
-          "value:", global_max, "length:", global_max_index-global_min_index)
-    print(global_min_index, "value:", df[target_col][global_min_index], global_max_index,
-          "value:", df[target_col][global_max_index], "length:", global_max_index-global_min_index)
-
-    return global_min_index, global_max_index, global_min, global_max
-
+def get_runtime_crop_state(plot):
+    """Return the cached or freshly computed runtime crop state."""
+    return _compute_runtime_crop_state(plot)
 
 # Function to find next lower and higher value occurrence
 def find_next_occurrences(df, column, threshold, timeSpanOverThreshold):
-    timezone = TimeUtils.Timezone
+    timezone = str(df.index.tz) if isinstance(df.index, pd.DatetimeIndex) and df.index.tz else "UTC"
 
     # Start @current time
     # timezone = create_model.get_timezone(Current_config["Gps_info"]["latitude"], Current_config["Gps_info"]["longitude"])
@@ -662,9 +743,11 @@ def _resolve_runtime_irrigation_volume(plot, crop_state):
         if volume_m3 is not None and np.isfinite(volume_m3) and volume_m3 > 0:
             return volume_m3
 
-    volume_mm = crop_state.recommended_volume_mm
+    volume_mm = getattr(crop_state, "recommended_volume_mm", None)
     if volume_mm is None:
-        volume_mm = crop_state.etc_daily_mm
+        volume_mm = getattr(crop_state, "etc_daily_mm", None)
+    if volume_mm is None:
+        return None
 
     try:
         volume_mm = float(volume_mm)
@@ -683,7 +766,12 @@ def _resolve_runtime_irrigation_volume(plot, crop_state):
 
 
 def get_irrigation_recommendation(plot):
-    runtime_state = _compute_runtime_crop_state(plot)
+    # Prefer the crop state already used by orchestration; compute one only when
+    # the API is called before the first pipeline cycle.
+    pipeline_result = getattr(plot, "pipeline_result", None)
+    runtime_state = getattr(pipeline_result, "crop_state", None)
+    if runtime_state is None:
+        runtime_state = _compute_runtime_crop_state(plot)
     if runtime_state is None:
         return {
             "available": False,
@@ -705,7 +793,13 @@ def get_irrigation_recommendation(plot):
         runtime_state, "weather_data_age_hours", float("inf"))
     sat_age = getattr(runtime_state, "sat_data_age_hours", float("inf"))
     weather_stale = bool(weather_age > WEATHER_STALE_HOURS)
-    sat_stale = bool(sat_age > SATELLITE_STALE_HOURS)
+    # Each index reports cadence-derived quality; there is no crop-day expiry.
+    quality_values = [
+        _finite_or_none(getattr(runtime_state, "sat_ndvi_quality", None)),
+        _finite_or_none(getattr(runtime_state, "sat_ndre_quality", None)),
+    ]
+    sat_quality = max((value for value in quality_values if value is not None), default=0.0)
+    sat_stale = bool(sat_quality <= 0.0)
     stale_sources = []
     if weather_stale:
         stale_sources.append("weather")
@@ -715,13 +809,15 @@ def get_irrigation_recommendation(plot):
     area_m2 = _resolve_plot_area_m2(plot)
     irrigation_type = _resolve_irrigation_type(plot)
     efficiency = _resolve_irrigation_efficiency(plot)
-    actuator_based = _has_actuator_support(plot)
+    actuator_based = (_has_actuator_support(plot)
+                      and resolve_irrigation_mode(plot) != "advisory_only")
     recommended_volume_m3 = _resolve_runtime_irrigation_volume(
         plot, runtime_state)
 
-    return {
+    base = {
         "available": True,
         "actuator_based": actuator_based,
+        "irrigation_mode": resolve_irrigation_mode(plot),
         "crop_type": runtime_state.crop_type,
         "growth_stage": runtime_state.growth_stage_name,
         "kc": round(float(runtime_state.kc), 3) if getattr(runtime_state, "kc", None) is not None else None,
@@ -745,6 +841,9 @@ def get_irrigation_recommendation(plot):
         "sat_ndre": (None if pd.isna(getattr(runtime_state, "sat_ndre", float("nan")))
                      else round(float(runtime_state.sat_ndre), 3)),
         "sat_ndvi_age_hours": _finite_or_none(getattr(runtime_state, "sat_ndvi_age_hours", float("nan")), 1),
+        "sat_ndre_age_hours": _finite_or_none(getattr(runtime_state, "sat_ndre_age_hours", float("nan")), 1),
+        "sat_ndvi_quality": _finite_or_none(getattr(runtime_state, "sat_ndvi_quality", float("nan")), 3),
+        "sat_ndre_quality": _finite_or_none(getattr(runtime_state, "sat_ndre_quality", float("nan")), 3),
         "sat_vv_db": (None if pd.isna(getattr(runtime_state, "sat_vv_db", float("nan")))
                       else round(float(runtime_state.sat_vv_db), 2)),
         "sat_data_age_hours": _finite_or_none(getattr(runtime_state, "sat_data_age_hours", float("nan")), 1),
@@ -764,10 +863,11 @@ def get_irrigation_recommendation(plot):
             },
             "satellite": {
                 "expected_interval": "scene-based / as available",
-                "used_for": ["sat_ndvi", "sat_ndre", "sat_vv_db"],
+                "used_for": ["sat_ndvi", "sat_ndre"],
                 "model_processing": [
-                    "NDVI and NDRE feed Kc blending",
-                    "VV is used only to cap NDVI staleness when SAR confirms canopy",
+                    "NDRE is preferred for mid-season Kc when point-valid and fresh",
+                    "NDVI covers other stages and is the stale-NDRE fallback",
+                    "freshness follows each index's observed acquisition intervals",
                 ],
             },
         },
@@ -775,7 +875,9 @@ def get_irrigation_recommendation(plot):
         "data_stale_sources": stale_sources,
         "data_stale_thresholds": {
             "weather_hours": WEATHER_STALE_HOURS,
-            "satellite_hours": SATELLITE_STALE_HOURS,
+            # Preserve the response key while making clear there is no fixed cutoff.
+            "satellite_hours": None,
+            "satellite_policy": "empirical_acquisition_intervals",
         },
         "reason": (
             "No pump/actuator configured for this irrigation mode. Advice only."
@@ -783,6 +885,20 @@ def get_irrigation_recommendation(plot):
             "Rainfall-adjusted irrigation need computed from weather history and forecast."
         ),
     }
+    decision = {}
+    if pipeline_result is not None:
+        pipeline_decision = getattr(pipeline_result, "recommendation", None)
+        if pipeline_decision is not None:
+            if hasattr(pipeline_result, "to_dict"):
+                decision = pipeline_result.to_dict().get("recommendation") or {}
+            elif hasattr(pipeline_decision, "__dict__"):
+                decision = dict(vars(pipeline_decision))
+    contract = compose_recommendation(
+        plot=plot, base=base, decision=decision, pipeline=pipeline_result,
+        forecast_weather=getattr(runtime_state, "weather_forecast_frame", None))
+    # Keep v1 flat keys for existing integrations while all first-party UI
+    # consumers move to the schema-versioned nested contract.
+    return {**base, **decision, **contract, "decision": decision}
 
 
 def _alert_paths(plot_id):
@@ -809,7 +925,7 @@ def _persist_alert_record(
     try:
         plot_id = getattr(plot, "id", None)
         plot_name = getattr(plot, "user_given_name", "")
-        now_utc = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        now_utc = pd.Timestamp.now(tz="UTC").floor("s").isoformat()
 
         validation_factors = {}
         if isinstance(satellite_validation, dict):
@@ -918,15 +1034,15 @@ def round_to_nearest_10_minutes(dt):
 # to json file -> not needed because can just ask api, more consistent state
 
 
-def save_irrigation_time(amount, plotid, status="not confirmed") -> int:
+def save_irrigation_time(amount, plot, status="not confirmed") -> int:
     # Load from file
-    filename = 'data/irrigations_plot_' + str(plotid) + '.json'
+    filename = 'data/irrigations_plot_' + str(plot.id) + '.json'
     data = read_data_from_file(filename)
 
     # obtain timezone
-    timezone = pytz.timezone(TimeUtils.Timezone)
+    timezone = pytz.timezone(TimeUtils.for_plot(plot))
     # add to current timestamp without converting it
-    now = timezone.localize(datetime.now())
+    now = datetime.now(tz=timezone)
 
     # Round to the nearest 10 minutes
     rounded_tz = round_to_nearest_10_minutes(now)
@@ -970,12 +1086,23 @@ def verify_irrigation(plot, amount):
     """
     plot_id = getattr(plot, 'id', 0)
 
+    def transition_latest(status, detail=None):
+        stable_id = getattr(plot, "stable_id", None)
+        if not stable_id:
+            return
+        operation = get_operations_store().latest_for_plot(
+            stable_id, statuses={"active", "completed"})
+        if operation:
+            _transition_operation(operation, status, detail)
+
     # Get sensor id of confirmation device.
     confirmation = plot.device_and_sensor_ids_flow_confirmation
     if not isinstance(confirmation, list) or len(confirmation) == 0 or not isinstance(confirmation[0], str):
         print(
             f"No confirmation sensor configured for plot {plot.id}, cannot verify irrigation.")
         update_irrigation_status(plot, "no_confirmation_sensor_configured")
+        transition_latest("completed", {"verification": "no_confirmation_sensor"})
+        _release_active_irrigation(plot_id)
         return
     else:
         sensor_id = confirmation[0]
@@ -994,10 +1121,12 @@ def verify_irrigation(plot, amount):
             print(f"Verification failed for plot {plot_id}: "
                   f"HTTP {response.status_code} {response.text}")
             update_irrigation_status(plot, "verification_of_irrigation_failed")
+            transition_latest("failed", {"error": f"verification_http_{response.status_code}"})
+            _release_active_irrigation(plot_id)
             return
 
         resp = response.json()
-        tz = pytz.timezone(TimeUtils.Timezone)
+        tz = pytz.timezone(TimeUtils.for_plot(plot))
         last_time = datetime.fromisoformat(
             resp.get('time').replace("Z", "+00:00")).astimezone(tz)
         time_passed = datetime.now(tz=tz) - last_time
@@ -1012,7 +1141,10 @@ def verify_irrigation(plot, amount):
             print(f"Irrigation confirmed for plot {plot_id}: "
                   f"delivered={last_value}m³, expected={amount}m³.")
             update_irrigation_status(plot, "confirmed")
+            transition_latest("verified", {"delivered_m3": last_value,
+                                             "expected_m3": amount})
             _irrigation_retries[plot_id] = 0
+            _release_active_irrigation(plot_id)
         else:
             retries = _irrigation_retries.get(plot_id, 0)
             if retries == 0:
@@ -1021,38 +1153,30 @@ def verify_irrigation(plot, amount):
                       f"Retrying once.")
                 update_irrigation_status(
                     plot, "irrigation failed, retrying once")
-                irrigate_amount(plot, amount)
                 _irrigation_retries[plot_id] = 1
+                _release_active_irrigation(plot_id)
+                irrigate_amount(plot, amount, authorized=True)
             else:
-                if Irrigation_retries == 0:
-                    print(
-                        f"Irrigation failed for plot {plot.id}: amount_given: {last_value}m³, expected amount: {amount}m³. Irrigation will be retried once.")
-                    update_irrigation_status(
-                        plot, "irrigation failed, retrying once")
-                    irrigate_amount(plot, amount)
-                    Irrigation_retries += 1
-                    # Here another action could be triggered, like sending notification
-                else:
-                    update_irrigation_status(
-                        plot, "irrigation failed, twice, no more retries")
-                    print(
-                        f"Irrigation failed for plot {plot.id}: amount_given: {last_value}m³, expected amount: {amount}m³. Irrigation will not be retried.")
-                    Irrigation_retries = 0
-        else:
-            print("Verification failed:", response.status_code, response.text)
-            update_irrigation_status(plot, "verification_of_irrigation_failed")
-            print(
-                f"Verification of irrigation failed for plot {plot.id}: expected amount: {amount}m³. Irrigation will not be retried.")
+                update_irrigation_status(
+                    plot, "irrigation failed, twice, no more retries")
+                transition_latest("failed", {"error": "delivery_mismatch_after_retry",
+                                              "delivered_m3": last_value,
+                                              "expected_m3": amount})
+                _release_active_irrigation(plot_id)
+                print(
+                    f"Irrigation failed for plot {plot.id}: amount_given: {last_value}m³, expected amount: {amount}m³. Irrigation will not be retried.")
     except requests.exceptions.RequestException as e:
         print(f"Verification request error for plot {plot_id}: {e}")
         update_irrigation_status(plot, "verification_failed_request_error")
+        transition_latest("failed", {"error": "verification_request_error"})
+        _release_active_irrigation(plot_id)
         print(
             f"Request of verification of irrigation failed for plot {plot.id}: expected amount: {amount}m³. Irrigation will not be retried.")
 
 
 # Load from wazigate API
 # TODO: renew the token, make function in NetworkUtils that does a arbitrary API request
-def irrigate_amount(plot, amount=0):
+def irrigate_amount(plot, amount=0, authorized=False):
     # Example API call:
     # curl -X POST "http://192.168.189.2/devices/6645c4d468f31971148f2ab1/actuators/6673fcb568f31971148ff5f7/value"
     # -H "accept: */*" -H "Content-Type: application/json" -d "7.2"
@@ -1060,6 +1184,16 @@ def irrigate_amount(plot, amount=0):
     # if there is no amount in arguments, take it from config -> It is automatically triggered, retrieve amount!
     if amount == 0:
         amount = plot.irrigation_amount
+
+    mode = resolve_irrigation_mode(plot)
+    if mode in {"approval_required", "manual"} and not authorized:
+        log.warning("Irrigation command rejected for plot %s: mode '%s' requires an approved/manual operation",
+                    getattr(plot, "id", "?"), mode)
+        return None
+    if mode == "advisory_only":
+        log.warning("Irrigation command rejected for advisory-only plot %s",
+                    getattr(plot, "id", "?"))
+        return None
 
     if not _has_actuator_support(plot):
         print(
@@ -1073,6 +1207,14 @@ def irrigate_amount(plot, amount=0):
         print(
             f"Irrigation skipped for plot {getattr(plot, 'id', '?')}: no actuator configured.")
         return None
+
+    plot_id = getattr(plot, "id", None)
+    # Reserve the plot before the network request to close concurrent races.
+    with _irrigation_lock:
+        if plot_id in _active_irrigations:
+            log.warning("Duplicate irrigation prevented for plot %s", plot_id)
+            return None
+        _active_irrigations.add(plot_id)
 
     flow_meter_name = flow_ids[0]
 
@@ -1098,14 +1240,26 @@ def irrigate_amount(plot, amount=0):
 
         # Check if the request was successful (status code 200)
         if response.status_code == 200:
-            # Save times on when there was an irrigation TODO: wait for confirmation from microcontroller, irrigation could be skipped, needs to be implemented!!
-            save_irrigation_time(amount, plot.id, status="not confirmed")
             response_ok = True
+            # The hardware command has already succeeded. A local logging
+            # problem must not turn that success into an API failure or prevent
+            # delivery verification from being scheduled.
+            try:
+                save_irrigation_time(amount, plot, status="not confirmed")
+            except (OSError, ValueError, TypeError) as exc:
+                log.exception(
+                    "Irrigation command succeeded but event recording failed for plot %s: %s",
+                    plot_id,
+                    exc,
+                )
 
-            # Schedule verification after 3 hours (10800 sec), the varification is only called once
+            # Confirmation timing comes from the shared farm timing contract.
             timer = threading.Timer(
-                Irrigation_confirmation_sec, verify_irrigation, args=[plot, amount])
+                runtime_config.get_timing_config(plot).irrigation_confirmation_seconds,
+                verify_irrigation, args=[plot, amount])
             timer.name = f"IrrigationCheckRoutine-{plot.id}"
+            # A long confirmation delay must not prevent graceful process exit.
+            timer.daemon = True
             timer.start()
 
             response_ok = True
@@ -1119,58 +1273,11 @@ def irrigate_amount(plot, amount=0):
         print("Request error:", e)
         response_ok = None  # TODO: introduce error handling
 
+    if response_ok is not True:
+        _release_active_irrigation(plot_id)
+
     return response_ok
 
-# Mighty main function TODO: encapsulate
-
-
-def main_old(currentSoilTension, threshold_timestamp, predictions, plot) -> int:
-    # Get configuration
-    threshold = plot.threshold
-    timeSpanOverThreshold = plot.look_ahead_time
-
-    future_time = datetime.now() + timedelta(hours=timeSpanOverThreshold)
-    threshold_timestamp = future_time.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    now = datetime.now().replace(microsecond=0)
-
-    # "Weak" irrigation strategy
-    # If threshold was met
-    if currentSoilTension > threshold:
-        print(
-            f"Threshold: {threshold} was reached with a value of {currentSoilTension}.")
-
-        # If current soil tension exceeds threshold by more than allowed margin, irrigate immediately
-        if currentSoilTension > threshold * OverThresholdAllowed:
-            print(
-                f"Threshold: {threshold} was exceeded by 20%, irrigate immediately!")
-            e = irrigate_amount(plot)
-            return e
-
-        # Check predictions
-        next_lower_idx, next_higher_idx = find_next_occurrences(
-            predictions, 'smoothed_values', threshold, timeSpanOverThreshold)
-
-        # If no lower value is predicted within the forecast horizon, trigger irrigation
-        if not next_lower_idx:
-            print(
-                f"No lower value predicted within {timeSpanOverThreshold} hours, irrigate now!")
-            e = irrigate_amount(plot)
-            return e
-
-        # Otherwise, no immediate irrigation is needed
-        else:
-            print(
-                f"Soil tension is high, but irrigation can wait. Since it is expected go below the threshold at: {next_lower_idx}")
-            return 0
-
-    # Threshold was not met, so do not irrigate
-    else:
-        print(
-            f"Threshold: {threshold} is not reached, current soil tension is: {currentSoilTension}, do not irrigate.")
-        return 0
-
-
-# Mighty main function TODO: encapsulate
 def main(
     current_value,
     threshold_timestamp,
@@ -1189,10 +1296,48 @@ def main(
     :return: 1 if irrigation is triggered, otherwise 0.
     """
 
-    runtime_state = _compute_runtime_crop_state(plot)
-    threshold = (runtime_state.stress_threshold_cbar
-                 if runtime_state is not None
-                 else compute_runtime_dynamic_threshold(plot))
+    # Actuation fails closed unless one complete, fresh orchestration result is
+    # available; it never recomputes a separate decision state here.
+    pipeline_result = getattr(plot, "pipeline_result", None)
+    if pipeline_result is None:
+        log.warning("Actuation skipped: no completed orchestration result")
+        return 0
+    runtime_state = getattr(pipeline_result, "crop_state", None)
+    if getattr(pipeline_result, "error", None) or getattr(
+            pipeline_result, "model_status", "failed") == "failed":
+        log.warning("Actuation skipped: pipeline result is invalid")
+        return 0
+    if runtime_state is None:
+        log.warning("Actuation skipped: runtime crop state unavailable")
+        return 0
+
+    freshness = getattr(pipeline_result, "data_freshness", {}) or {}
+    if any(
+        value is None or not np.isfinite(float(value)) or float(value) > limit
+        for value, limit in (
+            (freshness.get("weather_age_hours"), WEATHER_STALE_HOURS),
+        )
+    ):
+        log.warning("Actuation skipped: weather data is missing/stale")
+        return 0
+    quality_values = []
+    for attribute in ("sat_ndvi_quality", "sat_ndre_quality"):
+        try:
+            value = float(getattr(runtime_state, attribute, 0.0))
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(value):
+            quality_values.append(value)
+    satellite_quality = max(quality_values, default=0.0)
+    if satellite_quality <= 0.0:
+        # Cadence quality already removes stale satellite influence, so the
+        # primary soil/weather decision remains available and fail-safe.
+        log.info("Satellite refinement unavailable or stale; using GDD-based Kc")
+    tension_forecast = dict(getattr(pipeline_result, "tension_forecast", {}) or {})
+    if not tension_forecast:
+        log.warning("Actuation skipped: tension forecast is missing")
+        return 0
+    threshold = runtime_state.stress_threshold_cbar
     timeSpanOverThreshold = plot.look_ahead_time
 
     actuator_supported = _has_actuator_support(plot)
@@ -1203,10 +1348,13 @@ def main(
         and plot.sensor_kind == "tension"
         and getattr(plot, "_inference_source", "live") == "live"
     ):
-        # Build forecast dict from predictions if available
-        tension_forecast = {}
+        # Prefer the forecast already evaluated by orchestration. This keeps
+        # actuation on the model's configured cadence and horizon.
+        pipeline_result = getattr(plot, "pipeline_result", None)
+        tension_forecast = dict(
+            getattr(pipeline_result, "tension_forecast", {}) or {})
         if isinstance(predictions, pd.DataFrame) and 'smoothed_values' in predictions.columns:
-            timezone = TimeUtils.Timezone
+            timezone = TimeUtils.for_plot(plot)
             try:
                 now = pd.Timestamp(datetime.now().replace(microsecond=0))
                 if timezone:
@@ -1227,17 +1375,15 @@ def main(
                 if isinstance(future.index, pd.DatetimeIndex) and len(future.index) > 0:
                     max_hours = (future.index.max() -
                                  now_cmp).total_seconds() / 3600.0
-                horizons_to_sample = [
-                    h for h in FORECAST_HORIZON_HOURS
-                    if max_hours is None or h <= max_hours + 1e-6
-                ]
-                # Sample at standard horizons (match training horizons)
-                for hours in horizons_to_sample:
-                    target_time = now_cmp + timedelta(hours=hours)
-                    closest_idx = future.index[future.index <= target_time]
-                    if len(closest_idx) > 0:
-                        val = future.loc[closest_idx[-1], 'smoothed_values']
-                        tension_forecast[f"{hours}h"] = float(val)
+                if not tension_forecast:
+                    for timestamp in future.index:
+                        hours = (timestamp - now_cmp).total_seconds() / 3600.0
+                        if hours <= 0 or (max_hours is not None and hours > max_hours):
+                            continue
+                        val = future.loc[timestamp, 'smoothed_values']
+                        if isinstance(val, pd.Series):
+                            val = val.iloc[-1]
+                        tension_forecast[f"{hours:.3f}h"] = float(val)
             except (TypeError, ValueError, KeyError, IndexError) as forecast_error:
                 print(
                     f"  [Decision Engine] Forecast extraction failed: {forecast_error}"
@@ -1279,9 +1425,24 @@ def main(
             runtime_state=runtime_state,
         )
 
-        if not actuator_supported:
+        operation, operation_created = _recommendation_operation(
+            plot, pipeline_result, recommendation, runtime_state,
+            current_value, threshold, satellite_validation)
+        mode = resolve_irrigation_mode(plot)
+        if not operation_created:
+            log.info("Duplicate recommendation operation suppressed for plot %s",
+                     getattr(plot, "stable_id", getattr(plot, "id", "?")))
+            return 0
+
+        if not actuator_supported or mode == "advisory_only":
             print(
                 f"  [Decision Engine] {plot.user_given_name}: irrigation mode '{_resolve_irrigation_type(plot)}' is advisory-only; no actuator will be triggered.")
+            return 0
+        if mode == "approval_required":
+            print(f"  [Decision Engine] {plot.user_given_name}: irrigation is pending approval.")
+            return 0
+        if mode == "manual":
+            print(f"  [Decision Engine] {plot.user_given_name}: manual mode; recommendation recorded without actuation.")
             return 0
 
         if recommendation.urgency == "critical":
@@ -1292,7 +1453,10 @@ def main(
                 print(
                     f"  No runtime irrigation volume available for {plot.user_given_name}; skipping irrigation.")
                 return 0
-            return irrigate_amount(plot, volume)
+            if operation is None:
+                return irrigate_amount(plot, volume)
+            operation["amount_m3"] = volume
+            return execute_operation_command(plot, operation)
         elif recommendation.should_irrigate:
             # Check if predictions show natural recovery before irrigating
             if isinstance(predictions, pd.DataFrame) and 'smoothed_values' in predictions.columns:
@@ -1309,7 +1473,10 @@ def main(
                 print(
                     f"  No runtime irrigation volume available for {plot.user_given_name}; skipping irrigation.")
                 return 0
-            return irrigate_amount(plot, volume)
+            if operation is None:
+                return irrigate_amount(plot, volume)
+            operation["amount_m3"] = volume
+            return execute_operation_command(plot, operation)
         else:
             print(f"  No irrigation needed for {plot.user_given_name}")
             return 0
@@ -1320,57 +1487,8 @@ def main(
         )
         return 0
 
-    # Fallback: capacitive sensors or no decision engine — use legacy comparison
-    comparison_fn = (lambda value, thresh: value > thresh) if plot.sensor_kind == "tension" else (
-        lambda value, thresh: value < thresh
+    log.warning(
+        "Actuation skipped: decision engine unavailable for sensor kind '%s'",
+        getattr(plot, "sensor_kind", None),
     )
-
-    over_threshold_fn = (
-        (lambda value, thresh: value > thresh * OverThresholdAllowed)
-        if plot.sensor_kind == "tension"
-        else (lambda value, thresh: value < thresh / OverThresholdAllowed)
-    )
-
-    # "Weak" irrigation strategy
-    if comparison_fn(current_value, threshold):
-        print(
-            f"Threshold: {threshold} was reached with a value of {current_value} on {plot.user_given_name}.")
-
-        # Immediate irrigation if over-threshold logic is satisfied
-        if over_threshold_fn(current_value, threshold):
-            print(
-                f"Immediate irrigation triggered for sensor_kind '{plot.sensor_kind} on {plot.user_given_name}'!")
-            volume = _resolve_runtime_irrigation_volume(plot, runtime_state)
-            if volume is None:
-                print(
-                    f"  No runtime irrigation volume available for {plot.user_given_name}; skipping irrigation.")
-                return 0
-            return irrigate_amount(plot, volume)
-
-        # Check predictions for next occurrence below/above threshold
-        next_lower_idx, next_higher_idx = find_next_occurrences(
-            predictions, 'smoothed_values', threshold, timeSpanOverThreshold)
-
-        # No recovery predicted within forecast horizon
-        if (plot.sensor_kind == "tension" and not next_lower_idx) or (plot.sensor_kind == "humidity" and not next_higher_idx):
-            print(
-                f"No recovery predicted within {timeSpanOverThreshold} hours on {plot.user_given_name}, irrigate now!")
-            volume = _resolve_runtime_irrigation_volume(plot, runtime_state)
-            if volume is None:
-                print(
-                    f"  No runtime irrigation volume available for {plot.user_given_name}; skipping irrigation.")
-                return 0
-            return irrigate_amount(plot, volume)
-
-        # Otherwise, delay irrigation
-        else:
-            target_time = next_lower_idx if plot.sensor_kind == "tension" else next_higher_idx
-            print(
-                f"Irrigation can wait. Recovery expected at: {target_time} on {plot.user_given_name}")
-            return 0
-
-    # Threshold was not met, so do not irrigate
-    else:
-        print(
-            f"Threshold: {threshold} is not reached on {plot.user_given_name}, current value is: {current_value}. Do not irrigate.")
-        return 0
+    return 0

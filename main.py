@@ -2,26 +2,26 @@
 
 
 #!/usr/bin/python
+import os
+
+# Configure noisy ML libraries before importing create_model/pycaret.
+os.environ.setdefault("PYCARET_CUSTOM_LOGGING_LEVEL", "CRITICAL")
+os.environ.setdefault("PYCARET_NO_LOGGING", "1")
+
 import requests
 from crops import get_crop_params
-import training_thread
 from utils import NetworkUtils, TimeUtils
 import plot_manager
-from plot import Plot
 import actuation
-import create_model
 import csv
 from datetime import datetime, timedelta
 from io import StringIO
 import json
 import threading
-from threading import Timer
 import time
 from urllib.parse import urlparse, parse_qs
-from dotenv import load_dotenv
 import pandas as pd
 import usock
-import os
 import glob
 import shutil
 import logging
@@ -30,11 +30,15 @@ import pathlib
 import numpy as np
 from collections import defaultdict
 from dateutil import parser
+from farm_config import apply_farm_configs_to_plots, load_all_farms
+from spaceiotbox_client import fetch_weather_frame
+from operations_store import get_operations_store
+from dashboard_contract import build_farm_dashboard
 
-# Quiet pycaret's very chatty INFO logging - must be set BEFORE create_model imports pycaret
-os.environ.setdefault("PYCARET_CUSTOM_LOGGING_LEVEL", "CRITICAL")
-os.environ.setdefault("PYCARET_NO_LOGGING", "1")
-
+# Heavy ML modules are loaded only after startup configuration passes. This
+# keeps missing/invalid farm settings from being hidden by dependency errors.
+training_thread = None
+create_model = None
 
 # ---------------------#
 # Path to the root of the code
@@ -128,7 +132,8 @@ class LogCleanerThread(threading.Thread):
     def run(self):
         while not self.stop_thread.is_set():
             self.clean_log()
-            time.sleep(self.check_interval)  # Wait before the next check
+            if self.stop_thread.wait(self.check_interval):
+                break
 
     def stop(self):
         self.stop_thread.set()
@@ -140,13 +145,25 @@ class LogCleanerThread(threading.Thread):
 
 
 def setup_logging():
-    handler = RotatingFileHandler(
-        "logs.log", maxBytes=30 * 1024 * 1024, backupCount=1)
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s:%(levelname)s:%(message)s"))
+    """Install one bounded, key-value production log handler."""
     root = logging.getLogger()
+    if any(getattr(handler, "_irrigation_handler", False) for handler in root.handlers):
+        return
+    try:
+        handler = RotatingFileHandler(
+            "logs.log", maxBytes=30 * 1024 * 1024, backupCount=1)
+        file_error = None
+    except OSError as exc:
+        # Read-only or host-owned volumes must not hide startup diagnostics.
+        handler = logging.StreamHandler()
+        file_error = exc
+    handler._irrigation_handler = True
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s level=%(levelname)s logger=%(name)s message=%(message)s"))
     root.setLevel(logging.INFO)
     root.addHandler(handler)
+    if file_error is not None:
+        root.warning("file_logging_unavailable error=%s", file_error)
     # runtime-effective even after pycaret is already imported
     logging.getLogger("pycaret").setLevel(logging.WARNING)
 
@@ -158,12 +175,15 @@ def schedule_log_cleanup():
     ]
 
     # Start a thread for each log file
+    cleaners = []
     for log_path, age_limit in logs_to_clean:
         thread_name = f"LogCleaner-{os.path.basename(log_path)}"
         cleaner = LogCleanerThread(
             file_path=log_path, age_limit_days=age_limit, name=thread_name)
         cleaner.daemon = True  # Run thread in the background
         cleaner.start()
+        cleaners.append(cleaner)
+    return cleaners
 
 
 class ModelCleanerThread(threading.Thread):
@@ -192,7 +212,8 @@ class ModelCleanerThread(threading.Thread):
             for pattern in self.file_globs:
                 # prune specific files
                 delete_old_glob_files(pattern)
-            time.sleep(self.interval_days * 24 * 3600)
+            if self.stop_event.wait(self.interval_days * 24 * 3600):
+                break
 
     def stop(self):
         self.stop_event.set()
@@ -203,6 +224,19 @@ class ModelCleanerThread(threading.Thread):
 def delete_old_files(folder_path):
     current_time = time.time()
     threshold_time = current_time - THRESHOLD_DAYS_CLEANUP * 24 * 60 * 60
+    protected = set()
+    if pathlib.Path(folder_path).name == "models":
+        # Never prune active/rollback artifacts referenced by model manifests.
+        for manifest_path in pathlib.Path(folder_path).glob("*/model_manifest.json"):
+            protected.add(manifest_path.resolve())
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                for generation in (manifest.get("active"), manifest.get("previous")):
+                    for artifact in (generation or {}).get("artifacts", []):
+                        protected.add(pathlib.Path(artifact).resolve())
+            except (OSError, ValueError, TypeError):
+                logging.getLogger(__name__).exception(
+                    "Invalid model manifest during cleanup: %s", manifest_path)
 
     # Traverse the directory, including subdirectories
     for root, _, files in os.walk(folder_path):
@@ -212,6 +246,8 @@ def delete_old_files(folder_path):
                 continue
 
             file_path = os.path.join(root, file_name)
+            if pathlib.Path(file_path).resolve() in protected:
+                continue
             # Check if the file is older than the threshold
             if os.path.isfile(file_path) and os.path.getmtime(file_path) < threshold_time:
                 try:
@@ -262,6 +298,20 @@ def schedule_model_cleanup(file_paths, dir_globs=None, file_globs=None, interval
 
     return cleaner
 
+
+def stop_background_workers(plots, cleaners=(), join_timeout=30):
+    """Signal plot and maintenance workers, then wait briefly for shutdown."""
+    threads = list(cleaners)
+    for plot in plots.values():
+        for name in ("prediction_thread", "training_thread"):
+            worker = getattr(plot, name, None)
+            if worker is not None and worker.is_alive():
+                worker.stop()
+                threads.append(worker)
+    for worker in threads:
+        if worker.is_alive():
+            worker.join(timeout=join_timeout)
+
 # Get URL of API from .env file => TODO: better with try catch than locals, getenv can still stop backend
 
 
@@ -292,17 +342,15 @@ def setPlot(url, body):
     # Parse the query parameters from Body
     parsed_data = parse_qs(body.decode('utf-8'))
 
-    # Get currentPlot
-    currentTab = int(parsed_data.get('currentPlot', [])[0])
-
-    # if(plot_manager.setPlot(currentTab)):
-    #         return 200, b"Plot has been set.", []
-    # else:
-    #     return 200, b"Has been set but has no config yet.", []
-
-    plot_manager.setPlot(currentTab)
-
-    return 200, f"Plot has been set. PlotId = {currentTab}".encode(), []
+    identifier = parsed_data.get('plot_id', parsed_data.get('currentPlot', [None]))[0]
+    try:
+        plot_manager.setPlot(identifier)
+        current = plot_manager.getCurrentPlot()
+        payload = {"status": "ok", "plot_id": current.stable_id,
+                   "currentPlot": current.tab_number}
+        return 200, bytes(json.dumps(payload), "utf8"), []
+    except (KeyError, TypeError, ValueError) as exc:
+        return 404, bytes(json.dumps({"status": "error", "error": str(exc)}), "utf8"), []
 
 
 usock.routerPOST("/api/setPlot", setPlot)
@@ -330,9 +378,13 @@ def getPlots(url, body):
     except Exception:
         current_plot_number = None
 
+    registry = plot_manager.registrySnapshot()
     response = {
         "tabnames": tab_name_array,
         "currentPlot": current_plot_number,
+        "current_plot_id": registry["current_plot_id"],
+        "current_farm_id": registry["current_farm_id"],
+        "plots": registry["plots"],
         "status_code": 200
     }
 
@@ -348,14 +400,18 @@ def addPlot(url, body):
     # Parse the query parameters from Body
     parsed_data = parse_qs(body.decode('utf-8'))
 
-    # ID of tab in UI
-    amount_tabs = int(parsed_data.get('tab_nr', [])[0])
-
-    # Call function in plot manager
-    next_number, newfilename = plot_manager.addPlot(amount_tabs)
+    amount_tabs = parsed_data.get('tab_nr', [None])[0]
+    try:
+        plot_id, newfilename = plot_manager.addPlot(
+            amount_tabs, farm_id=parsed_data.get('farm_id', [None])[0],
+            name=parsed_data.get('name', [''])[0],
+            area=parsed_data.get('area', [0])[0],
+            area_unit=parsed_data.get('area_unit', ['m2'])[0])
+    except (KeyError, TypeError, ValueError) as exc:
+        return 400, bytes(json.dumps({"status": "error", "error": str(exc)}), "utf8"), []
 
     response = {
-        "plot_number": next_number,
+        "plot_id": plot_id,
         "filename": newfilename,
         "status_code": 200
     }
@@ -371,13 +427,18 @@ usock.routerPOST("/api/addPlot", addPlot)
 def removePlot(url, body):
     # Parse the query parameters from Body
     parsed_data = parse_qs(body.decode('utf-8'))
-    plot_to_be_removed = int(parsed_data.get('currentPlot', [])[0])
+    plot_to_be_removed = parsed_data.get('plot_id', parsed_data.get('currentPlot', [None]))[0]
 
     # Call function in plot manager
-    removed_plot_id, oldfilename = plot_manager.removePlot(plot_to_be_removed)
+    try:
+        removed_plot_id, oldfilename = plot_manager.removePlot(plot_to_be_removed)
+    except KeyError as exc:
+        return 404, bytes(json.dumps({"status": "error", "error": str(exc)}), "utf8"), []
+    except ValueError as exc:
+        return 409, bytes(json.dumps({"status": "error", "error": str(exc)}), "utf8"), []
 
     response = {
-        "plot_number": removed_plot_id,
+        "plot_id": removed_plot_id,
         "filename": oldfilename,
         "status_code": 200
     }
@@ -483,6 +544,12 @@ def setConfig(url, body):
     currentPlot.irrigation_type = parsed_data.get(
         'irrigation_type', [getattr(currentPlot, 'irrigation_type', 'unknown')]
     )[0] or 'unknown'
+    currentPlot.irrigation_mode = parsed_data.get(
+        'irrigation_mode', [actuation.resolve_irrigation_mode(currentPlot)]
+    )[0]
+    if currentPlot.irrigation_mode not in {
+            'automatic', 'approval_required', 'manual', 'advisory_only'}:
+        errors['irrigation_mode'] = "Unsupported irrigation mode."
     currentPlot.look_ahead_time = _parse_float(
         _get_first('lookahead'), "look_ahead_time", errors, 0.0)
 
@@ -601,6 +668,15 @@ def setConfig(url, body):
         "longitude": gps_lon,
         "lattitude": gps_lat,
     }
+    try:
+        currentPlot.timezone = TimeUtils.get_timezone(gps_lat, gps_lon) or "UTC"
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "Could not determine timezone for plot %s; using UTC",
+            getattr(currentPlot, "id", "?"),
+        )
+        currentPlot.timezone = "UTC"
+    currentPlot.configuration_source = "ui"
 
     pending_sensors = (
         len(currentPlot.device_and_sensor_ids_moisture) == 0
@@ -623,6 +699,8 @@ def setConfig(url, body):
         "DeviceAndSensorIdsFlowConfirmation": currentPlot.device_and_sensor_ids_flow_confirmation,
         "Sensor_kind": currentPlot.sensor_kind,
         "Name": currentPlot.user_given_name,
+        "Plot_id": currentPlot.stable_id,
+        "Farm_id": currentPlot.farm_id,
         "Zone_name": getattr(currentPlot, 'zone_name', currentPlot.user_given_name),
         # "Gps_info": {"lattitude": currentPlot.gps_info['lattitude'], "longitude": currentPlot.gps_info['longitude']},
         # "Gps_info": currentPlot.gps_info,
@@ -631,11 +709,15 @@ def setConfig(url, body):
             "longitude": gps_lon,
             "lattitude": gps_lat,
         },
+        "Timezone": currentPlot.timezone,
+        "Configuration_source": "ui",
         "Slope": currentPlot.slope,
         "Threshold": getattr(currentPlot, 'threshold_static', currentPlot.threshold),
         "Irrigation_amount": currentPlot.irrigation_amount,
         "Plot_area_m2": currentPlot.plot_area_m2,
+        "Plot_area_unit": parsed_data.get('area_unit', [getattr(currentPlot, 'area_unit', 'm2')])[0],
         "Irrigation_type": getattr(currentPlot, 'irrigation_type', 'unknown'),
+        "Irrigation_mode": actuation.resolve_irrigation_mode(currentPlot),
         "Look_ahead_time": currentPlot.look_ahead_time,
         "Start_date": currentPlot.start_date,
         "Period": currentPlot.period,
@@ -678,6 +760,10 @@ def setConfig(url, body):
             if pending_sensors else ""
         )
     }
+
+    currentPlot.area_unit = data["Plot_area_unit"]
+    plot_manager.updateCurrentPlotMetadata(
+        currentPlot.user_given_name, currentPlot.plot_area_m2, currentPlot.area_unit)
 
     # Save the JSON data to the file
     with open(plot_manager.getCurrentConfig(), 'w') as json_file:
@@ -755,6 +841,10 @@ def getConfigsFromAllFiles():
             # Get data from forms
             plots[i].user_given_name = data.get('Name', [])
             plots[i].owner = data.get('Owner', getattr(plots[i], 'owner', ''))
+            plots[i].configuration_source = data.get(
+                'Configuration_source', getattr(plots[i], 'configuration_source', 'legacy'))
+            plots[i].timezone = data.get(
+                'Timezone', getattr(plots[i], 'timezone', 'UTC')) or 'UTC'
             plots[i].zone_name = data.get(
                 'Zone_name', plots[i].user_given_name)
             plots[i].sensor_kind = data.get('Sensor_kind', [])
@@ -778,6 +868,8 @@ def getConfigsFromAllFiles():
             plots[i].plot_area_m2 = float(data.get('Plot_area_m2', 0))
             plots[i].irrigation_type = data.get(
                 'Irrigation_type', 'unknown') or 'unknown'
+            plots[i].irrigation_mode = data.get(
+                'Irrigation_mode', getattr(plots[i], 'irrigation_mode', '')) or ''
             plots[i].look_ahead_time = float(data.get('Look_ahead_time', []))
             plots[i].start_date = data.get('Start_date', [])
             plots[i].period = int(data.get('Period', []))
@@ -856,13 +948,17 @@ def returnConfig(url, body):
                 "DeviceAndSensorIdsFlow": currentPlot.device_and_sensor_ids_flow,
                 "Sensor_kind": currentPlot.sensor_kind,
                 "Name": currentPlot.user_given_name,
+                "Plot_id": currentPlot.stable_id,
+                "Farm_id": currentPlot.farm_id,
                 "Zone_name": getattr(currentPlot, 'zone_name', currentPlot.user_given_name),
                 "Gps_info": currentPlot.gps_info,
                 "Slope": currentPlot.slope,
                 "Threshold": getattr(currentPlot, 'threshold_static', currentPlot.threshold),
                 "Irrigation_amount": currentPlot.irrigation_amount,
                 "Plot_area_m2": currentPlot.plot_area_m2,
+                "Plot_area_unit": getattr(currentPlot, 'area_unit', 'm2'),
                 "Irrigation_type": getattr(currentPlot, 'irrigation_type', 'unknown'),
+                "Irrigation_mode": actuation.resolve_irrigation_mode(currentPlot),
                 "Look_ahead_time": currentPlot.look_ahead_time,
                 "Start_date": currentPlot.start_date,
                 "Period": currentPlot.period,
@@ -975,7 +1071,12 @@ def extract_and_format(data, key, datatype):
     return values
 
 
-def group_sensor_data(sensor_lists, agg_func=lambda vals: sum(vals)/len(vals), resample_interval="30T"):
+def group_sensor_data(
+    sensor_lists,
+    agg_func=lambda vals: sum(vals)/len(vals),
+    resample_interval="30T",
+    timezone_name="UTC",
+):
     """
     Given a list of sensor-lists (each a list of {'time':…, 'value':…}),
     return two lists:
@@ -1001,8 +1102,8 @@ def group_sensor_data(sensor_lists, agg_func=lambda vals: sum(vals)/len(vals), r
     # Resampling
     df = df.resample(resample_interval).mean().dropna()
 
-    # Display in local time
-    df.index = df.index.tz_convert(TimeUtils.Timezone)
+    # Convert using the requesting plot's timezone; never shared mutable state.
+    df.index = df.index.tz_convert(timezone_name)
 
     # Convert back to lists
     resampled_timestamps = df.index.strftime("%Y-%m-%dT%H:%M:%S").tolist()
@@ -1125,19 +1226,222 @@ def irrigateManually(url, body):
     amount = float(query_params.get('amount', [0])[0])
 
     currentPlot = plot_manager.getCurrentPlot()
-    if not actuation._has_actuator_support(currentPlot):
-        return 400, bytes(json.dumps({"status": "error", "message": "Manual irrigation is disabled for advisory-only irrigation modes (rainfed/furrow/gravity)."}), "utf8"), []
+    mode = actuation.resolve_irrigation_mode(currentPlot)
+    if mode == "advisory_only" or not actuation._has_actuator_support(currentPlot):
+        return 400, bytes(json.dumps({"status": "error", "message": "Manual irrigation is disabled for advisory-only plots or plots without an actuator."}), "utf8"), []
+    if amount <= 0:
+        return 400, bytes(json.dumps({"status": "error", "message": "Amount must be greater than zero."}), "utf8"), []
 
-    # Call the actuation function with the extracted amount
-    response = actuation.irrigate_amount(currentPlot, amount)
+    request_key = query_params.get('idempotency_key', [None])[0]
+    if not request_key:
+        request_key = f"manual:{currentPlot.stable_id}:{amount}:{pd.Timestamp.now(tz='UTC').floor('min').isoformat()}"
+    initial_status = "pending_approval" if mode == "approval_required" else "approved"
+    operation, created = get_operations_store().create_operation(
+        idempotency_key=request_key, plot_id=currentPlot.stable_id,
+        farm_id=currentPlot.farm_id, plot_name=currentPlot.user_given_name,
+        source="manual", mode=mode, status=initial_status, amount_m3=amount)
+    if not created:
+        return 200, bytes(json.dumps({"status": "duplicate", "operation": operation}), "utf8"), []
+    if mode == "approval_required":
+        return 202, bytes(json.dumps({"status": "pending_approval", "operation": operation}), "utf8"), []
 
+    response = actuation.execute_operation_command(currentPlot, operation)
+    updated = get_operations_store().get_operation(operation["operation_id"])
     if not response:
-        return 400, bytes(json.dumps({"status": "error", "message": "Irrigation failed or no active irrigation system.", "response": response}), "utf8"), []
-
-    return 200, bytes(json.dumps({"status": "success", "amount": amount, "response": response}), "utf8"), []
+        return 400, bytes(json.dumps({"status": "error", "message": "Irrigation command failed.", "operation": updated}), "utf8"), []
+    return 200, bytes(json.dumps({"status": "success", "amount": amount,
+                                 "operation": updated}), "utf8"), []
 
 
 usock.routerGET("/api/irrigateManually", irrigateManually)
+
+
+def _plot_by_stable_id(plot_id):
+    for plot in plot_manager.getPlots().values():
+        if getattr(plot, "stable_id", None) == plot_id:
+            return plot
+    return None
+
+
+def listOperations(url, body):
+    query = parse_qs(urlparse(url).query)
+    first = lambda key, default=None: query.get(key, [default])[0]
+    registry = plot_manager.registrySnapshot()
+    operations = get_operations_store().list_operations(
+        farm_id=first("farm_id", registry.get("current_farm_id")),
+        plot_id=first("plot_id"), status=first("status"),
+        search=first("search"), limit=first("limit", 100))
+    return 200, bytes(json.dumps({"operations": operations, "count": len(operations)}), "utf8"), []
+
+
+usock.routerGET("/api/operations", listOperations)
+
+
+def operationEvents(url, body):
+    query = parse_qs(urlparse(url).query)
+    operation_id = query.get("operation_id", [None])[0]
+    if not operation_id:
+        return 400, bytes(json.dumps({"error": "operation_id is required"}), "utf8"), []
+    return 200, bytes(json.dumps({"events": get_operations_store().events(operation_id)}), "utf8"), []
+
+
+usock.routerGET("/api/operationEvents", operationEvents)
+
+
+def createIrrigationSchedule(url, body):
+    values = parse_qs(body.decode("utf-8"))
+    first = lambda key, default=None: values.get(key, [default])[0]
+    plot_id = first("plot_id", getattr(plot_manager.getCurrentPlot(), "stable_id", None))
+    plot = _plot_by_stable_id(plot_id)
+    if plot is None:
+        return 404, bytes(json.dumps({"error": "Unknown plot_id"}), "utf8"), []
+    try:
+        amount = float(first("amount_m3"))
+        planned_start = pd.Timestamp(first("planned_start"))
+        planned_end_raw = first("planned_end")
+        planned_end = pd.Timestamp(planned_end_raw) if planned_end_raw else None
+        if planned_end is not None and planned_end <= planned_start:
+            raise ValueError("planned_end must be after planned_start")
+        mode = actuation.resolve_irrigation_mode(plot)
+        status = "pending_approval" if mode == "approval_required" else "planned"
+        key = first("idempotency_key", f"schedule:{plot_id}:{planned_start.isoformat()}:{amount}")
+        operation, created = get_operations_store().create_operation(
+            idempotency_key=key, plot_id=plot_id, farm_id=plot.farm_id,
+            plot_name=plot.user_given_name, source="schedule", mode=mode,
+            status=status, amount_m3=amount, planned_start=planned_start.isoformat(),
+            planned_end=planned_end.isoformat() if planned_end is not None else None)
+    except (TypeError, ValueError) as exc:
+        return 400, bytes(json.dumps({"error": str(exc)}), "utf8"), []
+    return (201 if created else 200), bytes(json.dumps({"operation": operation,
+                                                        "created": created}), "utf8"), []
+
+
+usock.routerPOST("/api/irrigationSchedules", createIrrigationSchedule)
+
+
+def approveIrrigation(url, body):
+    values = parse_qs(body.decode("utf-8"))
+    operation_id = values.get("operation_id", [None])[0]
+    store = get_operations_store()
+    try:
+        operation, changed = store.transition(operation_id, "approved",
+                                              {"actor": "farm_owner"})
+    except KeyError as exc:
+        return 404, bytes(json.dumps({"error": str(exc)}), "utf8"), []
+    except ValueError as exc:
+        return 409, bytes(json.dumps({"error": str(exc)}), "utf8"), []
+    if not changed:
+        return 200, bytes(json.dumps({"operation": operation, "duplicate": True}), "utf8"), []
+    if operation["source"] == "schedule" and operation.get("planned_start"):
+        planned_start = pd.Timestamp(operation["planned_start"])
+        now = pd.Timestamp.now(tz="UTC")
+        if planned_start.tzinfo is None:
+            planned_start = planned_start.tz_localize("UTC")
+        if planned_start > now:
+            return 200, bytes(json.dumps({"operation": operation,
+                                         "message": "Approved and waiting for its scheduled start."}), "utf8"), []
+    plot = _plot_by_stable_id(operation["plot_id"])
+    if plot is None or not actuation._has_actuator_support(plot):
+        operation = store.transition(operation_id, "failed",
+                                     {"error": "plot_or_actuator_unavailable"})[0]
+        return 409, bytes(json.dumps({"operation": operation}), "utf8"), []
+    response = actuation.execute_operation_command(plot, operation)
+    updated = store.get_operation(operation_id)
+    return (200 if response else 409), bytes(json.dumps({"operation": updated}), "utf8"), []
+
+
+usock.routerPOST("/api/approveIrrigation", approveIrrigation)
+
+
+def declineIrrigation(url, body):
+    values = parse_qs(body.decode("utf-8"))
+    operation_id = values.get("operation_id", [None])[0]
+    try:
+        operation, changed = get_operations_store().transition(
+            operation_id, "declined", {"actor": "farm_owner",
+                                        "reason": values.get("reason", [""])[0]})
+        return 200, bytes(json.dumps({"operation": operation,
+                                     "duplicate": not changed}), "utf8"), []
+    except KeyError as exc:
+        return 404, bytes(json.dumps({"error": str(exc)}), "utf8"), []
+    except ValueError as exc:
+        return 409, bytes(json.dumps({"error": str(exc)}), "utf8"), []
+
+
+usock.routerPOST("/api/declineIrrigation", declineIrrigation)
+
+
+def _today_for_farm(registry, farm_id):
+    farm = next((item for item in registry.get("farms", [])
+                 if item.get("farm_id") == farm_id), {})
+    timezone = farm.get("timezone") or "UTC"
+    try:
+        return pd.Timestamp.now(tz=timezone).date().isoformat()
+    except (TypeError, ValueError):
+        return pd.Timestamp.now(tz="UTC").date().isoformat()
+
+
+def getTodaysPlan(url, body):
+    query = parse_qs(urlparse(url).query)
+    registry = plot_manager.registrySnapshot()
+    farm_id = query.get("farm_id", [registry["current_farm_id"]])[0]
+    today = query.get("date", [_today_for_farm(registry, farm_id)])[0]
+    operations = get_operations_store().list_operations(farm_id=farm_id, today=today, limit=500)
+    included = [item for item in operations if item["status"] not in {"declined", "failed"}]
+    total = round(sum(float(item["amount_m3"] or 0) for item in included), 3)
+    return 200, bytes(json.dumps({"date": today, "farm_id": farm_id,
+                                 "planned_water_m3": total,
+                                 "operations": operations}), "utf8"), []
+
+
+usock.routerGET("/api/todaysIrrigationPlan", getTodaysPlan)
+
+
+def getActiveAlerts(url, body):
+    query = parse_qs(urlparse(url).query)
+    farm_id = query.get("farm_id", [plot_manager.registrySnapshot()["current_farm_id"]])[0]
+    alerts = get_operations_store().active_alerts(farm_id)
+    return 200, bytes(json.dumps({"farm_id": farm_id, "alerts": alerts,
+                                 "count": len(alerts)}), "utf8"), []
+
+
+usock.routerGET("/api/activeAlerts", getActiveAlerts)
+
+
+def getFarmDashboard(url, body):
+    query = parse_qs(urlparse(url).query)
+    registry = plot_manager.registrySnapshot()
+    farm_id = query.get("farm_id", [registry["current_farm_id"]])[0]
+    farm = next((item for item in registry["farms"] if item["farm_id"] == farm_id), None)
+    if farm is None:
+        return 404, bytes(json.dumps({"error": "Unknown farm_id"}), "utf8"), []
+    plot_records = [item for item in registry["plots"] if item["farm_id"] == farm_id]
+    runtime_plots = {getattr(plot, "stable_id", None): plot
+                     for plot in plot_manager.getPlots().values()}
+    recommendations = {}
+    for record in plot_records:
+        plot = runtime_plots.get(record["plot_id"])
+        pipeline = getattr(plot, "pipeline_result", None) if plot else None
+        if pipeline is not None and getattr(pipeline, "crop_state", None) is not None:
+            try:
+                recommendations[record["plot_id"]] = actuation.get_irrigation_recommendation(plot)
+            except Exception as exc:
+                recommendations[record["plot_id"]] = {
+                    "available": False, "reason": str(exc)}
+        else:
+            recommendations[record["plot_id"]] = {
+                "available": False, "reason": "No completed prediction cycle."}
+    store = get_operations_store()
+    alerts = store.active_alerts(farm_id)
+    today = _today_for_farm(registry, farm_id)
+    operations = store.list_operations(farm_id=farm_id, today=today, limit=500)
+    payload = build_farm_dashboard(
+        farm=farm, plot_records=plot_records, runtime_plots=runtime_plots,
+        recommendations=recommendations, alerts=alerts, operations=operations)
+    return 200, bytes(json.dumps(payload), "utf8"), []
+
+
+usock.routerGET("/api/farmDashboard", getFarmDashboard)
 
 # Get latest values for dashboard
 
@@ -1314,8 +1618,11 @@ def getHistoricalChartData(url, body):
         # for flow in currentPlot.device_and_sensor_ids_flow: # TODO: maybe display that also here (is displayed in datasets data)
         #     data_flow.append(currentPlot.load_data_api(flow, "actuators", currentPlot.start_date))
 
-        f_data_time, f_data_moisture = group_sensor_data(data_moisture)
-        f_data_time, f_data_temp = group_sensor_data(data_temp)
+        plot_timezone = TimeUtils.for_plot(currentPlot)
+        f_data_time, f_data_moisture = group_sensor_data(
+            data_moisture, timezone_name=plot_timezone)
+        f_data_time, f_data_temp = group_sensor_data(
+            data_temp, timezone_name=plot_timezone)
 
         # extract series from key value pairs
         # f_data_time = extract_and_format(data_moisture, "time", "str")
@@ -1519,13 +1826,23 @@ def getPredictionChartData(url, body):
 
     chart_data["threshold_cbar_dynamic"] = dynamic_threshold
 
-    horizon_targets = [24, 48, 120, 168]
+    # Chart horizons mirror the actual model output instead of fixed 24/48/120h
+    # labels that may not exist at the configured cadence.
+    pipeline_result = getattr(currentPlot, "pipeline_result", None)
+    horizon_targets = []
+    if pipeline_result is not None:
+        horizon_targets = [
+            float(label[:-1])
+            for label in getattr(pipeline_result, "tension_forecast", {})
+            if str(label).endswith("h")
+        ]
     available_horizons = []
     max_hours = None
     if isinstance(data_pred.index, pd.DatetimeIndex) and len(data_pred.index) > 0:
         now = pd.Timestamp(datetime.now().replace(microsecond=0))
-        if TimeUtils.Timezone:
-            now = now.tz_localize(TimeUtils.Timezone)
+        timezone_name = TimeUtils.for_plot(currentPlot)
+        if timezone_name:
+            now = now.tz_localize(timezone_name)
         now_cmp = now
         idx = data_pred.index
         if idx.tz is None and now.tzinfo is not None:
@@ -1537,10 +1854,7 @@ def getPredictionChartData(url, body):
         max_hours = (idx.max() - now_cmp).total_seconds() / 3600.0
         if max_hours < 0:
             max_hours = 0.0
-        available_horizons = [
-            h for h in horizon_targets
-            if max_hours is None or max_hours + 1e-6 >= h
-        ]
+        available_horizons = horizon_targets
 
     chart_data["forecast_horizons_target"] = horizon_targets
     chart_data["forecast_horizons_available"] = available_horizons
@@ -1560,6 +1874,28 @@ def getPredictionChartData(url, body):
 usock.routerGET("/api/getPredictionChartData", getPredictionChartData)
 
 
+def _gps_from_plot(plot):
+    gps = getattr(plot, "gps_info", None)
+    if not isinstance(gps, dict):
+        return None, None
+    try:
+        latitude = float(gps.get("latitude", gps.get("lattitude")))
+        longitude = float(gps.get("longitude"))
+    except (TypeError, ValueError):
+        return None, None
+    if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+        return None, None
+    return latitude, longitude
+
+
+def _weather_icon_from_rain(rain_mm):
+    if rain_mm >= 10:
+        return "rainy"
+    if rain_mm > 0:
+        return "rainy_light"
+    return "partly_cloudy_day"
+
+
 def getWeatherForecast(url, body):
     currentPlot = plot_manager.getCurrentPlot()
     lat, lon = _gps_from_plot(currentPlot)
@@ -1570,13 +1906,20 @@ def getWeatherForecast(url, body):
             "days": [],
         }), "utf8"), []
 
-    today = datetime.utcnow().date()
-    horizon_days = 4
+    today = pd.Timestamp.now(tz="UTC").date()
+    # Display five forecast days by default; deployments can choose another
+    # positive horizon without changing application code.
+    try:
+        horizon_days = max(1, int(os.getenv("WEATHER_FORECAST_DAYS", "5")))
+    except ValueError:
+        logging.getLogger(__name__).warning(
+            "Invalid WEATHER_FORECAST_DAYS; using 5")
+        horizon_days = 5
     start_date = today.strftime("%Y-%m-%d")
-    end_date = (today + timedelta(days=horizon_days)).strftime("%Y-%m-%d")
+    end_date = (today + timedelta(days=horizon_days - 1)).strftime("%Y-%m-%d")
 
     try:
-        frame = create_model.fetch_weather_frame(
+        frame = fetch_weather_frame(
             lat,
             lon,
             start_date=start_date,
@@ -1590,7 +1933,7 @@ def getWeatherForecast(url, body):
             "days": [],
         }), "utf8"), []
 
-    if frame is None or frame.empty or "Rain" not in frame.columns:
+    if frame is None or frame.empty:
         payload = {
             "available": False,
             "reason": "no_data",
@@ -1600,28 +1943,60 @@ def getWeatherForecast(url, body):
         return 200, bytes(json.dumps(payload), "utf8"), []
 
     try:
-        frame.index = pd.to_datetime(frame.index)
+        frame.index = pd.to_datetime(frame.index, utc=True).tz_convert(
+            TimeUtils.for_plot(currentPlot))
     except Exception:
         pass
 
-    rain_series = pd.to_numeric(frame["Rain"], errors="coerce").fillna(0.0)
-    daily = rain_series.resample("D").sum()
+    def numeric(field):
+        if field not in frame:
+            return pd.Series(index=frame.index, dtype=float)
+        return pd.to_numeric(frame[field], errors="coerce")
+
+    rain_series = numeric("Rain").fillna(0.0).clip(lower=0.0)
+    temperature = numeric("Temperature")
+    humidity = numeric("Humidity")
+    windspeed = numeric("Windspeed").clip(lower=0.0)
+    winddirection = numeric("Winddirection")
+    daily_index = pd.DatetimeIndex(frame.resample("D").size().index)
     days = []
-    for idx, (ts, rain) in enumerate(daily.items()):
+    for idx, ts in enumerate(daily_index):
         if idx >= horizon_days:
             break
+        end = ts + pd.Timedelta(days=1)
+        rain = float(rain_series[(rain_series.index >= ts) & (rain_series.index < end)].sum())
+        temp_day = temperature[(temperature.index >= ts) & (temperature.index < end)].dropna()
+        humidity_day = humidity[(humidity.index >= ts) & (humidity.index < end)].dropna()
+        wind_day = windspeed[(windspeed.index >= ts) & (windspeed.index < end)].dropna()
+        direction_day = winddirection[(winddirection.index >= ts) & (winddirection.index < end)].dropna()
+        direction = None
+        if not direction_day.empty:
+            radians = np.deg2rad(direction_day.to_numpy(dtype=float))
+            direction = float((np.rad2deg(np.arctan2(
+                np.sin(radians).mean(), np.cos(radians).mean())) + 360) % 360)
         label = "Today" if idx == 0 else f"+{idx} days"
         days.append({
             "date": ts.date().isoformat() if hasattr(ts, "date") else str(ts),
             "label": label,
             "rain_mm": round(float(rain), 2),
+            "temperature_c": round(float(temp_day.mean()), 1) if not temp_day.empty else None,
+            "temperature_min_c": round(float(temp_day.min()), 1) if not temp_day.empty else None,
+            "temperature_max_c": round(float(temp_day.max()), 1) if not temp_day.empty else None,
+            "humidity_percent": round(float(humidity_day.mean()), 1) if not humidity_day.empty else None,
+            "wind_speed": round(float(wind_day.mean()), 1) if not wind_day.empty else None,
+            "wind_gust": round(float(wind_day.max()), 1) if not wind_day.empty else None,
+            "wind_direction_degrees": round(direction, 0) if direction is not None else None,
             "icon": _weather_icon_from_rain(float(rain)),
         })
 
     payload = {
         "available": True,
         "days": days,
-        "unit": "mm",
+        "today": days[0] if days else None,
+        "units": {"rain": "mm", "temperature": "°C",
+                  "humidity": "%", "wind_speed": "km/h"},
+        "source": frame.attrs.get("provider", "unknown"),
+        "generated_at": pd.Timestamp.now(tz="UTC").isoformat(),
     }
     currentPlot.weather_snapshot = payload
     return 200, bytes(json.dumps(payload), "utf8"), []
@@ -1743,12 +2118,45 @@ usock.routerGET("/api/getThreshold", getThreshold)
 
 def getIrrigationRecommendation(url, body):
     currentPlot = plot_manager.getCurrentPlot()
+    # Always retain the rich crop/water/freshness contract consumed by the UI.
+    # When a pipeline cycle exists, merge its exact decision into that payload
+    # so the UI and actuator use the same urgency and breach timing.
     recommendation = actuation.get_irrigation_recommendation(currentPlot)
+    pipeline_result = getattr(currentPlot, "pipeline_result", None)
+    if pipeline_result is not None and pipeline_result.recommendation is not None:
+        decision = pipeline_result.to_dict().get("recommendation") or {}
+        for key, value in decision.items():
+            recommendation.setdefault(key, value)
+        recommendation.setdefault("decision", decision)
     return 200, bytes(json.dumps(recommendation), "utf8"), []
 
 
 usock.routerGET("/api/getIrrigationRecommendation",
                 getIrrigationRecommendation)
+
+
+def getPipelineState(url, body):
+    """Return the latest unified model, crop-state, and decision result."""
+    currentPlot = plot_manager.getCurrentPlot()
+    pipeline_result = getattr(currentPlot, "pipeline_result", None)
+    if pipeline_result is None:
+        # Return the concrete cache/lifecycle failure instead of hiding it.
+        return 404, bytes(json.dumps({
+            "available": False,
+            "reason": getattr(
+                currentPlot,
+                "pipeline_cache_reason",
+                None,
+            ) or "No completed pipeline cycle for the selected plot.",
+            "cache_status": getattr(currentPlot, "pipeline_cache_status", "empty"),
+        }), "utf8"), []
+
+    payload = pipeline_result.to_dict()
+    payload["available"] = pipeline_result.error is None
+    return 200, bytes(json.dumps(payload), "utf8"), []
+
+
+usock.routerGET("/api/getPipelineState", getPipelineState)
 
 
 def getAlertStatus(url, body):
@@ -1867,33 +2275,42 @@ usock.routerGET("/api/getSensorKind", getSensorKind)
 
 
 def getFarmRegistry(url, body):
-    plots = plot_manager.getPlots()
-    registry = []
-    for pid, plot in plots.items():
-        gps = getattr(plot, 'gps_info', None)
-        if isinstance(gps, dict):
-            lat = gps.get('latitude', gps.get('lattitude'))
-            lon = gps.get('longitude')
-        else:
-            lat = None
-            lon = None
-        registry.append({
-            "plot_id": pid,
-            "name": getattr(plot, 'user_given_name', ''),
-            "crop_type": getattr(plot, 'crop_type', ''),
-            "planting_date": getattr(plot, 'planting_date', ''),
-            "sensor_kind": getattr(plot, 'sensor_kind', ''),
-            "latitude": lat,
-            "longitude": lon,
-            "config_path": getattr(plot, 'configPath', ''),
-            "pending_sensors": bool(getattr(plot, 'device_and_sensor_ids_moisture', []) == []
-                                    or getattr(plot, 'device_and_sensor_ids_temp', []) == []),
-        })
-
-    return 200, bytes(json.dumps({"farms": registry}), "utf8"), []
+    return 200, bytes(json.dumps(plot_manager.registrySnapshot()), "utf8"), []
 
 
 usock.routerGET("/api/getFarmRegistry", getFarmRegistry)
+
+
+def createFarm(url, body):
+    values = parse_qs(body.decode('utf-8'))
+    first = lambda key, default='': values.get(key, [default])[0]
+    try:
+        farm, plot = plot_manager.createFarm(
+            first('name'), first('latitude', 0), first('longitude', 0),
+            first('size', 0), first('area_unit', 'm2'), first('timezone', 'UTC'),
+            first('owner'), first('plot_name'))
+        return 201, bytes(json.dumps({"farm": farm, "plot": plot}), "utf8"), []
+    except (KeyError, TypeError, ValueError) as exc:
+        return 400, bytes(json.dumps({"status": "error", "error": str(exc)}), "utf8"), []
+
+
+usock.routerPOST("/api/farms", createFarm)
+
+
+def updateFarm(url, body):
+    values = parse_qs(body.decode('utf-8'))
+    farm_id = values.pop('farm_id', [None])[0]
+    fields = {key: entries[0] for key, entries in values.items()}
+    try:
+        farm = plot_manager.updateFarm(farm_id, **fields)
+        return 200, bytes(json.dumps({"farm": farm}), "utf8"), []
+    except KeyError as exc:
+        return 404, bytes(json.dumps({"status": "error", "error": str(exc)}), "utf8"), []
+    except (TypeError, ValueError) as exc:
+        return 400, bytes(json.dumps({"status": "error", "error": str(exc)}), "utf8"), []
+
+
+usock.routerPOST("/api/updateFarm", updateFarm)
 
 
 def getSensorRegistry(url, body):
@@ -1978,23 +2395,42 @@ if __name__ == "__main__":
     # Load all plots once on startup
     plot_manager.loadPlots()
 
-    # Detect debug configuration on start, adjust globals accordingly
-    if os.getenv("LOAD_DATA_FROM_CSV") == "True":
-        for plot in plot_manager.Plots.values():
-            plot.load_data_from_csv = True
-    if os.getenv("SKIP_DATA_PREPROCESSING") == "True":
-        create_model.skip_data_preprocessing = True
-    if os.getenv("SKIP_TRAINING") == "True":
-        create_model.skip_training = True
-    if os.getenv("PERFORM_TRAINING") == "False":
-        create_model.perform_training = False
-
     # Bound logs.log by SIZE (an active log's mtime is always recent, so the age-based
     # cleaner below never fires on it) - set up before anything logs
     setup_logging()
 
     # Get saved config from all plots and save it in objects
     getConfigsFromAllFiles()
+    # Compatibility JSON loads installation/UI state first. Optional valid
+    # YAML entries apply only to plots that are not explicitly UI-owned.
+    try:
+        # YAML entries are optional manual/model configurations. Installation
+        # settings persisted by the UI are operational and must survive restart.
+        farm_configs = load_all_farms(strict=False)
+        apply_farm_configs_to_plots(
+            plot_manager.getPlots(), farm_configs, preserve_ui_config=True)
+    except (OSError, RuntimeError, ValueError) as exc:
+        # Configuration errors are operator-facing and must stop before workers.
+        raise SystemExit(f"Startup validation failed: {exc}") from None
+
+    # Import the ML runtime only after fail-fast configuration checks succeed.
+    import create_model as create_model_module
+    import training_thread as training_thread_module
+    create_model = create_model_module
+    training_thread = training_thread_module
+
+    # Detect debug configuration on start, adjust globals accordingly.
+    if os.getenv("LOAD_DATA_FROM_CSV") == "True":
+        for plot in plot_manager.Plots.values():
+            plot.load_data_from_csv = True
+    if os.getenv("SKIP_DATA_PREPROCESSING") == "True":
+        # Workers read shared flags from create_model.state, not package aliases.
+        create_model.state.SkipDataPreprocessing = True
+    if os.getenv("SKIP_TRAINING") == "True":
+        create_model.state.SkipTraining = True
+    if os.getenv("PERFORM_TRAINING") == "False":
+        create_model.state.Perform_training = False
+
     sync_sensor_registry_from_plots()
 
     # Start thread that deletes old models and data regularly to save memory.
@@ -2004,12 +2440,13 @@ if __name__ == "__main__":
     # dir globs: delete the WHOLE matching folder once old (per-run scratch)
     dir_cleanup_globs = ["tmp/tuning_*", "tmp/nn_*"]
     # file globs: prune only these files (data/debug also holds datasets - never rmtree it)
-    file_cleanup_globs = ["data/debug/saved_variables_plot_*.pkl"]
-    schedule_model_cleanup(file_cleanup_paths, dir_cleanup_globs,
-                           file_cleanup_globs, interval_days=7)  # Check every week
+    file_cleanup_globs = ["data/cache/saved_variables_plot_*.pkl"]
+    model_cleaner = schedule_model_cleanup(
+        file_cleanup_paths, dir_cleanup_globs,
+        file_cleanup_globs, interval_days=7)  # Check every week
 
     # Clean logs
-    schedule_log_cleanup()
+    log_cleaners = schedule_log_cleanup()
 
     # Former Start serving -> obsolete, now start in thread with recovery mechanism
     # usock.sockAddr = NetworkUtils.Proxy
@@ -2037,4 +2474,12 @@ if __name__ == "__main__":
             time.sleep(3600)  # Check every hour
     except KeyboardInterrupt:
         print("\nShutting down server...")
-        # Add cleanup logic here if needed
+    finally:
+        # Stop workers before the HTTP server so no background task continues
+        # mutating plot state during container shutdown.
+        for cleaner in [model_cleaner, *log_cleaners]:
+            cleaner.stop()
+        stop_background_workers(
+            plot_manager.getPlots(), [model_cleaner, *log_cleaners])
+        usock.stop()
+        server_thread.join(timeout=30)

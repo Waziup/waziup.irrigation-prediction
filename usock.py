@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 
 sockAddr = ""
+_server = None
 
 # ----------------- #
 
@@ -162,7 +163,7 @@ class HTTPHandler(BaseHTTPRequestHandler):
 
 
 def start():
-    global sockAddr
+    global sockAddr, _server
     load_dotenv()
     sockAddr = os.getenv("Proxy_URL")
 
@@ -192,10 +193,12 @@ def start():
     unixSock.listen(5)
 
     server = ThreadingHTTPServer(sockAddr, HTTPHandler, False)
+    _server = server
 
     # ThreadingHTTPServer
     server.socket = unixSock
     server.serve_forever()
+    _server = None
 
     # Cleanup after server stops
     try:
@@ -223,3 +226,10 @@ def start_with_recovery():
         else:
             print("Server exited normally — breaking out.")
             break  # Exit if server stops on purpose
+
+
+def stop():
+    """Stop the active Unix-socket HTTP server, if one is running."""
+    server = _server
+    if server is not None:
+        server.shutdown()
