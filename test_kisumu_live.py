@@ -20,7 +20,11 @@ except Exception as e:
     _import_error = e
 
 
-@unittest.skipUnless(os.getenv('SPACEIOTBOX_API_KEY'), 'SPACEIOTBOX_API_KEY not set in .env')
+@unittest.skipUnless(
+    os.getenv('SPACEIOTBOX_API_KEY')
+    and os.getenv('RUN_LIVE_SPACEIOTBOX_TESTS') == '1',
+    'Set RUN_LIVE_SPACEIOTBOX_TESTS=1 with SPACEIOTBOX_API_KEY for live smoke tests',
+)
 class TestKisumuLive(unittest.TestCase):
     def test_fetch_live_kisumu_maize(self):
         if fetch_weather_frame is None or fetch_satellite_snapshot is None or get_irrigation_recommendation is None:
@@ -141,27 +145,6 @@ class TestKisumuLive(unittest.TestCase):
         except Exception as e:
             growth_stage_audit["error"] = str(e)
 
-        # Also collect STAC/collection info to help surface scene availability
-        try:
-            import spaceiotbox_satellite as sbox_sat
-            collections = []
-            try:
-                collections = sbox_sat._discover_collection_names()
-            except Exception:
-                collections = []
-
-            stac_items = []
-            try:
-                # search items for the requested window
-                from pandas import Timestamp
-                stac_items = sbox_sat._search_items(lat, lon, Timestamp(
-                    start_date + 'T00:00:00Z'), Timestamp(end_date + 'T23:59:59Z'))
-            except Exception:
-                stac_items = []
-        except Exception:
-            collections = []
-            stac_items = []
-
         # Save outputs to data/ for inspection and commit
         out_dir = Path('data') / 'test_kisumu_live_outputs'
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -202,19 +185,6 @@ class TestKisumuLive(unittest.TestCase):
                 json.dump(growth_stage_audit, fh, indent=2, default=str)
         except Exception:
             pass
-        # Save collection and STAC search metadata for debugging
-        try:
-            with open(out_dir / 'stac_collections.json', 'w') as fh:
-                json.dump(collections, fh, default=str, indent=2)
-        except Exception:
-            pass
-
-        try:
-            with open(out_dir / 'stac_items.json', 'w') as fh:
-                json.dump(stac_items, fh, default=str, indent=2)
-        except Exception:
-            pass
-
         # Print concise summary and output locations
         print('\nSaved outputs:')
         print(' -', weather_csv)
@@ -311,6 +281,8 @@ class TestKisumuLive(unittest.TestCase):
         # Basic sanity checks
         self.assertIsNotNone(weather_frame)
         self.assertIsNotNone(satellite_snapshot)
+        # Partial five-day responses must be replaced by complete fallback data.
+        self.assertTrue(weather_audit["date_range_matches_request"])
         self.assertIn('weather_data_summary', recommendation)
         self.assertIn('satellite_data_summary', recommendation)
 

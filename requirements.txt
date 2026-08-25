@@ -20,4 +20,4 @@ keras-tuner
 xmlrunner
 psutil
 gevent
-rasterio
+rasterio==1.3.11

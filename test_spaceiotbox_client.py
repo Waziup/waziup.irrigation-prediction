@@ -1,8 +1,6 @@
 import json
 import os
 import unittest
-from datetime import date
-
 import pandas as pd
 import requests
 from dotenv import load_dotenv
@@ -16,10 +14,6 @@ LAKE_VICTORIA_POINTS = [
     {"name": "Kisumu", "lat": -0.09, "lon": 34.75},
     {"name": "Jinja", "lat": 0.44, "lon": 33.20},
 ]
-
-WINDOW_START = date(2026, 5, 1)
-WINDOW_END = date(2026, 5, 18)
-
 
 def _collect_timestamps(payload, timestamps, field_names):
     if isinstance(payload, dict):
@@ -44,8 +38,9 @@ class TestSpaceIoTBoxLiveAvailability(unittest.TestCase):
     def setUpClass(cls):
         load_dotenv(override=False)
         cls.api_key = os.getenv("SPACEIOTBOX_API_KEY", "").strip()
-        if not cls.api_key:
-            raise unittest.SkipTest("SPACEIOTBOX_API_KEY is not set")
+        if not cls.api_key or os.getenv("RUN_LIVE_SPACEIOTBOX_TESTS") != "1":
+            raise unittest.SkipTest(
+                "Set RUN_LIVE_SPACEIOTBOX_TESTS=1 with SPACEIOTBOX_API_KEY for live smoke tests")
 
     def _get_json(self, path, params=None):
         response = requests.get(
@@ -79,17 +74,12 @@ class TestSpaceIoTBoxLiveAvailability(unittest.TestCase):
 
         min_ts = min(timestamps)
         max_ts = max(timestamps)
-        in_window = sum(
-            1
-            for ts in timestamps
-            if WINDOW_START <= ts.date() <= WINDOW_END
-        )
         print(
             f"{endpoint_name}: fields={sorted(fields)} min={min_ts.isoformat()} "
-            f"max={max_ts.isoformat()} window_count={in_window}"
+            f"max={max_ts.isoformat()} count={len(timestamps)}"
         )
 
-    def test_01_agro_climate_land_response_for_window(self):
+    def test_agro_climate_land_snapshot(self):
         for point in LAKE_VICTORIA_POINTS:
             path = "/v1/agro_climate/land"
             base_params = {"lat": point["lat"], "lon": point["lon"]}
@@ -102,44 +92,40 @@ class TestSpaceIoTBoxLiveAvailability(unittest.TestCase):
             self.assertIn("NDVI", vegetation)
             self._print_window_stats(f"{path} {point['name']} no_dates", body_no_dates)
 
-            date_params = {
-                **base_params,
-                "start_date": WINDOW_START.isoformat(),
-                "end_date": WINDOW_END.isoformat(),
-            }
-            response, body_dates = self._get_json(path, params=date_params)
-            self.assertIn(
-                response.status_code,
-                (200, 422),
-                msg=(
-                    f"{path} with date params returned {response.status_code} "
-                    f"body={str(body_dates)[:350]}"
-                ),
-            )
-            self._print_window_stats(f"{path} {point['name']} with_dates", body_dates)
-
         water_response, water_body = self._get_json("/v1/agro_climate/water", params={"lat": LAKE_VICTORIA_POINTS[0]["lat"], "lon": LAKE_VICTORIA_POINTS[0]["lon"]})
         self.assertIn(water_response.status_code, (200, 400))
         print(f"/v1/agro_climate/water status={water_response.status_code} body={str(water_body)[:200]}")
 
-    def test_02_eo_locations_and_stac_collections_respond(self):
-        locations = self._assert_endpoint_responds("/v1/eo/locations")
-        print(f"/v1/eo/locations keys={list(locations.keys()) if isinstance(locations, dict) else 'list'}")
-
+    def test_eo_stac_advertises_derived_ndvi_and_ndre(self):
+        """Verify the collection-items fallback used because `/search` is broken."""
         collections = self._assert_endpoint_responds("/v1/eo/stac/collections")
-        if isinstance(collections, dict):
-            values = collections.get("collections", [])
-        elif isinstance(collections, list):
-            values = collections
-        else:
-            values = []
+        collection_ids = [entry.get("id") for entry in collections.get("collections", [])]
+        self.assertIn("Kisumu", collection_ids)
 
-        ids = []
-        for item in values[:5]:
-            if isinstance(item, dict) and item.get("id"):
-                ids.append(item["id"])
-        print(f"/v1/eo/stac/collections count={len(values)} first_ids={ids}")
+        items = self._assert_endpoint_responds(
+            "/v1/eo/stac/collections/Kisumu/items")
+        features = items.get("features", [])
+        ndvi_dates = []
+        ndre_dates = []
+        for feature in features:
+            timestamp = pd.to_datetime(
+                feature.get("properties", {}).get("datetime") or feature.get("id"),
+                utc=True,
+                errors="coerce",
+            )
+            asset_names = {str(name).upper() for name in feature.get("assets", {})}
+            if "NDVI" in asset_names:
+                ndvi_dates.append(timestamp)
+            if "NDRE" in asset_names:
+                ndre_dates.append(timestamp)
 
+        self.assertGreaterEqual(len(ndvi_dates), 2)
+        self.assertGreaterEqual(len(ndre_dates), 2)
+        print(
+            "EO/STAC Kisumu: "
+            f"NDVI={len(ndvi_dates)} latest={max(ndvi_dates).isoformat()} "
+            f"NDRE={len(ndre_dates)} latest={max(ndre_dates).isoformat()}"
+        )
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

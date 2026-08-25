@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Iterable, Optional
 
 import numpy as np
@@ -9,6 +10,28 @@ import requests
 
 
 DEFAULT_BASE_URL = "https://www.smartafrihub.com/spaceiotbox/api"
+REQUEST_TIMEOUT_SECONDS = float(os.getenv("SPACEIOTBOX_TIMEOUT_SECONDS", "30"))
+REQUEST_ATTEMPTS = max(1, int(os.getenv("SPACEIOTBOX_REQUEST_ATTEMPTS", "3")))
+
+# The documented agro-climate service is limited to the Lake Victoria area.
+SPACEIOTBOX_LAT_RANGE = (-5.1, 2.5)
+SPACEIOTBOX_LON_RANGE = (28.95, 36.7)
+OPEN_METEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/era5"
+OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_ARCHIVE_DELAY_DAYS = 5
+
+OPEN_METEO_ARCHIVE_FIELDS = [
+    "temperature_2m", "relative_humidity_2m", "rain", "cloud_cover",
+    "shortwave_radiation", "wind_speed_10m", "wind_direction_10m",
+    "soil_temperature_7_to_28cm", "soil_moisture_0_to_7cm",
+    "et0_fao_evapotranspiration",
+]
+OPEN_METEO_FORECAST_FIELDS = [
+    "temperature_2m", "relative_humidity_2m", "rain", "cloud_cover",
+    "shortwave_radiation", "wind_speed_10m", "wind_direction_10m",
+    "soil_temperature_18cm", "soil_moisture_3_to_9cm",
+    "et0_fao_evapotranspiration",
+]
 
 LEGACY_WEATHER_COLUMNS = [
     "Temperature",
@@ -32,6 +55,12 @@ TIME_ALIASES = [
     "valid_time",
     "validTime",
 ]
+
+TIMEZONE_ALIASES = {
+    "EAT": "Africa/Nairobi",
+    "GMT": "UTC",
+    "UTC": "UTC",
+}
 
 COLUMN_ALIASES = {
     "Temperature": [
@@ -109,19 +138,44 @@ def build_headers() -> dict:
 
 
 def _request_json(path: str, params: Optional[dict] = None) -> object:
-    response = requests.get(
-        f"{get_base_url()}{path}",
-        params=params,
-        headers=build_headers(),
-        timeout=30,
-    )
-    if response.ok:
-        return response.json()
+    for attempt in range(REQUEST_ATTEMPTS):
+        try:
+            response = requests.get(
+                f"{get_base_url()}{path}",
+                params=params,
+                headers=build_headers(),
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            if response.ok:
+                return response.json()
+            # Retry transient server failures, but preserve client errors such
+            # as 422 for the bounded-query fallback handled by the caller.
+            if response.status_code < 500 or attempt == REQUEST_ATTEMPTS - 1:
+                response.raise_for_status()
+        except (requests.Timeout, requests.ConnectionError):
+            if attempt == REQUEST_ATTEMPTS - 1:
+                raise
+        time.sleep(min(2 ** attempt, 4))
+    raise RuntimeError("SpaceIoTBox request exhausted without a response")
 
-    # Keep date-bounded requests strict: callers that request a time range
-    # must not silently fall back to unbounded data.
-    response.raise_for_status()
-    return response.json()
+
+def _request_external_json(url: str, params: dict) -> object:
+    """Apply the same bounded retry policy to the Open-Meteo fallback."""
+    for attempt in range(REQUEST_ATTEMPTS):
+        try:
+            response = requests.get(
+                url, params=params, headers={"Accept": "application/json"},
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            if response.ok:
+                return response.json()
+            if response.status_code < 500 or attempt == REQUEST_ATTEMPTS - 1:
+                response.raise_for_status()
+        except (requests.Timeout, requests.ConnectionError):
+            if attempt == REQUEST_ATTEMPTS - 1:
+                raise
+        time.sleep(min(2 ** attempt, 4))
+    raise RuntimeError("Open-Meteo request exhausted without a response")
 
 
 def fetch_agro_climate(endpoint: str, lat: float, lon: float, params: Optional[dict] = None) -> object:
@@ -142,6 +196,14 @@ def fetch_agro_climate(endpoint: str, lat: float, lon: float, params: Optional[d
         )
 
 
+def coordinates_supported_by_spaceiotbox(lat: float, lon: float) -> bool:
+    """Return whether coordinates satisfy the documented `/land` bounds."""
+    return (
+        SPACEIOTBOX_LAT_RANGE[0] <= float(lat) <= SPACEIOTBOX_LAT_RANGE[1]
+        and SPACEIOTBOX_LON_RANGE[0] <= float(lon) <= SPACEIOTBOX_LON_RANGE[1]
+    )
+
+
 def _tabular_frame_from_value(value: object) -> Optional[pd.DataFrame]:
     if isinstance(value, list):
         frame = pd.DataFrame(value)
@@ -160,6 +222,8 @@ def _tabular_frame_from_value(value: object) -> Optional[pd.DataFrame]:
 def _extract_table(payload: object) -> pd.DataFrame:
     if payload is None:
         return pd.DataFrame()
+    if isinstance(payload, pd.DataFrame):
+        return payload.copy()
     if isinstance(payload, list):
         return pd.DataFrame(payload)
     if not isinstance(payload, dict):
@@ -172,6 +236,24 @@ def _extract_table(payload: object) -> pd.DataFrame:
             return frame
 
     return pd.json_normalize(payload)
+
+
+def _payload_timezone(payload) -> str:
+    """Resolve provider-local timestamps; normalized frames are already UTC."""
+    if isinstance(payload, pd.DataFrame):
+        return str(payload.attrs.get("normalized_timezone", "UTC"))
+    if not isinstance(payload, dict):
+        return "UTC"
+    location = payload.get("location", {})
+    candidates = [
+        payload.get("timezone"),
+        location.get("timezone") if isinstance(location, dict) else None,
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            value = candidate.strip()
+            return TIMEZONE_ALIASES.get(value.upper(), value)
+    return "UTC"
 
 
 def _time_index_from_frame(frame: pd.DataFrame, start_date=None, end_date=None) -> pd.DatetimeIndex:
@@ -212,10 +294,13 @@ def _normalize_weather_bound(value) -> pd.Timestamp:
     bound = pd.Timestamp(value)
     if bound.tzinfo is not None:
         bound = bound.tz_convert("UTC").tz_localize(None)
-    return bound.normalize()
+    # Retain clock time so model forecasts can require the complete final day,
+    # while date-only callers naturally remain midnight-bounded.
+    return bound
 
 
 def normalize_weather_frame(payload: object, start_date=None, end_date=None) -> pd.DataFrame:
+    source_timezone = _payload_timezone(payload)
     raw_frame = _extract_table(payload)
     if raw_frame.empty:
         return raw_frame
@@ -227,31 +312,12 @@ def normalize_weather_frame(payload: object, start_date=None, end_date=None) -> 
         if result.index.tz is not None:
             result.index = result.index.tz_convert("UTC").tz_localize(None)
         else:
-            result.index = pd.DatetimeIndex(result.index)
-
-    if start_date is not None or end_date is not None:
-        index_days = [pd.Timestamp(ts).date() for ts in result.index]
-        mask_values = [True] * len(index_days)
-        if start_date is not None:
-            start_day = _normalize_weather_bound(start_date).date()
-            mask_values = [keep and day >= start_day for keep,
-                           day in zip(mask_values, index_days)]
-        if end_date is not None:
-            end_day = _normalize_weather_bound(end_date).date()
-            mask_values = [keep and day <= end_day for keep,
-                           day in zip(mask_values, index_days)]
-
-        mask = pd.Series(mask_values, index=result.index)
-
-        result = result.loc[mask]
-        if result.empty:
-            start_label = _normalize_weather_bound(
-                start_date).date() if start_date is not None else "-"
-            end_label = _normalize_weather_bound(
-                end_date).date() if end_date is not None else "-"
-            raise ValueError(
-                f"Weather response had no rows within requested window {start_label}..{end_label}"
-            )
+            try:
+                result.index = result.index.tz_localize(
+                    source_timezone).tz_convert("UTC").tz_localize(None)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Unsupported weather response timezone: {source_timezone}")
 
     for column in LEGACY_WEATHER_COLUMNS:
         alias_columns = [column] + COLUMN_ALIASES.get(column, [])
@@ -263,7 +329,87 @@ def normalize_weather_frame(payload: object, start_date=None, end_date=None) -> 
 
     result = result.replace([np.inf, -np.inf], np.nan)
     result = result.sort_index()
+    result.attrs["source_timezone"] = source_timezone
+    result.attrs["normalized_timezone"] = "UTC"
+
+    # Filter only after columns are aligned with the original response. The
+    # previous ordering could assign an unfiltered array to a shorter frame.
+    if start_date is not None:
+        result = result[
+            result.index.normalize() >= _normalize_weather_bound(start_date).normalize()]
+    if end_date is not None:
+        result = result[
+            result.index.normalize() <= _normalize_weather_bound(end_date).normalize()]
+    if result.empty and (start_date is not None or end_date is not None):
+        start_label = _normalize_weather_bound(
+            start_date).date() if start_date is not None else "-"
+        end_label = _normalize_weather_bound(
+            end_date).date() if end_date is not None else "-"
+        raise ValueError(
+            f"Weather response had no rows within requested window {start_label}..{end_label}"
+        )
     return result
+
+
+def _covers_requested_window(frame: pd.DataFrame, start_bound, end_bound) -> bool:
+    """Require both requested date boundaries, not merely an overlap."""
+    if frame is None or frame.empty:
+        return False
+    first_timestamp = pd.Timestamp(frame.index.min())
+    last_timestamp = pd.Timestamp(frame.index.max())
+    return (
+        (start_bound is None or first_timestamp <= start_bound)
+        and (end_bound is None or last_timestamp >= end_bound)
+    )
+
+
+def _fetch_open_meteo_segment(url, fields, lat, lon, start_bound, end_bound):
+    params = {
+        "latitude": float(lat),
+        "longitude": float(lon),
+        "start_date": start_bound.strftime("%Y-%m-%d"),
+        "end_date": end_bound.strftime("%Y-%m-%d"),
+        "hourly": ",".join(fields),
+        "timezone": "UTC",
+    }
+    return normalize_weather_frame(
+        _request_external_json(url, params), start_bound, end_bound)
+
+
+def fetch_open_meteo_weather_frame(lat, lon, start_bound, end_bound):
+    """Fetch complete archive/forecast coverage when `/land` cannot provide it."""
+    if start_bound is None or end_bound is None:
+        raise ValueError("Open-Meteo fallback requires start_date and end_date")
+
+    today = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
+    archive_cutoff = today - pd.Timedelta(days=OPEN_METEO_ARCHIVE_DELAY_DAYS)
+    frames = []
+
+    if start_bound <= archive_cutoff:
+        archive_end = min(end_bound, archive_cutoff)
+        frames.append(_fetch_open_meteo_segment(
+            OPEN_METEO_ARCHIVE_URL, OPEN_METEO_ARCHIVE_FIELDS,
+            lat, lon, start_bound, archive_end,
+        ))
+
+    forecast_start = max(start_bound, archive_cutoff + pd.Timedelta(days=1))
+    if forecast_start <= end_bound:
+        frames.append(_fetch_open_meteo_segment(
+            OPEN_METEO_FORECAST_URL, OPEN_METEO_FORECAST_FIELDS,
+            lat, lon, forecast_start, end_bound,
+        ))
+
+    if not frames:
+        raise ValueError("Open-Meteo fallback returned no weather segments")
+    combined = pd.concat(frames).sort_index()
+    combined = combined[~combined.index.duplicated(keep="last")]
+    if not _covers_requested_window(combined, start_bound, end_bound):
+        raise ValueError(
+            f"Open-Meteo did not cover requested window "
+            f"{start_bound.date()}..{end_bound.date()}"
+        )
+    combined.attrs["provider"] = "Open-Meteo"
+    return combined
 
 
 def fetch_weather_frame(lat: float, lon: float, start_date=None, end_date=None) -> pd.DataFrame:
@@ -275,85 +421,67 @@ def fetch_weather_frame(lat: float, lon: float, start_date=None, end_date=None) 
         raise ValueError(
             f"start_date must be <= end_date (got {start_bound.date()} > {end_bound.date()})")
 
-    params = {}
-    if start_bound is not None:
-        params["start_date"] = start_bound.strftime("%Y-%m-%d")
-    if end_bound is not None:
-        params["end_date"] = end_bound.strftime("%Y-%m-%d")
-
-    frames = []
-    available_windows = []
-    auth_errors = []
-    for endpoint in ("land",):
+    fallback_reasons = []
+    auth_error = None
+    spaceiotbox_partial = None
+    if coordinates_supported_by_spaceiotbox(lat, lon):
         try:
-            payload = fetch_agro_climate(
-                endpoint, lat, lon, params=params or None)
-            try:
+            # `/land` documents only lat/lon; never send unsupported range keys.
+            full_frame = normalize_weather_frame(
+                fetch_agro_climate("land", lat, lon))
+            if _covers_requested_window(full_frame, start_bound, end_bound):
                 frame = normalize_weather_frame(
-                    payload, start_date=start_bound, end_date=end_bound)
-            except ValueError as exc:
-                if "no rows within requested window" not in str(exc).lower():
-                    raise
-                # Keep date-bounded calls strict: do not silently return
-                # out-of-window rows when the API ignores range parameters.
-                full_frame = normalize_weather_frame(payload)
-                if not full_frame.empty:
-                    available_windows.append(
-                        (
-                            endpoint,
-                            str(full_frame.index.min())[:10],
-                            str(full_frame.index.max())[:10],
-                        )
-                    )
-                continue
-            if not frame.empty:
-                frames.append(frame)
+                    full_frame, start_date=start_bound, end_date=end_bound)
+                frame.attrs["provider"] = "SpaceIoTBox"
+                return frame
+            if not full_frame.empty:
+                try:
+                    spaceiotbox_partial = normalize_weather_frame(
+                        full_frame, start_date=start_bound,
+                        end_date=end_bound)
+                except ValueError:
+                    spaceiotbox_partial = None
+                fallback_reasons.append(
+                    "SpaceIoTBox returned only "
+                    f"{full_frame.index.min().date()}..{full_frame.index.max().date()}"
+                )
         except requests.HTTPError as exc:
             response = getattr(exc, "response", None)
             status = getattr(response, "status_code", None)
             if status in (401, 403):
-                auth_errors.append((endpoint, status))
-            continue
-        except (requests.RequestException, TypeError, ValueError, KeyError):
-            continue
+                auth_error = status
+            fallback_reasons.append(f"SpaceIoTBox HTTP {status}")
+        except (requests.RequestException, TypeError, ValueError, KeyError) as exc:
+            fallback_reasons.append(f"SpaceIoTBox error: {exc}")
+    else:
+        fallback_reasons.append("coordinates outside SpaceIoTBox coverage")
 
-    if not frames:
-        if auth_errors:
-            statuses = ", ".join(
-                f"{endpoint}:{status}" for endpoint, status in auth_errors
-            )
+    # Historical completeness is essential for GDD; partial SpaceIoTBox data
+    # is discarded instead of producing a confidently wrong crop stage.
+    try:
+        fallback = fetch_open_meteo_weather_frame(
+            lat, lon, start_bound, end_bound)
+        if spaceiotbox_partial is not None and not spaceiotbox_partial.empty:
+            # SpaceIoTBox remains authoritative on overlapping timestamps;
+            # Open-Meteo supplies only the missing historical/forecast range.
+            combined = spaceiotbox_partial.combine_first(fallback).sort_index()
+            if not _covers_requested_window(combined, start_bound, end_bound):
+                raise ValueError("merged providers did not cover the full window")
+            combined.attrs["provider"] = "SpaceIoTBox + Open-Meteo"
+            combined.attrs["fallback_reason"] = "; ".join(fallback_reasons)
+            return combined
+        fallback.attrs["fallback_reason"] = "; ".join(fallback_reasons)
+        return fallback
+    except Exception as fallback_exc:
+        if auth_error is not None:
             raise PermissionError(
-                f"SpaceIoTBox authentication failed ({statuses}). "
-                "Check SPACEIOTBOX_API_KEY (or API_KEY/api_key) and token validity."
-            )
-        if start_bound is not None or end_bound is not None:
-            start_label = start_bound.date() if start_bound is not None else "-"
-            end_label = end_bound.date() if end_bound is not None else "-"
-            if available_windows:
-                availability = "; ".join(
-                    f"{endpoint} returned {min_date}..{max_date}"
-                    for endpoint, min_date, max_date in available_windows
-                )
-                raise ValueError(
-                    f"No weather data returned within requested window {start_label}..{end_label}. "
-                    f"Available range(s): {availability}."
-                )
-            raise ValueError(
-                f"No weather data returned within requested window {start_label}..{end_label}"
-            )
-        else:
-            return pd.DataFrame(columns=LEGACY_WEATHER_COLUMNS)
-
-    combined = frames[0]
-    for frame in frames[1:]:
-        combined = combined.combine_first(frame)
-
-    for column in LEGACY_WEATHER_COLUMNS:
-        if column not in combined.columns:
-            combined[column] = np.nan
-
-    if "Timestamp" not in combined.columns:
-        combined["Timestamp"] = combined.index
-
-    combined = combined[LEGACY_WEATHER_COLUMNS + ["Timestamp"]]
-    return combined.sort_index()
+                f"SpaceIoTBox authentication failed ({auth_error}) and "
+                f"Open-Meteo fallback failed: {fallback_exc}"
+            ) from fallback_exc
+        start_label = start_bound.date() if start_bound is not None else "-"
+        end_label = end_bound.date() if end_bound is not None else "-"
+        raise ValueError(
+            f"No complete weather coverage for {start_label}.."
+            f"{end_label}: {'; '.join(fallback_reasons)}; "
+            f"Open-Meteo fallback failed: {fallback_exc}"
+        ) from fallback_exc

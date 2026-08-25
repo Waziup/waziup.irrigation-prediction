@@ -5,7 +5,6 @@ Split out of the original create_model.py - function bodies are verbatim
 """
 import csv
 import ctypes
-from datetime import timedelta, datetime
 import gc
 import json
 import logging
@@ -51,7 +50,7 @@ from subprocess_manager import run_tuning_and_ensemble_nn_with_subprocess, run_t
 from . import state
 from .constants import *
 from .cleaning import convert_cols, fill_gaps, remove_large_gaps, resample
-from .weather import get_historical_weather_api, get_weather_forecast_api
+from .weather import get_historical_weather_api
 
 
 # TODO: more sophisticated approach needed: needs to learn from former => introduce model, is now excluded when flow meter is installed
@@ -85,6 +84,7 @@ def ensure_json_file(file_path):
 
 # include the (on device saved) amount of irrigation given
 def include_irrigation_amount(df, plot):
+    timezone_name = TimeUtils.for_plot(plot)
     irrigation_file = plot.irrigations_from_json
     # Check and ensure the JSON file exists
     ensure_json_file(irrigation_file)
@@ -139,7 +139,7 @@ def include_irrigation_amount(df, plot):
 
             # Convert the 'Timestamp' column to datetime, ensuring it is in UTC
             df_irrigation['Timestamp'] = pd.to_datetime(df_irrigation['Timestamp'], utc=True)
-            df_irrigation['Timestamp'] = df_irrigation['Timestamp'].dt.tz_convert(TimeUtils.Timezone)  # Replace with the correct timezone
+            df_irrigation['Timestamp'] = df_irrigation['Timestamp'].dt.tz_convert(timezone_name)
 
             df_irrigation.rename(columns={'value': 'irrigation_amount'}, inplace=True)
 
@@ -157,7 +157,7 @@ def include_irrigation_amount(df, plot):
             df_irrigation.set_index('Timestamp', inplace=True)
 
             # Timezone has to be set for df_irrigation
-            df_irrigation = df_irrigation.tz_convert(TimeUtils.Timezone)
+            df_irrigation = df_irrigation.tz_convert(timezone_name)
 
             # Merge the dataframes
             df = pd.merge(df, df_irrigation, left_index=True, right_index=True, how='outer', suffixes=('_main', '_irrigation'))
@@ -262,28 +262,16 @@ def create_features(data, plot):
     # Save the length of sensordata to var in days -> to dynamically adjust train interval
     plot.train_period_days = (data.index[-1] - data.index[0]).days
 
-    # Get weather from weather meteo
+    # Fetch the exact sensor-training interval. The shared adapter joins
+    # archive/recent sources itself and rejects incomplete coverage.
     data_weather = get_historical_weather_api(data, plot)
 
     # Resample weatherdata before merge => takes a long time
     data_weather = resample(data_weather)
 
-    # historical weather data is not available for the latest two days, use forecast to account for that!
-    if not plot.load_data_from_csv:
-        data_weather_endtime = data_weather.index[-1]
-        data_endtime = data.index[-1]
-
-        # Get forecast for the ~last two days
-        data_weather_recent_forecast = get_weather_forecast_api(data_weather_endtime, data_endtime, plot, data)
-
-        # Merge weather data to one dataframe
-        data_weather_merged = pd.concat([data_weather.loc[data.index[0]:], 
-                                        data_weather_recent_forecast.loc[data_weather_endtime + 
-                                                                        timedelta(minutes=Sample_rate) 
-                                                                        : data_endtime]
-                                                                        ])
-    else:
-        data_weather_merged = data_weather.loc[data.index[0]:data.index[-1]]
+    # Use only timestamps represented by the tension sensors. This prevents
+    # future weather or unrelated historical rows leaking into model training.
+    data_weather_merged = data_weather.loc[data.index[0]:data.index[-1]]
 
     # Merge data_weather_merged into data
     data = pd.merge(data, data_weather_merged, left_index=True, right_index=True, how='outer')
@@ -349,11 +337,9 @@ def prepare_data(plot):
 
     # start date is in UTC, but user expects it in his timezone
     start_date = plot.start_date
-    lat = plot.gps_info['lattitude']
-    long = plot.gps_info['longitude']
-    TimeUtils.Timezone = TimeUtils.get_timezone(lat, long)
+    timezone_name = TimeUtils.for_plot(plot)
     start_date = parser.parse(start_date)
-    start_date = start_date.replace(tzinfo=pytz.timezone(TimeUtils.Timezone))
+    start_date = start_date.replace(tzinfo=pytz.timezone(timezone_name))
 
     if plot.load_data_from_csv:
         # Load from CSV
@@ -363,7 +349,7 @@ def prepare_data(plot):
         data.set_index('Time', inplace=True)
         # Correct timestamp for timezone
         # Add timezone information without converting 
-        data.index = data.index.map(lambda x: x.replace(tzinfo=pytz.timezone(TimeUtils.Timezone)))
+        data.index = data.index.map(lambda x: x.replace(tzinfo=pytz.timezone(timezone_name)))
         #data.index = pd.to_datetime(data.index) + pd.DateOffset(hours=get_timezone_offset(Timezone))
     else:
         # Load data from API
@@ -405,7 +391,7 @@ def prepare_data(plot):
 
     # Convert index
     data.index = pd.to_datetime(data.index, utc=True)
-    data.index = data.index.tz_convert(TimeUtils.Timezone)
+    data.index = data.index.tz_convert(timezone_name)
         
     # Impute gaps in data
     data = fill_gaps(data)

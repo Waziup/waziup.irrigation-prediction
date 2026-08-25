@@ -17,7 +17,6 @@ coords = [
 
 endpoints = [
     ("/v1/agro_climate/land", {}),
-    ("/v1/agro_climate/land", {"start_date": "2026-05-01", "end_date": "2026-05-18"}),
     ("/v1/agro_climate/water", {}),
 ]
 
@@ -59,8 +58,5 @@ for name, lat, lon in coords:
         query.update({"lat": lat, "lon": lon})
         res = call_api(path, query)
         results.append(f"{name} {path} {p}: {res}")
-
-results.append(f"Global /v1/eo/locations: {call_api('/v1/eo/locations')}")
-results.append(f"Global /v1/eo/stac/collections: {call_api('/v1/eo/stac/collections')}")
 
 for r in results: print(r)
