@@ -15,7 +15,7 @@ from utils import NetworkUtils, TimeUtils
 
 class Plot:
     # Class init, called when created in UI
-    def __init__(self, tab_number, configPath):
+    def __init__(self, tab_number, configPath, stable_id=None, farm_id=None):
         # Fundamental
         # Int to enumerate plots/tabs
         self.tab_number = tab_number
@@ -23,8 +23,15 @@ class Plot:
         self.configPath = configPath
         # Current unique number, always incremented
         self.id = int(re.search(r'(\d+)\.json$', self.configPath).group(1))
+        self.stable_id = stable_id or f"plot-legacy-{self.id}"
         # User given name is preset, but can be changed later
         self.user_given_name = "Plot " + str(self.id)
+        # Links this compatibility Plot object to its authoritative YAML record.
+        self.farm_id = farm_id
+        self.area_unit = "m2"
+        # Installation/settings values win over optional manual YAML values.
+        self.configuration_source = "legacy"
+        self.timezone = "UTC"
 
         # Variables that were global before, now plot-specific
         # Device
@@ -46,8 +53,10 @@ class Plot:
         self.threshold_static = 0
         # Amount in liters to irrigate plants
         self.irrigation_amount = 0
+        self.irrigation_mode = ""
         # Time to look ahead in forecast how long soil tension threshold can be exceeded in hours
         self.look_ahead_time = 0
+        self.watch_horizon_time = 72
         # Start date: use sensor and API data from this date
         self.start_date = ""
         # Time period to include into the model
@@ -56,6 +65,13 @@ class Plot:
         self.train_period_days = 1
         # Frequencies in hours in between predict cycles
         self.predict_period_hours = 3
+        # Tension-model output cadence and forecast horizon. These defaults
+        # match create_model.constants and may be overridden by plot config.
+        self.forecast_interval_minutes = 60
+        self.forecast_horizon_days = 5
+        self.retrain_interval_days = 1
+        self.irrigation_confirmation_seconds = 10800
+        self.error_retry_seconds = 1800
         self.soil_type = ""                                 # Soil type for current field
         # Soil is to dry, plant cannot access any water with its roots
         self.permanent_wilting_point = 40
@@ -105,6 +121,10 @@ class Plot:
         self.predictions = pd.DataFrame
         # Threshold timestamp when soil will be to dry
         self.threshold_timestamp = ""
+        # Latest unified result plus its persistent-cache state.
+        self.pipeline_result = None
+        self.pipeline_cache_status = "empty"
+        self.pipeline_cache_reason = None
 
         # Model
         # Stores the currently best model
@@ -128,16 +148,7 @@ class Plot:
         # Load former irrigations from file "data/irrigations.json" DEBUG
         self.load_irrigations_from_file = False
         self.irrigations_from_json = 'data/irrigations_plot_' + \
-            str(id) + '.json'
-
-        def __repr__(self):
-            return (
-                f"plotTabNumber(tab_number={self.tab_number}, "
-                f"name='{self.user_given_name}', "
-                f"configPath='{self.configPath}', "
-                f"training_active={self.currently_training}, "
-                f"prediction_active={self.prediction_thread is not None})"
-            )
+            str(self.id) + '.json'
 
     # Just print some class properties
 
@@ -171,6 +182,12 @@ class Plot:
 
             # Get data from forms
             self.user_given_name = data.get('Name', [])
+            # Older JSON configurations may omit this during YAML migration.
+            self.farm_id = data.get('Farm_id', self.farm_id)
+            self.area_unit = data.get('Plot_area_unit', self.area_unit)
+            self.configuration_source = data.get(
+                'Configuration_source', self.configuration_source)
+            self.timezone = data.get('Timezone', self.timezone) or "UTC"
 
             self.zone_name = data.get('Zone_name', self.user_given_name)
             self.sensor_kind = data.get('Sensor_kind', [])
@@ -192,7 +209,23 @@ class Plot:
             self.plot_area_m2 = float(data.get('Plot_area_m2', 0))
             self.irrigation_type = data.get(
                 'Irrigation_type', 'unknown') or 'unknown'
+            self.irrigation_mode = data.get(
+                'Irrigation_mode', self.irrigation_mode) or ''
             self.look_ahead_time = float(data.get('Look_ahead_time', []))
+            # Retain JSON timing reads for backward compatibility; startup YAML
+            # application overwrites them with authoritative farm values.
+            self.predict_period_hours = float(
+                data.get('Predict_period_hours', self.predict_period_hours))
+            self.forecast_interval_minutes = int(data.get(
+                'Forecast_interval_minutes', self.forecast_interval_minutes))
+            self.forecast_horizon_days = float(data.get(
+                'Forecast_horizon_days', self.forecast_horizon_days))
+            self.retrain_interval_days = float(data.get(
+                'Retrain_interval_days', self.retrain_interval_days))
+            self.irrigation_confirmation_seconds = int(data.get(
+                'Irrigation_confirmation_seconds', self.irrigation_confirmation_seconds))
+            self.error_retry_seconds = int(data.get(
+                'Error_retry_seconds', self.error_retry_seconds))
             self.start_date = data.get('Start_date', [])
             self.period = int(data.get('Period', []))
             self.soil_type = data.get('Soil_type', [])
@@ -238,7 +271,7 @@ class Plot:
             'Authorization': f'Bearer {NetworkUtils.Token}'
         }
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=30)
             if response.status_code != 200:
                 print(
                     f"Failed to fetch sensors, status code: {response.status_code}")
@@ -298,7 +331,7 @@ class Plot:
 
         try:
             # Send a GET request to the API
-            response = requests.get(encoded_url, headers=headers)
+            response = requests.get(encoded_url, headers=headers, timeout=30)
 
             # Handle token expiration (HTTP 401)
             if response.status_code == 401:
@@ -306,7 +339,7 @@ class Plot:
                 NetworkUtils.get_token()  # Refresh token
                 headers['Authorization'] = f'Bearer {NetworkUtils.Token}'
                 response = requests.get(
-                    request_url, headers=headers)  # Retry request
+                    request_url, headers=headers, timeout=30)  # Retry request
 
             # Check if the request was successful (status code 200)
             if response.status_code == 200:
@@ -340,13 +373,6 @@ class Plot:
         except Exception as e:
             print("An error occurred, loading latest data from csv file:", e)
             return None
-
-    # Load from CSV file -> obsolete
-    def load_data(path):
-        # creating a data frame
-        data = pd.read_csv("binned_removed.csv", header=0)
-        print(data.head())
-        return data
 
     def read_config(self):
         # Specify the path to the JSON file you want to read
@@ -408,14 +434,11 @@ class Plot:
         if not isinstance(from_timestamp, str):
             from_timestamp = from_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
-        # Get timezone if no information available
-        if TimeUtils.Timezone == '':
-            TimeUtils.Timezone = TimeUtils.get_timezone(
-                self.config["Gps_info"]["lattitude"], self.config["Gps_info"]["longitude"])
+        timezone_name = TimeUtils.for_plot(self)
 
         # Correct timestamp for timezone => TODO: here is an ERROR, timezone var is not available in first start
         from_timestamp = (datetime.strptime(from_timestamp, "%Y-%m-%dT%H:%M:%S.%fZ") -
-                          timedelta(hours=TimeUtils.get_timezone_offset(TimeUtils.Timezone))).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+                          timedelta(hours=TimeUtils.get_timezone_offset(timezone_name))).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
         if apiUrl.startswith('http://wazigate/'):
             print('There is no token needed, fetch data from local gateway.')
@@ -448,7 +471,7 @@ class Plot:
 
         try:
             # Send a GET request to the API
-            response = requests.get(encoded_url, headers=headers)
+            response = requests.get(encoded_url, headers=headers, timeout=30)
 
             # Handle token expiration (HTTP 401)
             if response.status_code == 401:
@@ -456,7 +479,7 @@ class Plot:
                 NetworkUtils.get_token()  # Refresh token
                 headers['Authorization'] = f'Bearer {NetworkUtils.Token}'
                 response = requests.get(
-                    encoded_url, headers=headers)  # Retry request
+                    encoded_url, headers=headers, timeout=30)  # Retry request
 
             # Check if the request was successful (status code 200)
             if response.status_code == 200:
@@ -522,13 +545,14 @@ class Plot:
     # surveillance, check threads are running
     def check_threads(self):
         print("Checking threads of plot: " + self.user_given_name)
-        if not self.training_thread or not self.training_thread.is_alive():
-            print("Training thread not alive, restarting...")
-            self.training_thread.start(self)
-
-        if not self.prediction_thread or not self.prediction_thread.is_alive():
+        # A Thread instance cannot be started twice. Restart prediction through
+        # its module factory only after a successful training cycle.
+        if self.training_finished and (
+            not self.prediction_thread or not self.prediction_thread.is_alive()
+        ):
             print("Prediction thread not alive, restarting...")
-            self.prediction_thread.start(self)
+            import prediction_thread
+            prediction_thread.start(self)
 
     # Data
 

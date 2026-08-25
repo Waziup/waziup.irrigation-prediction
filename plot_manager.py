@@ -1,217 +1,183 @@
-from plot import Plot
-import os
+"""Runtime plot objects backed by persistent, stable farm/plot identities."""
+
+from pathlib import Path
 import threading
 
-# Global variables
-# This stores all plots in a shared dictionary
-Plots = {}
-# CurrentPlotId to retrieve from Dict init with first plot
-CurrentPlotId = 1
-CurrentPlotTab = 1                                  # init with first tab
-ConfigPath = 'config/current_config_plot1.json'     # init with first plot
-Config_folder_path = "config/"                      # Folder with configfiles
+from farm_registry import FarmRegistry
+from plot import Plot
 
-# Array of active threads TODO: if training started kill other threads.(formerly done in main.py)
+Plots = {}
+CurrentPlotId = 1
+CurrentPlotTab = 1
+Config_folder_path = "config/"
+ConfigPath = "config/current_config_plot1.json"
 Threads = []
 ThreadId = 0
+_lock = threading.RLock()
+_registry = FarmRegistry()
 
-# Just read directory and retrieve filenames in sorted manner
+
+def _resolve_key(identifier):
+    if isinstance(identifier, str):
+        for key, plot in Plots.items():
+            if plot.stable_id == identifier:
+                return key
+        try:
+            identifier = int(identifier)
+        except ValueError as exc:
+            raise KeyError(f"Unknown plot: {identifier}") from exc
+    identifier = int(identifier)
+    if identifier in Plots:
+        return identifier
+    for key, plot in Plots.items():
+        if plot.id == identifier:
+            return key
+    raise KeyError(f"Unknown plot: {identifier}")
 
 
 def readFiles():
-    try:
-        files = [
-            f for f in os.listdir(Config_folder_path)
-            if os.path.isfile(os.path.join(Config_folder_path, f))
-            and f.startswith("current_config_plot")
-            and f.endswith(".json")
-        ]
-        files.sort()
-    except Exception as e:
-        files = []
-
-    return files
-
-# Set the current ṕlot
+    return [record["config_file"] for record in _registry.snapshot()["plots"]]
 
 
-def setPlot(plot_nr_tab):
+def setPlot(identifier):
     global CurrentPlotId, CurrentPlotTab, ConfigPath
-
-    # Get the plot object from the dictionary
-    currentPlot = Plots[plot_nr_tab]
-
-    # Point to config file of current plot
-    try:
-        # Should work if config is already set
-        # files[plot_nr_in_ui - 1] # -1 because the dict start with 1, not with 0
-        ConfigPath = Config_folder_path + \
-            "current_config_plot" + str(currentPlot.id) + ".json"
-    # Newplot has been added as "last plot"
-    except Exception as e:
-        # Should never be the case, but just in case
-        max_index = max(Plots.keys())
-        newPlot = Plots[max_index]
-        ConfigPath = newPlot.configPath
-        print(
-            f"Error setting plot: {e}. Using last plot's config path: {ConfigPath}")
-
-    # Set also changes in manager_class, TODO: redundant
-    CurrentPlotId = currentPlot.id
-    CurrentPlotTab = getCurrentPlotNumberWithId(currentPlot)
-
-    return ConfigPath
+    with _lock:
+        key = _resolve_key(identifier)
+        plot = Plots[key]
+        CurrentPlotId, CurrentPlotTab, ConfigPath = plot.id, key, plot.configPath
+        _registry.set_current_plot(plot.stable_id)
+        return ConfigPath
 
 
-# When App starts it looks through fromer plot configuration and reloads them, also creates object of a class that represents plots
-def loadPlots():
+def loadPlots(registry_path=None, config_folder=None):
+    """Load the registry, migrating legacy config files on first use."""
+    global Plots, CurrentPlotId, CurrentPlotTab, ConfigPath
+    global Config_folder_path, _registry
+    with _lock:
+        if config_folder is not None:
+            Config_folder_path = str(config_folder).rstrip("/") + "/"
+        registry_file = registry_path or Path(Config_folder_path) / "farm_registry.json"
+        _registry = FarmRegistry(registry_file, Config_folder_path)
+        data = _registry.load_or_migrate()
+        Plots = {}
+        records = sorted(data["plots"], key=lambda item: (item.get("position", 0), item["legacy_id"]))
+        for tab, record in enumerate(records, start=1):
+            path = str(Path(Config_folder_path) / record["config_file"])
+            plot = Plot(tab, path, stable_id=record["plot_id"], farm_id=record["farm_id"])
+            plot.user_given_name = record["name"]
+            plot.plot_area_m2 = float(record.get("area", 0.0) or 0.0)
+            plot.area_unit = record.get("area_unit", "m2")
+            Plots[tab] = plot
+        CurrentPlotTab = next(key for key, plot in Plots.items() if plot.stable_id == data["current_plot_id"])
+        current = Plots[CurrentPlotTab]
+        CurrentPlotId, ConfigPath = current.id, current.configPath
+        return len(Plots)
+
+
+def addPlot(tabNumber=None, farm_id=None, name="", area=0.0, area_unit="m2"):
     global Plots
-
-    files = readFiles()
-    amount = len(files)
-
-    if amount == 0:
-        plot_obj = Plot(1, ConfigPath)
-        Plots[1] = plot_obj
-        plot_obj.printPlotNumber()
-    else:
-        # Create class to manage tabs/plots
-        # Using enumerate to get index correctly
-        for index, file in enumerate(files, start=1):
-            plot_obj = Plot(index, os.path.join(Config_folder_path, file))
-            Plots[index] = plot_obj
-            plot_obj.printPlotNumber()  # Print for debugging
-
-    return len(files)
-
-# Add a plot during runtine TODO: finish
+    with _lock:
+        farm_id = farm_id or _registry.snapshot()["current_farm_id"]
+        record = _registry.add_plot(farm_id, name, area, area_unit)
+        tab = len(Plots) + 1
+        path = str(Path(Config_folder_path) / record["config_file"])
+        plot = Plot(tab, path, stable_id=record["plot_id"], farm_id=farm_id)
+        plot.user_given_name, plot.plot_area_m2 = record["name"], record["area"]
+        plot.area_unit = record["area_unit"]
+        Plots[tab] = plot
+        setPlot(record["plot_id"])
+        return record["plot_id"], path
 
 
-def addPlot(tabNumber):
-    global Plots
-
-    # files = readFiles()
-
-    # retrieve the last plot and increment filename
-    # try:
-    #     newfilename = files[-1]
-    # except Exception as e: # in case setup has never been run
-    #     newfilename = 'config/current_config_plot0.json' # LOL
-
-    next_number = max(plot.id for plot in Plots.values()) + 1
-    newfilepath = os.path.join(
-        Config_folder_path, "current_config_plot" + str(next_number) + ".json")
-    # next_number = 0
-    # match = re.search(r'plot(\d+)\.json$', newfilename)
-    # if match:
-    #     number = int(match.group(1))
-    #     next_number = number + 1  # Increment number
-    #     newfilename = re.sub(r'plot(\d+)(\.json)$', f'plot{next_number}.json', newfilename)   # Replace with new number
-
-    # Create new plot
-    plot_obj = Plot(int(tabNumber), newfilepath)
-    Plots[len(Plots)+1] = plot_obj
-
-    plot_obj.printPlotNumber()  # Print for debugging
-    plot_obj.setState(True)  # TODO: obsolete?
-
-    return tabNumber, newfilepath
-
-# Remove a plot from the list
+def createFarm(name, latitude=0, longitude=0, size=0, area_unit="m2", timezone_name="UTC", owner="", plot_name=""):
+    with _lock:
+        farm = _registry.create_farm(name, latitude, longitude, size, area_unit, timezone_name, owner)
+        plot_id, _ = addPlot(farm_id=farm["farm_id"], name=plot_name or f"{name} Plot 1", area=size, area_unit=area_unit)
+        return _registry.get_farm(farm["farm_id"]), _registry.get_plot(plot_id)
 
 
-def removePlot(plot_nr_to_be_removed):
-    global Plots, CurrentPlotTab, CurrentPlotId
+def updateFarm(farm_id, **fields):
+    return _registry.update_farm(farm_id, **fields)
 
-    # Get current plot and remove -> formerly was getCurrentPlot()
-    plot_to_remove = Plots[CurrentPlotTab]
-    # plot_to_remove = getCurrentPlotWithId(plot_nr_to_be_removed)
 
-    # Compare plot scope
-    if plot_nr_to_be_removed is CurrentPlotTab:
-        print("Will remove plot number: ", plot_nr_to_be_removed)
-    else:
-        print("IndexError: Number of plot in frontend is different than backend, might have just deleted the wrong plot.")
+def updateCurrentPlotMetadata(name=None, area=None, area_unit=None):
+    plot = getCurrentPlot()
+    fields = {key: value for key, value in {"name": name, "area": area, "area_unit": area_unit}.items() if value is not None}
+    record = _registry.update_plot(plot.stable_id, **fields)
+    plot.user_given_name, plot.plot_area_m2 = record["name"], record["area"]
+    plot.area_unit = record["area_unit"]
+    return record
 
-    try:
-        # Remove json config file TODO: DEBUG
-        os.remove(plot_to_remove.configPath)
-    except Exception as e:
-        print(
-            f"Error removing file, most likely it is not being created. Error: {e}")
 
-    # Finally remove the plot from the list TODO: not array not suitable
-    if removePlotWithId(plot_nr_to_be_removed):
-        print(f"Plot {plot_nr_to_be_removed} removed successfully.")
-    else:
-        print(f"Failed to remove plot {plot_nr_to_be_removed}.")
+def removePlot(identifier):
+    """Remove the exact stable target and archive, rather than delete, its config."""
+    global Plots, CurrentPlotId, CurrentPlotTab, ConfigPath
+    with _lock:
+        key = _resolve_key(identifier)
+        plot = Plots[key]
+        removed = _registry.remove_plot(plot.stable_id)
+        config_path = Path(plot.configPath)
+        if config_path.exists():
+            archive = config_path.with_suffix(config_path.suffix + ".removed")
+            counter = 1
+            while archive.exists():
+                archive = config_path.with_suffix(config_path.suffix + f".removed.{counter}")
+                counter += 1
+            config_path.rename(archive)
+        del Plots[key]
+        Plots = {index: item for index, item in enumerate(Plots.values(), start=1)}
+        for tab, item in Plots.items():
+            item.tab_number = tab
+        CurrentPlotTab = _resolve_key(_registry.snapshot()["current_plot_id"])
+        current = Plots[CurrentPlotTab]
+        CurrentPlotId, ConfigPath = current.id, current.configPath
+        return removed["plot_id"], str(config_path)
 
-    # Set plot to former plot
-    CurrentPlotTab = CurrentPlotTab - 1
-    if CurrentPlotTab < 1:
-        CurrentPlotTab = 1
 
-    # Assign former plot to be current plot (id)
-    try:
-        CurrentPlotId = Plots[CurrentPlotTab].id
-    except Exception as e:
-        print(f"Error setting current plot ID: {e}")
-        CurrentPlotId = False
-
-    return plot_nr_to_be_removed, plot_to_remove.configPath
-
-# Just access
+def registrySnapshot():
+    data = _registry.snapshot()
+    runtime = {plot.stable_id: plot for plot in Plots.values()}
+    for record in data["plots"]:
+        plot = runtime.get(record["plot_id"])
+        if plot:
+            record.update({"tab_number": plot.tab_number, "name": plot.user_given_name,
+                           "area": float(getattr(plot, "plot_area_m2", 0.0) or 0.0),
+                           "area_unit": getattr(plot, "area_unit", "m2")})
+    return data
 
 
 def getPlots():
-    return Plots  # Returns the list of Plot objects
+    return Plots
 
 
 def getCurrentConfig():
-    return Plots[CurrentPlotTab].configPath
+    return getCurrentPlot().configPath
 
 
 def getCurrentPlot():
     return Plots[CurrentPlotTab]
 
-# def getCurrentPlot():
-#     print(f"Into get current plot with id: {CurrentPlotTab}")
-#     print(f"[{multiprocessing.current_process().name}] Trying to acquire plot_lock...")
-#     with plot_lock:
-#         print(f"[{multiprocessing.current_process().name}] Lock acquired.")
-#         plot = Plots[CurrentPlotTab]
-#     print(f"[{multiprocessing.current_process().name}] Lock released.")
-#     return plot
-
 
 def getCurrentPlotNumberWithId(currentPlot):
-    global Plots
-    i = 1
-    for plot in Plots.values():
-        if plot.id == currentPlot.id:
-            return i
-        i += 1
-    return 1
+    return _resolve_key(getattr(currentPlot, "stable_id", currentPlot.id))
 
 
 def getCurrentPlotWithId(passed_id):
-    for plot in Plots.values():
-        if plot.id == passed_id:
-            return plot
-    return False
+    try:
+        return Plots[_resolve_key(passed_id)]
+    except KeyError:
+        return False
 
 
 def removePlotWithId(passed_id):
-    global Plots
-    i = 1
-    for plot in Plots.values():
-        if plot.id == passed_id:
-            del Plots[i]
-            return True
-        i += 1
-    return False
+    try:
+        removePlot(passed_id)
+        return True
+    except (KeyError, ValueError):
+        return False
 
 
 def setCurrentConfig(path):
-    global Plots
-    Plots[CurrentPlotTab].configPath = path
+    global ConfigPath
+    getCurrentPlot().configPath = path
+    ConfigPath = path
