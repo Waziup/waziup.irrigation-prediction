@@ -1,14 +1,17 @@
 """Immutable configuration constants shared across the create_model package."""
 
+import runtime_config
+
 # Rolling mean window
 RollingMeanWindowData = 15
 RollingMeanWindowGrouped = 5
 
+# Model defaults reference the shared runtime contract to prevent drift.
 # Sampling rate of training dataset
-Sample_rate = 60
+Sample_rate = runtime_config.DEFAULT_SENSOR_SAMPLING_INTERVAL_MINUTES
 
 # Forecast horizon TODO: add config or adjust automa !!!!
-Forecast_horizon = 5 #days
+Forecast_horizon = runtime_config.DEFAULT_FORECAST_HORIZON_DAYS
 
 # Number of resampled rows spanned by one forecast horizon (used as the CV gap below,
 # so cross-validation is scored on a true forecast-horizon-ahead split instead of the
@@ -16,9 +19,9 @@ Forecast_horizon = 5 #days
 Forecast_horizon_periods = int(Forecast_horizon * 24 * 60 / Sample_rate)
 
 # Created features that are dropped later -> TODO: evaluate this!!!
-To_be_dropped = ['minute', 'Timestamp', 'gradient', 
-                 'grouped_soil', 'grouped_soil_temp', 
-                 'Winddirection', 'month', 'day_of_year', 
+To_be_dropped = ['minute', 'Timestamp', 'gradient',
+                 'grouped_soil', 'grouped_soil_temp',
+                 'Winddirection', 'month', 'day_of_year',
                  'date']
 
 # Mapping to identify models
