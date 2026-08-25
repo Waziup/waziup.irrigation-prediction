@@ -5,13 +5,12 @@
     <title>WAZIUP Irrigation Dashboard</title>
     <meta name="description" content="WAZIUP Irrigation Prediction Dashboard" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
 
-    <link rel="stylesheet" href="styles.css" type="text/css" />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-
-    <!-- Chart.js for inline charts used in the mock UI -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="styles.css?v=20260825-3" type="text/css" />
+    <link rel="stylesheet" href="responsive.css?v=20260825-6" type="text/css" />
+    <script src="libs/chart.umd.min.js"></script>
+    <script src="ui-icons.js"></script>
 
     <script type="text/javascript">
       // This script adapts the mock UI to call the app backend endpoints.
@@ -159,28 +158,33 @@
         const plots = await safeFetchJson('../api/getPlots');
         const farmReg = await safeFetchJson('../api/getFarmRegistry');
         const currentPlot = parseInt(plots?.currentPlot, 10);
+        const currentPlotId = plots?.current_plot_id;
         const farms = Array.isArray(farmReg?.farms) ? farmReg.farms : [];
-        const plotName = Array.isArray(plots?.tabnames) && currentPlot > 0
-          ? plots.tabnames[currentPlot - 1]
+        const plotRecord = Array.isArray(plots?.plots)
+          ? plots.plots.find((entry) => entry.plot_id === currentPlotId)
           : null;
-        const farm = farms.find((entry) => entry.plot_id === currentPlot);
+        const plotName = plotRecord?.name || (Array.isArray(plots?.tabnames) && currentPlot > 0
+          ? plots.tabnames[currentPlot - 1]
+          : null);
+        const farm = farms.find((entry) => Array.isArray(entry.plot_ids)
+          && entry.plot_ids.includes(currentPlotId));
         const el = document.getElementById('farmName');
         const pageTitle = document.getElementById('pageTitle');
         const pageFarmName = document.getElementById('pageFarmName');
         const currentPage = document.body.dataset.page || 'dashboard';
         const farmLabel = farm
-          ? (farm.name || plotName || `Plot ${currentPlot}`)
+          ? `${farm.name || 'Farm'} · ${plotName || `Plot ${currentPlot}`}`
           : (plotName || 'No farm configured');
         if (el) {
           el.textContent = farmLabel;
         }
-        if (pageFarmName) {
-          pageFarmName.textContent = farmLabel;
-          pageFarmName.style.display = currentPage === 'phenology' ? 'inline-flex' : 'none';
+        if (pageFarmName) pageFarmName.textContent = '';
+        if (pageTitle) {
+          const titles = { dashboard: 'Farm Overview', plot: 'Plot Overview', phenology: 'Growth & Water Demand' };
+          pageTitle.textContent = titles[currentPage] || 'Farm Overview';
         }
-        if (pageTitle && currentPage !== 'phenology') {
-          pageTitle.textContent = farmLabel;
-        }
+        const plotTitle = document.getElementById('selectedPlotTitle');
+        if (plotTitle) plotTitle.textContent = plotName || 'Plot details';
 
         // Check alert status and update badge
         const alert = await safeFetchJson('../api/getAlertStatus');
@@ -192,11 +196,109 @@
         }
       }
 
+      function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+        })[char]);
+      }
+
+      function formatDashboardTime(value) {
+        if (!value) return 'Not forecast';
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
+      }
+
+      function renderFarmDashboard(data, cached = false) {
+        const summary = data?.summary || {};
+        const setText = (id, value) => {
+          const node = document.getElementById(id);
+          if (node) node.textContent = value;
+        };
+        setText('farm-total-plots', summary.total_plots ?? '--');
+        setText('farm-attention-count', summary.plots_needing_attention ?? '--');
+        const plan = Array.isArray(data?.todays_plan) ? data.todays_plan : [];
+        const scheduled = plan.filter((item) => !['declined', 'failed'].includes(item.status));
+        setText('farm-scheduled-irrigations', scheduled.length);
+        setText('farm-scheduled-water', Number.isFinite(Number(summary.planned_water_m3))
+          ? `${Number(summary.planned_water_m3).toFixed(2)} m³ planned` : 'Amount unavailable');
+
+        const connectivity = document.getElementById('connectivity-notification');
+        if (connectivity) {
+          connectivity.classList.toggle('visible', cached);
+          connectivity.textContent = cached
+            ? `Offline — showing the last farm overview saved ${formatDashboardTime(data.generated_at)}. Commands are disabled until connection returns.`
+            : '';
+        }
+
+        const plots = Array.isArray(data?.plots) ? data.plots : [];
+        const plotContainer = document.getElementById('farm-plot-list');
+        if (plotContainer) {
+          plotContainer.innerHTML = plots.length ? plots.map((plot) => {
+            const margin = Number(plot.threshold_margin_cbar);
+            const marginText = Number.isFinite(margin)
+              ? (margin >= 0 ? `${margin.toFixed(1)} cbar remaining` : `${Math.abs(margin).toFixed(1)} cbar over threshold`)
+              : 'Threshold margin unavailable';
+            const urgency = String(plot.urgency || 'unknown').toLowerCase();
+            return `<button type="button" class="farm-plot-card urgency-${escapeHtml(urgency)}" onclick="switchDashboardPlot('${escapeHtml(plot.plot_id)}')">
+              <div class="farm-plot-main"><strong>${escapeHtml(plot.name || 'Unnamed plot')}</strong><span>${escapeHtml(plot.crop_type || 'Crop not set')} · ${escapeHtml(plot.growth_stage || 'Stage unavailable')}</span></div>
+              <div class="farm-plot-condition"><strong>${escapeHtml(plot.next_action || 'Awaiting forecast')}</strong><span>${escapeHtml(marginText)} · ${escapeHtml(formatDashboardTime(plot.next_action_time))}</span></div>
+              <div class="farm-plot-meta"><span class="status-chip ${escapeHtml(urgency)}">${escapeHtml(urgency)}</span><span class="plot-open-hint">View plot →</span></div>
+            </button>`;
+          }).join('') : '<div class="dashboard-empty">No plots are configured for this farm.</div>';
+        }
+
+        const alerts = Array.isArray(data?.active_alerts) ? data.active_alerts : [];
+        const badge = document.getElementById('alertsBadge');
+        if (badge) {
+          badge.style.display = alerts.length ? 'inline-block' : 'none';
+          badge.textContent = String(alerts.length);
+        }
+      }
+
+      async function loadFarmDashboard() {
+        const data = await safeFetchJson('../api/farmDashboard');
+        if (data) {
+          localStorage.setItem('wazifarm.dashboardCache', JSON.stringify(data));
+          renderFarmDashboard(data, false);
+          return data;
+        }
+        try {
+          const cached = JSON.parse(localStorage.getItem('wazifarm.dashboardCache') || 'null');
+          if (cached) renderFarmDashboard(cached, true);
+          else {
+            const connectivity = document.getElementById('connectivity-notification');
+            if (connectivity) {
+              connectivity.textContent = 'Farm overview unavailable. Add a farm and at least one plot in Settings.';
+              connectivity.classList.add('visible');
+            }
+          }
+          return cached;
+        } catch (error) {
+          console.warn('Could not restore dashboard cache', error);
+          return null;
+        }
+      }
+
+      async function switchDashboardPlot(plotId) {
+        try {
+          const response = await fetch('../api/setPlot', {method: 'POST', headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'},
+            body: `plot_id=${encodeURIComponent(plotId)}`});
+          if (!response.ok) throw new Error('Could not open this plot.');
+          navigateTo('plot');
+          await loadTopbar();
+        } catch (error) {
+          alert(error.message || 'Could not open this plot.');
+        }
+      }
+
       function formatRange(start, end, digits = 0) {
+        const startMissing = start === null || start === undefined || start === '';
+        const endMissing = end === null || end === undefined || end === '';
         const startNum = Number(start);
         const endNum = Number(end);
-        const hasStart = Number.isFinite(startNum);
-        const hasEnd = Number.isFinite(endNum);
+        const hasStart = !startMissing && Number.isFinite(startNum);
+        const hasEnd = !endMissing && Number.isFinite(endNum);
         if (!hasStart && !hasEnd) return '--';
         const format = (val) => digits > 0 ? val.toFixed(digits) : String(Math.round(val));
         if (hasStart && !hasEnd) return `${format(startNum)}+`;
@@ -207,10 +309,10 @@
       async function loadPhenologySummary() {
         const pageTitle = document.getElementById('pageTitle');
         const pageFarmName = document.getElementById('pageFarmName');
-        if (pageTitle) {
-          pageTitle.textContent = 'Crop Phenology';
+        if (pageTitle && document.body.dataset.page === 'phenology') {
+          pageTitle.textContent = 'Growth & Water Demand';
           setTimeout(() => {
-            pageTitle.textContent = 'Crop Phenology';
+            pageTitle.textContent = 'Growth & Water Demand';
           }, 0);
         }
         if (pageFarmName) {
@@ -257,6 +359,8 @@
             daysEl.textContent = '--';
           }
         }
+
+        setActiveGrowthStage(summary.current_stage || summary.growth_stage);
 
         if (tableBody) {
           const rows = Array.isArray(summary.stage_rows) ? summary.stage_rows : [];
@@ -386,7 +490,10 @@
                 },
               },
             },
-            scales: { y: { title: { display: true, text: currentTensionUnit || 'kPa' } } }
+            scales: {
+              x: { ticks: { autoSkip: true, maxTicksLimit: 6, maxRotation: 0 } },
+              y: { title: { display: true, text: currentTensionUnit || 'kPa' } }
+            }
           }
         });
       }
@@ -394,7 +501,7 @@
       // Navigation and UI wiring
       function navigateTo(page, el) {
         if (page === 'settings') {
-          window.location.href = 'settings.html';
+          window.location.href = `settings.html${window.location.search}`;
           return;
         }
         document.body.dataset.page = page;
@@ -402,12 +509,11 @@
         const target = document.getElementById('page-' + page);
         if (target) target.classList.add('active');
         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-        if (el && el.classList.contains('nav-item')) el.classList.add('active');
-        else {
-          const match = document.querySelector(`.nav-item[data-page="${page}"]`);
-          if (match) match.classList.add('active');
-        }
-        const titles = {dashboard:'Dashboard', tension:'Soil Tension', phenology:'Crop Phenology', alerts:'Alerts', settings:'Settings'};
+        document.querySelectorAll(`.nav-item[data-page="${page}"]`).forEach(n => n.classList.add('active'));
+        document.querySelectorAll('[data-plot-view]').forEach((button) => {
+          button.classList.toggle('active', button.dataset.plotView === page);
+        });
+        const titles = {dashboard:'Farm Overview', plot:'Plot Overview', phenology:'Growth & Water Demand', settings:'Settings'};
         const pageTitle = document.getElementById('pageTitle');
         if (pageTitle) {
           pageTitle.textContent = titles[page] || '';
@@ -415,8 +521,16 @@
             pageTitle.textContent = titles[page] || '';
           }, 0);
         }
-        if (page === 'dashboard') setTimeout(() => { loadCharts(); }, 200);
-        if (page === 'phenology') setTimeout(() => { loadPhenologySummary(); }, 200);
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${page}`);
+        if (page === 'dashboard') setTimeout(() => {
+          Promise.allSettled([loadFarmDashboard(), loadWeatherForecast()]);
+        }, 0);
+        if (page === 'plot') setTimeout(() => {
+          Promise.allSettled([updateMetrics(), fetchIrrigationRecommendation(), loadCharts(), fetchThreshold()]);
+        }, 0);
+        if (page === 'phenology') setTimeout(() => {
+          Promise.allSettled([loadPhenologySummary(), fetchIrrigationRecommendation()]);
+        }, 0);
       }
 
       function fetchThreshold() {
@@ -428,7 +542,7 @@
                 "The threshold is not reached in the current forecast horizon.";
             } else {
               document.getElementById("timestamp_txt").innerHTML =
-                "The threshold will be reached on " + timestamp_data.timestamp;
+                "The threshold is forecast to be reached " + formatDashboardTime(timestamp_data.timestamp) + ".";
             }
           })
           .catch((error) => {
@@ -456,12 +570,16 @@
             const phenoKcEl = document.getElementById("pheno-kc");
             const phenoThresholdValue = document.getElementById("pheno-threshold-value");
             const phenoEtcEl = document.getElementById("pheno-etc");
-            const summaryStage = document.getElementById("summary-stage");
-            const summaryGdd = document.getElementById("summary-gdd");
-            const adviceEtc = document.getElementById("advice-etc");
-            const adviceRain = document.getElementById("advice-rain");
-            const adviceRec = document.getElementById("advice-recommendation");
+            const summaryThreshold = document.getElementById("summary-threshold");
             const adviceVolume = document.getElementById("advice-volume");
+            const adviceVolumeBasis = document.getElementById("advice-volume-basis");
+            const adviceTime = document.getElementById("advice-time");
+            const adviceTimeBasis = document.getElementById("advice-time-basis");
+            const adviceMode = document.getElementById("advice-mode");
+            const adviceModeBasis = document.getElementById("advice-mode-basis");
+            const actionTitle = document.getElementById("plot-action-title");
+            const cropMeta = document.getElementById("plot-crop-meta");
+            const stageMeta = document.getElementById("plot-stage-meta");
 
             if (!data.available) {
               note.textContent = data.reason || "Irrigation recommendation unavailable.";
@@ -472,13 +590,15 @@
               if (phenoStageEl) phenoStageEl.textContent = "--";
               if (phenoGddEl) phenoGddEl.textContent = "--";
               if (phenoKcEl) phenoKcEl.textContent = "--";
-              if (summaryStage) summaryStage.textContent = "--";
-              if (summaryGdd) summaryGdd.textContent = "--";
+              if (summaryThreshold) summaryThreshold.textContent = "--";
               if (phenoEtcEl) phenoEtcEl.textContent = "--";
-              if (adviceEtc) adviceEtc.textContent = "--";
-              if (adviceRain) adviceRain.textContent = "--";
-              if (adviceRec) adviceRec.textContent = "--";
               if (adviceVolume) adviceVolume.textContent = "--";
+              if (adviceVolumeBasis) adviceVolumeBasis.textContent = "Add the plot area and irrigation method in Settings";
+              if (adviceTime) adviceTime.textContent = "Unavailable";
+              if (adviceTimeBasis) adviceTimeBasis.textContent = "No recommendation time is available";
+              if (adviceMode) adviceMode.textContent = "Not configured";
+              if (adviceModeBasis) adviceModeBasis.textContent = "Choose a mode in Settings";
+              if (actionTitle) actionTitle.textContent = "Recommendation unavailable";
               if (stalenessBanner) {
                 stalenessBanner.classList.remove("visible");
                 stalenessBanner.textContent = "";
@@ -486,45 +606,93 @@
               return data;
             }
 
-            const depthMm = Number(data.recommended_depth_mm);
-            const volumeM3 = Number(data.recommended_volume_m3);
-            const actuatorBased = data.actuator_based === true;
-            const rainHistory = Number(data.rain_since_planting_mm);
-            const rainRecent = Number(data.rain_last_24h_mm);
-            const rainForecast = Number(data.rain_forecast_mm);
-            const historicalCredit = Number(data.historical_rain_credit_mm);
-            const netNeed = Number(data.net_irrigation_need_mm);
-            const cumulativeEtc = Number(data.cumulative_etc_mm);
-            const satNdvi = data.sat_ndvi;
-            const satNdre = data.sat_ndre;
-            const satAge = data.sat_data_age_hours ?? data.sat_ndvi_age_hours;
-            const weatherAge = data.weather_data_age_hours;
-            const staleSources = Array.isArray(data.data_stale_sources)
-              ? data.data_stale_sources
+            const action = data.action || {};
+            const condition = data.condition || {};
+            const crop = data.crop || {};
+            const water = data.water || {};
+            const weather = data.weather || {};
+            const satellite = data.satellite || {};
+            const freshness = data.freshness || {};
+            const timing = data.timing || {};
+            const asNumber = (value) => value === null || value === undefined ? NaN : Number(value);
+            const depthMm = asNumber(water.net_depth_mm ?? water.recommended_depth_mm);
+            const volumeM3 = asNumber(water.recommended_volume_m3);
+            const actuatorBased = action.advisory_only === false;
+            const etcDailyValue = asNumber(weather.etc_daily_mm);
+            const satNdvi = satellite.ndvi;
+            const satNdre = satellite.ndre;
+            const satAge = satellite.source_age_hours;
+            const weatherAge = weather.age_hours;
+            const staleSources = Array.isArray(freshness.stale_sources)
+              ? freshness.stale_sources
               : [];
             const staleWeather = staleSources.includes("weather");
             const staleSatellite = staleSources.includes("satellite");
-            const growthStage = data.growth_stage;
-            const gddCumulative = data.gdd_cumulative;
-            const kcValue = data.kc;
+            const growthStage = crop.current_stage;
+            const gddCumulative = crop.gdd_cumulative;
+            const kcValue = crop.kc;
+            const thresholdCbar = asNumber(condition.threshold_cbar);
+            const irrigationNeeded = Number.isFinite(depthMm) && depthMm > 0;
+            const farmerReason = condition.status === "threshold_exceeded"
+              ? "The soil is too dry."
+              : "The soil is expected to become too dry.";
+            const modeDetails = {
+              automatic: ["Automatic", "The system starts irrigation"],
+              approval_required: ["Approval required", "Farmer approval is needed"],
+              manual: ["Manual", "The farmer starts irrigation"],
+              advisory_only: ["Advisory only", "The system will not start irrigation"],
+            };
+            const configuredMode = modeDetails[action.mode]
+              || ["Not configured", "Choose a mode in Settings"];
+            const formatIrrigationTime = (value) => {
+              const parsed = new Date(value);
+              if (!value || Number.isNaN(parsed.getTime())) return null;
+              const today = new Date();
+              const tomorrow = new Date(today);
+              tomorrow.setDate(today.getDate() + 1);
+              const sameDate = (left, right) => left.getFullYear() === right.getFullYear()
+                && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
+              const clock = parsed.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+              if (sameDate(parsed, today)) return `Today, ${clock}`;
+              if (sameDate(parsed, tomorrow)) return `Tomorrow, ${clock}`;
+              return `${parsed.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock}`;
+            };
+            const recommendedTime = formatIrrigationTime(timing.first_breach_timestamp);
+            const actionHeading = !irrigationNeeded
+              ? "No irrigation needed today"
+              : recommendedTime?.startsWith("Tomorrow")
+                ? "Irrigate by tomorrow"
+                : recommendedTime && !recommendedTime.startsWith("Today")
+                  ? "Irrigation needed"
+                  : "Irrigate today";
 
             currentIrrigationActuatorBased = actuatorBased;
+            if (actionTitle) actionTitle.textContent = actionHeading;
+            if (cropMeta) cropMeta.textContent = crop.crop_name || crop.crop_type || "Crop not configured";
+            if (stageMeta) stageMeta.textContent = growthStage || "Stage unavailable";
             setPumpActuatorVisibility(actuatorBased);
+            if (scheduleButton) {
+              scheduleButton.textContent = action.mode === "approval_required"
+                ? "Request Irrigation Approval"
+                : "Schedule Irrigation";
+            }
 
             if (actuatorBased) {
               if (scheduleButton) scheduleButton.disabled = false;
               if (pumpInput && !Number.isNaN(volumeM3) && volumeM3 > 0) {
                 pumpInput.value = volumeM3.toFixed(2);
               }
-              note.textContent = `ETc ${Number(data.etc_daily_mm).toFixed(1)} mm/day, historical rain credit ${Number.isNaN(historicalCredit) ? "—" : historicalCredit.toFixed(1)} mm, rain-adjusted need ${Number.isNaN(netNeed) ? "—" : netNeed.toFixed(1)} mm, volume ${Number.isNaN(volumeM3) ? "—" : volumeM3.toFixed(2)} m³.`;
+              note.textContent = `${farmerReason} Recent and expected rain are already included in the recommended amount.`;
             } else {
               if (scheduleButton) scheduleButton.disabled = true;
               if (pumpInput) pumpInput.value = "0.00";
-              note.textContent = `Advisory only: rain since planting ${Number.isNaN(rainHistory) ? "—" : rainHistory.toFixed(1)} mm, cumulative ETc ${Number.isNaN(cumulativeEtc) ? "—" : cumulativeEtc.toFixed(1)} mm, historical rain credit ${Number.isNaN(historicalCredit) ? "—" : historicalCredit.toFixed(1)} mm, last 24h ${Number.isNaN(rainRecent) ? "—" : rainRecent.toFixed(1)} mm, forecast ${Number.isNaN(rainForecast) ? "—" : rainForecast.toFixed(1)} mm, net need ${Number.isNaN(netNeed) ? "—" : netNeed.toFixed(1)} mm.`;
+              note.textContent = irrigationNeeded
+                ? `${farmerReason} Recent and expected rain are already included in the recommended amount.`
+                : `No irrigation is needed today. ${condition.message || "The crop water need and expected rain have been considered."}`;
             }
 
             if (Number.isNaN(depthMm)) {
-              note.textContent = data.reason || note.textContent;
+              note.textContent = condition.message || note.textContent;
             }
 
             if (ndviEl) {
@@ -552,47 +720,48 @@
                 typeof kcValue === "number" ? kcValue.toFixed(3) : "--";
             }
             if (phenoThresholdValue) {
-              const dynamic = isDynamicThresholdMode(data);
-              const thresholdCbar = Number(
-                dynamic
-                  ? (data.threshold_cbar ?? data.threshold_cbar_static)
-                  : (data.threshold_cbar_static ?? data.threshold_cbar)
-              );
               phenoThresholdValue.textContent = Number.isFinite(thresholdCbar)
                 ? thresholdCbar.toFixed(1)
                 : "--";
             }
             if (phenoEtcEl) {
-              const etcDaily = Number(data.etc_daily_mm);
+              const etcDaily = asNumber(weather.etc_daily_mm);
               phenoEtcEl.textContent = Number.isFinite(etcDaily) ? `${etcDaily.toFixed(1)} mm` : "--";
             }
 
-            if (summaryStage) {
-              summaryStage.textContent = growthStage || "--";
-            }
-            if (summaryGdd) {
-              summaryGdd.textContent =
-                typeof gddCumulative === "number" ? gddCumulative.toFixed(1) : "--";
+            if (summaryThreshold) {
+              summaryThreshold.textContent = Number.isFinite(thresholdCbar)
+                ? `${thresholdCbar.toFixed(1)} cbar`
+                : "--";
             }
 
             setActiveGrowthStage(growthStage);
 
-            if (adviceEtc) {
-              const etcDaily = Number(data.etc_daily_mm);
-              adviceEtc.textContent = Number.isFinite(etcDaily) ? `${etcDaily.toFixed(1)} mm/day` : "--";
-            }
-            if (adviceRain) {
-              adviceRain.textContent = Number.isFinite(rainRecent) ? `${rainRecent.toFixed(1)} mm` : "--";
-            }
-            if (adviceRec) {
-              adviceRec.textContent = Number.isFinite(depthMm) ? `${depthMm.toFixed(1)} mm` : "--";
-            }
             if (adviceVolume) {
-              adviceVolume.textContent = Number.isFinite(volumeM3) ? `${volumeM3.toFixed(2)} m³` : "--";
+              adviceVolume.textContent = Number.isFinite(volumeM3)
+                ? `${Math.round(volumeM3 * 1000).toLocaleString()} litres`
+                : "Amount unavailable";
             }
+            if (adviceVolumeBasis) {
+              if (Number.isFinite(volumeM3)) {
+                adviceVolumeBasis.textContent = `${volumeM3.toFixed(2)} m³. Rain has already been considered.`;
+              } else {
+                adviceVolumeBasis.textContent = "Add the plot area and irrigation method in Settings";
+              }
+            }
+            if (adviceTime) {
+              adviceTime.textContent = irrigationNeeded ? (recommendedTime || "Today") : "Not needed";
+            }
+            if (adviceTimeBasis) {
+              adviceTimeBasis.textContent = irrigationNeeded
+                ? (recommendedTime ? "Irrigate before the soil becomes too dry" : "Exact time is not available")
+                : "No irrigation is recommended today";
+            }
+            if (adviceMode) adviceMode.textContent = configuredMode[0];
+            if (adviceModeBasis) adviceModeBasis.textContent = configuredMode[1];
 
             if (stalenessBanner) {
-              if (data.data_stale === true) {
+              if (freshness.stale === true) {
                 const parts = [];
                 if (staleWeather) {
                   const wText = typeof weatherAge === "number"
@@ -631,18 +800,46 @@
 
         if (!forecast || !Array.isArray(forecast.days)) {
           container.innerHTML = '<div class="weather-empty">No forecast data.</div>';
+          const todayValue = document.getElementById('farm-today-weather');
+          const todayDetail = document.getElementById('farm-today-weather-detail');
+          if (todayValue) todayValue.textContent = '--';
+          if (todayDetail) todayDetail.textContent = 'Forecast unavailable';
           return;
         }
 
-        container.innerHTML = forecast.days.slice(0, 4).map((day) => {
-          const label = day.label || day.date || '--';
-          const rain = Number(day.rain_mm);
-          const icon = day.icon || 'cloud';
+        const today = forecast.today || forecast.days[0] || {};
+        const todayMin = Number(today.temperature_min_c);
+        const todayMax = Number(today.temperature_max_c);
+        const todayRain = Number(today.rain_mm);
+        const todayValue = document.getElementById('farm-today-weather');
+        const todayDetail = document.getElementById('farm-today-weather-detail');
+        if (todayValue) todayValue.textContent = Number.isFinite(todayMin) && Number.isFinite(todayMax)
+          ? `${todayMin.toFixed(0)}–${todayMax.toFixed(0)} °C` : '--';
+        if (todayDetail) todayDetail.textContent = Number.isFinite(todayRain)
+          ? `Rain total ${todayRain.toFixed(1)} mm` : 'Rain unavailable';
+
+        container.innerHTML = forecast.days.map((day, index) => {
+          const numberOrNaN = (value) => value === null || value === undefined ? NaN : Number(value);
+          const parsedDate = day.date ? new Date(`${day.date}T12:00:00`) : null;
+          const label = index === 0 ? 'Today' : index === 1 ? 'Tomorrow'
+            : parsedDate && !Number.isNaN(parsedDate.getTime())
+              ? parsedDate.toLocaleDateString(undefined, {weekday: 'short'})
+              : day.label || `+${index} days`;
+          const rain = numberOrNaN(day.rain_mm);
+          const tempMin = numberOrNaN(day.temperature_min_c);
+          const tempMax = numberOrNaN(day.temperature_max_c);
+          const humidity = numberOrNaN(day.humidity_percent);
+          const wind = numberOrNaN(day.wind_speed);
+          const iconKey = String(day.icon || '').toLowerCase();
+          const icon = iconKey.includes('rain') ? '🌧' : iconKey.includes('sun') ? '☀' : iconKey.includes('cloud') ? '⛅' : '🌤';
           return `
             <div class="weather-card">
-              <span class="material-symbols-outlined">${icon}</span>
-              <div class="weather-amount">${Number.isFinite(rain) ? rain.toFixed(1) : '--'} mm</div>
-              <div class="weather-label">${label}</div>
+              <span class="weather-icon" aria-hidden="true">${icon}</span>
+              <div class="weather-label">${escapeHtml(label)}</div>
+              <div class="weather-amount">${Number.isFinite(tempMin) && Number.isFinite(tempMax) ? `${tempMin.toFixed(0)}–${tempMax.toFixed(0)} °C` : '--'}</div>
+              <div class="weather-detail">Rain total ${Number.isFinite(rain) ? rain.toFixed(1) : '--'} mm</div>
+              <div class="weather-detail">Avg humidity ${Number.isFinite(humidity) ? humidity.toFixed(1) : '--'}%</div>
+              <div class="weather-detail">Avg wind ${Number.isFinite(wind) ? wind.toFixed(1) : '--'} km/h</div>
             </div>`;
         }).join('');
       }
@@ -683,30 +880,52 @@
         // Placeholder for future schedule state sync.
       }
 
+      function setPumpActuatorVisibility(actuatorBased) {
+        const card = document.querySelector('.pump-card');
+        const amount = document.getElementById('irrigation_value_form');
+        const schedule = document.getElementById('schedule_irrigation');
+        if (card) card.classList.toggle('advisory-only', !actuatorBased);
+        if (amount) amount.disabled = !actuatorBased;
+        if (schedule) schedule.disabled = !actuatorBased;
+      }
+
+      let manualIrrigationRequestKey = null;
+
       function irrigateManually() {
         const inputElement = document.getElementById("irrigation_value_form");
+        const button = document.getElementById("schedule_irrigation");
         const amount = parseFloat(inputElement.value);
 
-        if (!isNaN(amount)) {
-          fetch(`../api/irrigateManually?amount=${amount}`)
+        if (!isNaN(amount) && amount >= 0.01) {
+          if (!manualIrrigationRequestKey) {
+            manualIrrigationRequestKey = (window.crypto?.randomUUID?.() ||
+              `manual-${Date.now()}-${amount}`);
+          }
+          if (button) button.disabled = true;
+          fetch(`../api/irrigateManually?amount=${encodeURIComponent(amount)}&idempotency_key=${encodeURIComponent(manualIrrigationRequestKey)}`)
             .then((response) => response.text())
             .then((data) => {
               const dataObject = JSON.parse(data);
               if (dataObject.status == "success") {
                 alert(
-                  "Manual Irrigation was scheduled, will be performed within the next uplink cycle. Do not press this button again until irrigation is completed."
+                  "Irrigation command accepted and recorded."
                 );
+              } else if (dataObject.status == "pending_approval") {
+                alert("Irrigation request recorded and waiting for approval.");
+              } else if (dataObject.status == "duplicate") {
+                alert("This irrigation request was already recorded; no duplicate command was sent.");
               } else {
-                alert(
-                  "Cannot schedule irrigation, see console for more info! Error:",
-                  data
-                );
+                alert(dataObject.message || "Cannot schedule irrigation.");
               }
               console.log(data);
             })
             .catch((error) => {
               console.error("Error:", error);
               alert("An error occurred during the request. Please try again.");
+            })
+            .finally(() => {
+              manualIrrigationRequestKey = null;
+              if (button && currentIrrigationActuatorBased) button.disabled = false;
             });
         } else {
           alert("First type a valid amount in m³ to be irrigated!(min 0.01m³=10l)");
@@ -789,14 +1008,13 @@
       function loadStuff() {
         currentIrrigationActuatorBased = null;
         console.log("Starting dashboard data load...");
-        const loadPromises = Promise.allSettled([
-          updateMetrics(),
-          fetchIrrigationRecommendation(),
-          loadCharts(),
-          loadWeatherForecast(),
-          loadPhenologySummary(),
-          fetchThreshold(),
-        ]);
+        const currentPage = document.body.dataset.page || 'dashboard';
+        const pageLoaders = currentPage === 'plot'
+          ? [updateMetrics(), fetchIrrigationRecommendation(), loadCharts(), fetchThreshold()]
+          : currentPage === 'phenology'
+            ? [loadPhenologySummary(), fetchIrrigationRecommendation()]
+            : [loadFarmDashboard(), loadWeatherForecast()];
+        const loadPromises = Promise.allSettled(pageLoaders);
 
         const finishLoading = () => {
           try {
@@ -848,13 +1066,15 @@
 
       window.addEventListener('load', async () => {
         const initialPage = (window.location.hash || '').replace('#', '').trim();
-        if (initialPage === 'dashboard' || initialPage === 'phenology') {
+        if (initialPage === 'dashboard' || initialPage === 'plot' || initialPage === 'phenology') {
           document.body.dataset.page = initialPage;
         }
         try {
           await loadTopbar();
           if (initialPage === 'phenology') {
             navigateTo('phenology');
+          } else if (initialPage === 'plot') {
+            navigateTo('plot');
           } else if (initialPage === 'dashboard') {
             navigateTo('dashboard');
           }
@@ -865,8 +1085,13 @@
           hideLoadingIndicator();
           setTimeout(hideLoadingIndicator, 500);
         }
-        setInterval(updateMetrics, 30000);
+        setInterval(() => {
+          if (document.body.dataset.page === 'plot') updateMetrics();
+        }, 30000);
         setInterval(loadTopbar, 60000);
+        setInterval(() => {
+          if (document.body.dataset.page === 'dashboard') loadFarmDashboard();
+        }, 60000);
       });
 
       function adjustAmount(change) {
@@ -889,18 +1114,17 @@
   </head>
 
   <body>
+    <aside class="app-sidebar" aria-label="Primary navigation">
+      <div class="sidebar-logo"><span aria-hidden="true">🌱</span><strong>WaziFarm</strong></div>
+      <nav class="sidebar-links">
+        <button class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard', this)"><span aria-hidden="true">▦</span><span>Dashboard</span></button>
+        <button class="nav-item" data-page="settings" onclick="navigateTo('settings', this)"><span aria-hidden="true">⚙</span><span>Farm settings</span></button>
+      </nav>
+    </aside>
     <!-- Tab container for plot selection + controls -->
     <div class="tab-container">
       <div id="tabs" class="tabs"></div>
       <div class="tab-controls">
-        <button
-          id="settings_btn"
-          class="settings-button"
-          onclick="navigateTo('settings', this)"
-        >
-          <span class="material-symbols-outlined">settings</span>
-        </button>
-
         <button id="addTabButton" class="add-tab-button">+ Add Plot</button>
       </div>
     </div>
@@ -933,7 +1157,6 @@
     <div class="topbar">
       <div class="topbar-title-wrap">
         <div id="pageTitle" class="topbar-title">Loading farm...</div>
-        <div id="pageFarmName" class="topbar-farm-name" style="display:none;"></div>
       </div>
       <div class="topbar-actions">
         <button id="settingsQuick" class="settings-button icon-only" onclick="navigateTo('settings', this)" aria-label="Settings">
@@ -945,112 +1168,90 @@
     <!-- Main content -->
     <div class="main-content">
       <div id="alert-notification" class="alert-notification"></div>
+      <div id="connectivity-notification" class="connectivity-notification" role="status"></div>
       <div id="data-staleness-notification" class="data-staleness-notification"></div>
 
       <div id="page-dashboard" class="page active">
 
-      <div class="summary-grid">
-        <div class="summary-card">
-          <div class="summary-title" id="summary-tension-label">Soil Tension</div>
-          <div class="summary-value" id="summary-tension">--</div>
+      <section class="farm-overview" aria-labelledby="farm-overview-title">
+        <div class="dashboard-section-header">
+          <div><h2 id="farm-overview-title">Farm overview</h2><p>Current plot conditions, scheduled irrigation, and farm weather.</p></div>
         </div>
-        <div class="summary-card">
-          <div class="summary-title">Soil Temperature</div>
-          <div class="summary-value" id="summary-temp">--</div>
+        <div class="farm-summary-grid">
+          <div class="farm-summary-card"><span>Total plots</span><strong id="farm-total-plots">--</strong></div>
+          <div class="farm-summary-card attention"><span>Need attention</span><strong id="farm-attention-count">--</strong></div>
+          <div class="farm-summary-card"><span>Scheduled irrigations</span><strong id="farm-scheduled-irrigations">--</strong><small id="farm-scheduled-water">--</small></div>
+          <div class="farm-summary-card weather-summary-card"><span>Today’s weather</span><strong id="farm-today-weather">--</strong><small id="farm-today-weather-detail">--</small></div>
         </div>
-        <div class="summary-card">
-          <div class="summary-title">Crop Stage</div>
-          <div class="summary-value" id="summary-stage">--</div>
-          <div class="summary-subtext">GDD <span id="summary-gdd">--</span></div>
+        <div class="farm-operations-grid">
+          <div class="card farm-plots-panel"><div class="panel-title">Plot status</div><div id="farm-plot-list" class="farm-plot-list"><div class="dashboard-empty">Loading plots…</div></div></div>
         </div>
-        <div class="summary-card">
-          <div class="summary-title">Soil VWC (%)</div>
-          <div class="summary-value" id="summary-vwc">--</div>
-        </div>
-      </div>
-
-      <div class="dashboard-row">
-        <div class="card irrigation-advice">
-          <div class="advice-header">
-            <div class="advice-title">
-              <span class="material-symbols-outlined">water_drop</span>
-              Irrigation Advice
-            </div>
-            <div class="alert-pill" hidden></div>
-          </div>
-          <div class="advice-grid">
-            <div class="advice-item">
-              <span>ETc (crop water need)</span>
-              <strong id="advice-etc">--</strong>
-            </div>
-            <div class="advice-item">
-              <span>Effective rainfall (last 24h)</span>
-              <strong id="advice-rain">--</strong>
-            </div>
-            <div class="advice-item">
-              <span>Recommended irrigation</span>
-              <strong><span id="advice-recommendation">--</span> <span id="advice-volume">--</span></strong>
-            </div>
-          </div>
-          <div id="irrigation-recommendation" class="irrigation-recommendation">
-            Waiting for irrigation recommendation...
-          </div>
-        </div>
-
-        <div class="card weather-forecast">
-          <div class="weather-title">Weather Forecast</div>
+        <div class="card dashboard-weather-forecast">
+          <div class="weather-heading"><div class="weather-title">Farm weather forecast</div><span class="weather-source-note">Daily outlook</span></div>
           <div id="weather-forecast-grid" class="weather-grid"></div>
         </div>
+      </section>
 
-        <div class="card pump-card">
-            <div class="metric-header pump-header">
-              <div class="pump-title">Water Pump</div>
-              <div class="pump-help tooltip" data-tooltip-id="irrigationTooltip" aria-hidden="true">
-                <span class="tooltiptext" id="irrigationTooltip"></span>
-              </div>
-            </div>
-
-            <div class="pump-row amount-row">
-              <label class="pump-label">Irrigation Amount</label>
-              <div class="amount-input-group">
-                <button type="button" class="amount-btn decrease" onclick="adjustAmount(-1)">
-                  <span class="amount-symbol">−</span>
-                </button>
-                <input id="irrigation_value_form" type="number" min="0.01" max="1000" value="1" class="amount-input" />
-                <button type="button" class="amount-btn increase" onclick="adjustAmount(1)">
-                  <span class="amount-symbol">+</span>
-                </button>
-              </div>
-            </div>
-
-            <div class="pump-row status-row">
-              <div class="pump-status-section">
-                <div id="pump-status-on" class="status-indicator on">ON</div>
-                <div id="pump-status-off" class="status-indicator off">OFF</div>
-              </div>
-              <button id="schedule_irrigation" class="schedule-btn" onclick="irrigateManually()">
-                Schedule Irrigation
-              </button>
-            </div>
-        </div>
       </div>
 
-      <div class="chart-card">
-        <div class="chart-header">
-          <div class="chart-title-section">
-            <h3>Tension Forecast</h3>
-            <span id="threshold-source-badge" class="threshold-badge static">Static threshold</span>
-            <span class="tooltip material-symbols-outlined" data-tooltip-id="chart_pred_tooltip">help
-              <span class="tooltiptext" id="chart_pred_tooltip"></span>
-            </span>
-          </div>
+      <div id="page-plot" class="page">
+        <div class="plot-overview-shell">
+          <header class="plot-page-header">
+            <button type="button" class="back-to-farm" onclick="navigateTo('dashboard')" aria-label="Back to farm overview">← <span>Farm overview</span></button>
+            <div class="plot-title-copy">
+              <span class="context-label">Selected plot</span>
+              <h1 id="selectedPlotTitle">Plot details</h1>
+              <div class="plot-context"><span id="plot-crop-meta">Crop not configured</span><span id="plot-stage-meta">Stage unavailable</span></div>
+            </div>
+          </header>
+
+          <nav class="plot-subnav" aria-label="Selected plot sections">
+            <button type="button" class="active" data-plot-view="plot" onclick="navigateTo('plot', this)">Overview</button>
+            <button type="button" data-plot-view="phenology" onclick="navigateTo('phenology', this)">Growth &amp; Water Demand</button>
+          </nav>
+
+          <section class="plot-decision-card" aria-labelledby="plot-action-title">
+            <div class="plot-decision-heading">
+              <span>Today’s plot status</span>
+              <div class="alert-pill" hidden></div>
+            </div>
+            <div class="plot-decision-copy">
+              <h2 id="plot-action-title">Loading recommendation…</h2>
+              <p id="irrigation-recommendation">Waiting for irrigation recommendation...</p>
+            </div>
+            <div class="plot-water-grid" aria-label="Today’s irrigation details">
+              <div class="plot-water-item plot-water-amount"><span>Water to apply</span><strong id="advice-volume">--</strong><small id="advice-volume-basis">Rain has already been considered</small></div>
+              <div class="plot-water-item"><span>When to irrigate</span><strong id="advice-time">--</strong><small id="advice-time-basis">Before the soil becomes too dry</small></div>
+              <div class="plot-water-item"><span>Irrigation mode</span><strong id="advice-mode">--</strong><small id="advice-mode-basis">Configured by the farmer</small></div>
+            </div>
+          </section>
+
+          <section class="plot-readings-section" aria-labelledby="plot-readings-title">
+            <div class="plot-content-heading"><div><h2 id="plot-readings-title">Current readings</h2><p>Latest plot measurements and the active irrigation trigger.</p></div></div>
+            <div class="plot-readings-grid">
+              <div class="plot-reading-card"><span id="summary-tension-label">Soil tension</span><strong id="summary-tension">--</strong><small>Current root-zone reading</small></div>
+              <div class="plot-reading-card"><span>Today’s dynamic threshold</span><strong id="summary-threshold">--</strong><small>Active irrigation trigger</small></div>
+              <div class="plot-reading-card"><span>Soil temperature</span><strong id="summary-temp">--</strong><small>Latest sensor average</small></div>
+              <div class="plot-reading-card"><span>Soil VWC</span><strong id="summary-vwc">--</strong><small>Volumetric water content</small></div>
+            </div>
+          </section>
+
+          <section class="plot-trend-card" aria-labelledby="plot-trend-title">
+            <div class="plot-content-heading trend-heading">
+              <div><h2 id="plot-trend-title">Soil tension trend</h2><p>Past sensor observations followed by the prediction returned by the backend.</p></div>
+              <span id="threshold-source-badge" class="threshold-badge static">Static threshold</span>
+            </div>
+            <div class="forecast-chart-frame"><canvas id="chart_forecast" class="chart-area"></canvas></div>
+            <div class="chart-footnotes"><p id="timestamp_txt"></p><p id="forecast_horizons_txt"></p></div>
+          </section>
         </div>
-        <canvas id="chart_forecast" class="chart-area"></canvas>
-        <p id="timestamp_txt"></p>
-        <p id="forecast_horizons_txt"></p>
       </div>
 
       <div id="page-phenology" class="page">
+        <nav class="plot-subnav" aria-label="Selected plot sections">
+          <button type="button" data-plot-view="plot" onclick="navigateTo('plot', this)">Overview</button>
+          <button type="button" class="active" data-plot-view="phenology" onclick="navigateTo('phenology', this)">Growth &amp; Water Demand</button>
+        </nav>
         <div class="card phenology-hero">
           <div class="phenology-header">
             <div>
@@ -1073,21 +1274,6 @@
             </div>
           </div>
         </div>
-
-      <div class="page-switcher">
-        <button class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard', this)">
-          <span class="emoji-icon">▦</span>
-          <span>Dashboard</span>
-        </button>
-        <button class="nav-item" data-page="phenology" onclick="navigateTo('phenology', this)">
-          <span class="emoji-icon">🌿</span>
-          <span>Phenology</span>
-        </button>
-        <button class="nav-item" data-page="settings" onclick="navigateTo('settings', this)">
-          <span class="emoji-icon">⚙</span>
-          <span>Settings</span>
-        </button>
-      </div>
 
         <div class="phenology-metrics">
           <div class="phenology-metric">
@@ -1152,10 +1338,6 @@
         <button class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard', this)">
           <span class="emoji-icon">▦</span>
           <span>Dashboard</span>
-        </button>
-        <button class="nav-item" data-page="phenology" onclick="navigateTo('phenology', this)">
-          <span class="emoji-icon">🌿</span>
-          <span>Phenology</span>
         </button>
         <button class="nav-item" data-page="settings" onclick="navigateTo('settings', this)">
           <span class="emoji-icon">⚙</span>

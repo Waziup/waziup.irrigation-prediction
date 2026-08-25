@@ -88,9 +88,10 @@ body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #
 }
 
 .page-switcher .nav-item.active {
-  background: #356c2c;
-  color: #ffffff;
-  border-color: #356c2c;
+  background: #e7f2e4;
+  color: #245d2a;
+  border-color: #aac9a5;
+  box-shadow: inset 0 -3px #2f7133;
 }
 
 .page-switcher .nav-item .material-symbols-outlined {
@@ -967,6 +968,420 @@ body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #
 
 .schedule-btn:disabled::after {
   color: #adb5bd;
+}
+
+/* Final responsive cascade guard. */
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.main-content {
+  width: min(100%, 1440px);
+  margin-inline: auto;
+  padding: 20px clamp(14px, 2.5vw, 32px) 108px;
+}
+
+.page { padding: 0; min-width: 0; }
+.topbar-title-wrap { justify-content: flex-start; gap: 18px; }
+.topbar-title { flex: 0 0 auto; }
+.topbar-farm-name { display: inline-flex; min-width: 0; color: #52606d; font-size: .88rem; }
+.summary-grid, .farm-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.dashboard-row { grid-template-columns: minmax(0, 1.45fr) minmax(250px, .8fr) minmax(270px, .9fr); }
+.dashboard-row > * { min-width: 0; }
+.irrigation-advice { grid-column: auto; }
+.weather-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.weather-card { min-width: 0; overflow-wrap: anywhere; }
+.weather-icon { font-size: 1.45rem; }
+.pump-row { flex-wrap: wrap; }
+.schedule-btn { min-width: 0; max-width: 100%; justify-content: center; white-space: normal; text-align: center; }
+.pump-card.advisory-only { opacity: .82; }
+
+@media (max-width: 1050px) {
+  .dashboard-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .irrigation-advice { grid-column: 1 / -1; }
+}
+
+@media (max-width: 720px) {
+  .tab-container { display: none; }
+  .topbar { align-items: flex-start; }
+  .topbar-title-wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .topbar-title, .topbar-farm-name { max-width: calc(100vw - 82px); }
+  .main-content { padding: 14px 10px 104px; }
+  .farm-summary-grid, .summary-grid, .phenology-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-row, .farm-operations-grid { grid-template-columns: minmax(0, 1fr); }
+  .irrigation-advice, .farm-plots-panel { grid-column: auto; }
+  .weather-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .pump-card .status-row { display: grid; grid-template-columns: 1fr; }
+  .pump-status-section, .schedule-btn { width: 100%; }
+  .forecast-chart-frame { height: 280px; }
+  .page-switcher .nav-item { min-width: 0; padding: 10px 8px; font-size: .78rem; }
+}
+
+/* Authoritative responsive app shell. Keep these rules last so older mock-up
+   declarations cannot force desktop columns onto narrow screens. */
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.local-icon,
+.weather-icon {
+  font-family: system-ui, -apple-system, "Segoe UI Emoji", sans-serif;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.topbar {
+  min-height: 62px;
+  padding-inline: clamp(14px, 3vw, 32px);
+}
+
+.topbar-title-wrap {
+  justify-content: flex-start;
+  gap: 18px;
+}
+
+.topbar-title {
+  flex: 0 0 auto;
+  font-size: 1.05rem;
+}
+
+.topbar-farm-name {
+  display: inline-flex;
+  min-width: 0;
+  color: #52606d;
+  font-size: 0.88rem;
+}
+
+.main-content {
+  width: min(100%, 1440px);
+  margin-inline: auto;
+  padding: 20px clamp(14px, 2.5vw, 32px) 108px;
+}
+
+.page {
+  padding: 0;
+  min-width: 0;
+}
+
+.summary-grid,
+.farm-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dashboard-row {
+  grid-template-columns: minmax(0, 1.45fr) minmax(250px, .8fr) minmax(270px, .9fr);
+  align-items: stretch;
+}
+
+.dashboard-row > * {
+  min-width: 0;
+}
+
+.irrigation-advice {
+  grid-column: auto;
+}
+
+.weather-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.weather-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.weather-icon {
+  font-size: 1.45rem;
+}
+
+.pump-row {
+  flex-wrap: wrap;
+}
+
+.amount-input-group {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.schedule-btn {
+  min-width: 0;
+  max-width: 100%;
+  justify-content: center;
+  white-space: normal;
+  text-align: center;
+}
+
+.forecast-chart-frame {
+  position: relative;
+  width: 100%;
+  height: clamp(300px, 38vw, 480px);
+  min-height: 0;
+}
+
+.forecast-chart-frame .chart-area {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+}
+
+.phenology-table {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 1050px) {
+  .dashboard-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .irrigation-advice {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .tab-container {
+    display: none;
+  }
+
+  .topbar {
+    align-items: flex-start;
+  }
+
+  .topbar-title-wrap {
+    display: grid;
+    gap: 2px;
+  }
+
+  .topbar-title,
+  .topbar-farm-name {
+    max-width: calc(100vw - 82px);
+  }
+
+  .main-content {
+    padding: 14px 10px 104px;
+  }
+
+  .farm-summary-grid,
+  .summary-grid,
+  .phenology-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-row,
+  .farm-operations-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .irrigation-advice,
+  .farm-plots-panel {
+    grid-column: auto;
+  }
+
+  .weather-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .pump-row {
+    align-items: stretch;
+  }
+
+  .pump-row > * {
+    max-width: 100%;
+  }
+
+  .pump-card .status-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .pump-status-section,
+  .schedule-btn {
+    width: 100%;
+  }
+
+  .schedule-btn {
+    min-height: 44px;
+  }
+
+  .forecast-chart-frame {
+    height: 280px;
+  }
+
+  .chart-title-section {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .page-switcher .nav-item {
+    min-width: 0;
+    padding: 10px 8px;
+    font-size: .78rem;
+  }
+}
+
+@media (max-width: 390px) {
+  .summary-card,
+  .farm-summary-card,
+  .phenology-metric {
+    padding: 12px;
+  }
+
+  .summary-title,
+  .farm-summary-card span {
+    font-size: .68rem;
+  }
+
+  .summary-value {
+    font-size: 1.25rem;
+  }
+}
+
+/* Pilot farm overview */
+.connectivity-notification {
+  display: none;
+  margin: 0 16px 10px;
+  padding: 10px 14px;
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.connectivity-notification.visible { display: block; }
+
+.farm-overview { margin-bottom: 18px; }
+.dashboard-section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin: 4px 0 12px;
+}
+.dashboard-section-header h2 { margin: 0; font-size: 1.1rem; color: #111827; }
+.dashboard-section-header p { margin: 3px 0 0; font-size: 0.82rem; color: #64748b; }
+.selected-plot-header { margin-top: 20px; }
+
+.farm-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.farm-summary-card {
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 13px;
+  background: #fff;
+  display: grid;
+  gap: 8px;
+}
+.farm-summary-card span { font-size: 0.72rem; color: #64748b; text-transform: uppercase; font-weight: 700; }
+.farm-summary-card strong { color: #111827; font-size: 1.15rem; overflow-wrap: anywhere; }
+.farm-summary-card.attention strong { color: #b45309; }
+
+.farm-operations-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(220px, 1fr));
+  gap: 10px;
+}
+.farm-operations-grid > .card { min-width: 0; padding: 14px; }
+.panel-title { margin-bottom: 10px; color: #111827; font-weight: 800; }
+.farm-plot-list, .dashboard-list { display: grid; gap: 8px; }
+.farm-plot-card {
+  width: 100%;
+  min-height: 68px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid #94a3b8;
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(170px, 1.4fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+.farm-plot-card:hover, .farm-plot-card:focus-visible { background: #f8fafc; outline: 2px solid #86b978; outline-offset: 1px; }
+.farm-plot-card.urgency-critical { border-left-color: #dc2626; }
+.farm-plot-card.urgency-advise { border-left-color: #f97316; }
+.farm-plot-card.urgency-watch { border-left-color: #eab308; }
+.farm-plot-main, .farm-plot-condition { min-width: 0; display: grid; gap: 3px; }
+.farm-plot-main span, .farm-plot-condition span, .dashboard-list-item span { font-size: 0.75rem; color: #64748b; overflow-wrap: anywhere; }
+.farm-plot-meta { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; font-size: 0.7rem; color: #64748b; }
+.status-chip, .data-state { padding: 3px 7px; border-radius: 999px; background: #f1f5f9; text-transform: capitalize; }
+.status-chip.critical { background: #fee2e2; color: #991b1b; }
+.status-chip.advise { background: #ffedd5; color: #9a3412; }
+.status-chip.watch { background: #fef9c3; color: #854d0e; }
+.data-state.stale, .data-state.unavailable { background: #fff7ed; color: #9a3412; }
+.data-state.fresh { background: #dcfce7; color: #166534; }
+
+.dashboard-list-item {
+  min-height: 46px;
+  padding: 9px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.dashboard-list-item > div:first-child { min-width: 0; display: grid; gap: 3px; }
+.dashboard-list-item.alert-critical { border-left: 4px solid #dc2626; }
+.dashboard-list-item.alert-advise { border-left: 4px solid #f97316; }
+.dashboard-list-item.alert-watch { border-left: 4px solid #eab308; }
+.dashboard-empty { padding: 12px; color: #64748b; font-size: 0.82rem; text-align: center; }
+.approval-actions { display: flex; gap: 6px; }
+.approval-actions button {
+  min-height: 40px;
+  padding: 7px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+}
+.approval-actions button:first-child { background: #356c2c; border-color: #356c2c; color: #fff; }
+.weather-detail { font-size: 0.68rem; color: #64748b; }
+
+@media (max-width: 1050px) {
+  .farm-operations-grid { grid-template-columns: 1fr 1fr; }
+  .farm-plots-panel { grid-column: 1 / -1; }
+}
+
+@media (max-width: 680px) {
+  .page { padding-inline: 10px; }
+  .farm-summary-grid, .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .farm-operations-grid, .dashboard-row { grid-template-columns: 1fr; }
+  .farm-plots-panel { grid-column: auto; }
+  .farm-plot-card { grid-template-columns: 1fr; align-items: start; }
+  .farm-plot-meta { justify-content: flex-start; }
+  .weather-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-card { min-height: 94px; }
+  .dashboard-list-item { align-items: flex-start; flex-direction: column; }
+  .approval-actions { width: 100%; }
+  .approval-actions button { flex: 1; min-height: 44px; }
+  .schedule-btn, .amount-btn { min-height: 44px; }
+}
+
+@media (max-width: 380px) {
+  .farm-summary-grid, .summary-grid, .weather-grid { grid-template-columns: 1fr; }
 }
 
 .irrigation-recommendation {
