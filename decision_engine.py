@@ -64,6 +64,48 @@ class IrrigationRecommendation:
     error_message: Optional[str] = None
 
 
+def build_timestamp_forecast(
+    predictions: pd.DataFrame,
+    current_timestamp: Optional[pd.Timestamp] = None,
+) -> Dict[str, float]:
+    """Convert timestamped tension output into decision-engine horizons."""
+    if (
+        not isinstance(predictions, pd.DataFrame)
+        or predictions.empty
+        or "smoothed_values" not in predictions.columns
+    ):
+        return {}
+
+    # Preserve every model-produced timestamp so changing model cadence also
+    # changes decision horizons automatically.
+    index = pd.DatetimeIndex(predictions.index).sort_values().unique()
+    now = current_timestamp or pd.Timestamp.now(tz=index.tz)
+    if index.tz is None and now.tzinfo is not None:
+        now = now.tz_localize(None)
+    elif index.tz is not None and now.tzinfo is None:
+        now = now.tz_localize(index.tz)
+    elif index.tz is not None and now.tzinfo is not None:
+        now = now.tz_convert(index.tz)
+
+    result = {}
+    for timestamp in index[index > now]:
+        value = predictions.loc[timestamp, "smoothed_values"]
+        if isinstance(value, pd.Series):
+            value = value.iloc[-1]
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            continue
+        if not np.isfinite(value):
+            continue
+        hours = (timestamp - now).total_seconds() / 3600.0
+        label_hours = round(hours, 3)
+        label = f"{int(label_hours)}h" if label_hours.is_integer(
+        ) else f"{label_hours}h"
+        result[label] = value
+    return result
+
+
 def _error_recommendation(
     current_tension: float,
     stress_threshold: float,

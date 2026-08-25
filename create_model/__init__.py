@@ -113,18 +113,23 @@ from .prediction import (
     exponential_weights,
     generate_predictions,
     generate_predictions_nn,
-    quadratic_weights,
 )
+# Public worker/API facade for the unified application cycle.
 from .orchestration import (
+    PipelineCycleResult,
     data_pipeline,
     main,
     predict_with_updated_data,
+    run_complete_cycle,
+    run_prediction_cycle,
+    run_training_cycle,
 )
 from . import legacy
 
 
 _STATE_FLAGS = ("Currently_active", "Config", "SkipDataPreprocessing", "SkipTraining",
                 "Perform_training", "Use_subprocess", "Verbose_logging")
+
 
 def __getattr__(name):
     # Backward-compat READ access: create_model.Currently_active etc. delegate to

@@ -1,52 +1,14 @@
-"""Top-level pipelines: training run (main) and periodic re-prediction.
+"""Unified training, prediction, crop-state, and decision orchestration."""
 
-Split out of the original create_model.py - function bodies are verbatim
-(only module-flag references now go through create_model.state).
-"""
-import csv
-import ctypes
-from datetime import timedelta, datetime
-import gc
-import json
-import logging
-import os
-import pickle
-import shutil
-from dateutil import parser
-import subprocess
-import joblib
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 import pycaret
 from pycaret.regression import *
-from pycaret.internal.pipeline import Pipeline
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import sys
-import pytz
-import traceback
-import psutil
-from pathlib import Path
 
-import tensorflow
-from tensorflow.keras.models import Sequential, Model, clone_model
-from tensorflow.keras.layers import Dense, Conv1D, MaxPooling1D, Flatten, SimpleRNN, LSTM, GRU, Bidirectional, Dropout, Input, Reshape
-from tensorflow.keras.optimizers import Adam, SGD, RMSprop, get as get_optimizer
-from tensorflow.keras.callbacks import Callback, EarlyStopping
-from tensorflow.keras.backend import floatx
-import tensorflow.keras.models as keras_models
-from scikeras.wrappers import KerasRegressor
-from sklearn.model_selection import train_test_split, KFold, TimeSeriesSplit, GridSearchCV, RandomizedSearchCV
-from sklearn.preprocessing import StandardScaler
-from sklearn.impute import KNNImputer
-from scipy.interpolate import CubicSpline
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.linear_model import Ridge
-from keras_tuner import Hyperband, HyperParameters
-import time
-
-from utils import NetworkUtils, TimeUtils
-from tune_grids import PYCARET_REGRESSION_TUNE_GRIDS
-from subprocess_manager import run_tuning_and_ensemble_nn_with_subprocess, run_tuning_and_ensemble_with_subprocess, run_tuning_with_subprocess, run_ensemble_with_subprocess
+from api_contract import json_safe
+from utils import TimeUtils
 
 from . import state
 from .constants import *
@@ -54,60 +16,135 @@ from .evaluation import eval_approach_mix, evaluate_against_testset, evaluate_ag
 from .features import prepare_data, split_by_ratio
 from .nn_architectures import adapt_X_for_model
 from .nn_ensemble import EnsemblePredictor, compare_nn_ensembles
-from .nn_training import init_nn_subprocess_tuning_and_ensemble, prepare_data_for_cnn2, prepare_future_values, train_nn_models, tune_model_nn
+from .nn_training import init_nn_subprocess_tuning_and_ensemble, prepare_data_for_cnn2, prepare_future_values, save_models_nn, train_nn_models, tune_model_nn
 from .prediction import align_with_latest_sensor_values, calc_threshold, compare_train_predictions_cols, create_future_values, generate_predictions, generate_predictions_nn
-from .pycaret_models import create_and_compare_ensemble, create_and_compare_model_reg, init_pycaret_subprocess_tuning_and_ensemble, train_best, tune_models
+from .pycaret_models import create_and_compare_ensemble, create_and_compare_model_reg, init_pycaret_subprocess_tuning_and_ensemble, save_models, train_best, tune_models
 from .runtime import free_memory
 from .soil import add_volumetric_col_to_df
 
 
-def predict_with_updated_data(plot):
-# (flag now lives in state module)
+@dataclass
+class PipelineCycleResult:
+    """Complete backend result for one model, crop-state, and decision cycle."""
 
-    # Prevents multiple training or prediction at the same time
-    while state.Currently_active:
-        print(f"[{plot.user_given_name}] Waiting for resources to be released. Another training or prediction is already running.")
-        time.sleep(Resource_wait_time_seconds)
-    # Before training starts, lock the resource    
-    state.Currently_active = True
-    
+    # Stable contract consumed by the API, workers, cache, and actuator.
+    current_tension: float
+    threshold_timestamp: object
+    predictions: pd.DataFrame
+    tension_forecast: dict
+    forecast_timestamps: list
+    forecast_interval_hours: float | None
+    forecast_horizon_hours: float | None
+    stress_threshold_cbar: float | None
+    crop_state: object | None
+    recommendation: object | None
+    data_freshness: dict
+    data_sources: dict
+    model_status: str
+    inference_source: str
+    fallback_used: bool = False
+    fallback_reason: str | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict:
+        """Return JSON-oriented metadata while retaining predictions separately."""
+        crop_state = None
+        if self.crop_state is not None:
+            crop_state = asdict(self.crop_state)
+            for name in (
+                "satellite_validation",
+                "weather_data_summary",
+                "satellite_data_summary",
+            ):
+                if hasattr(self.crop_state, name):
+                    crop_state[name] = getattr(self.crop_state, name)
+
+        recommendation = None
+        if self.recommendation is not None:
+            recommendation = asdict(self.recommendation)
+            for key, value in recommendation.items():
+                if isinstance(value, (datetime, pd.Timestamp)):
+                    recommendation[key] = value.isoformat()
+
+        return json_safe({
+            "current_tension": self.current_tension,
+            "threshold_timestamp": (
+                self.threshold_timestamp.isoformat()
+                if hasattr(self.threshold_timestamp, "isoformat")
+                else self.threshold_timestamp
+            ),
+            "tension_forecast": dict(self.tension_forecast),
+            "forecast_timestamps": list(self.forecast_timestamps),
+            "forecast_interval_hours": self.forecast_interval_hours,
+            "forecast_horizon_hours": self.forecast_horizon_hours,
+            "stress_threshold_cbar": self.stress_threshold_cbar,
+            "crop_state": crop_state,
+            "recommendation": recommendation,
+            "data_freshness": dict(self.data_freshness),
+            "data_sources": dict(self.data_sources),
+            "model_status": self.model_status,
+            "inference_source": self.inference_source,
+            "fallback_used": self.fallback_used,
+            "fallback_reason": self.fallback_reason,
+            "error": self.error,
+        })
+
+
+def _predict_with_updated_data_unlocked(plot):
+    timezone_name = TimeUtils.for_plot(plot)
     # Run data pipeline to obtain latest data. training=False: reuse the scaler the frozen
     # model was trained under instead of refitting it on the newly accumulated data.
-    train, val, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = data_pipeline(plot, training=False)
+    train, val, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = data_pipeline(
+        plot, training=False)
     # Create future value set to feed new data to model
     future_features = create_future_values(plot.data, plot)
     # Compare dataframes cols to be sure that they match, otherwise drop
     future_features = compare_train_predictions_cols(train, future_features)
     # NN
     if not plot.use_pycaret:
-        Z, Z_scaled, Z_cnn = prepare_future_values(scaler, future_features, X_train.columns)
-        plot.predictions = generate_predictions_nn(plot.best_model, Z_scaled, future_features.index[0], future_features.index[-1])
+        Z, Z_scaled, Z_cnn = prepare_future_values(
+            scaler, future_features, X_train.columns)
+        plot.predictions = generate_predictions_nn(
+            plot.best_model,
+            Z_scaled,
+            future_features.index[0],
+            future_features.index[-1],
+            interval_minutes=int(
+                getattr(plot, "forecast_interval_minutes", 60)),
+        )
     else:
-        plot.predictions = generate_predictions(plot.best_model, plot.best_exp, future_features)
-    
+        plot.predictions = generate_predictions(
+            plot.best_model, plot.best_exp, future_features)
+
     # Cut passed time from predictions
     if not plot.load_data_from_csv:
-        plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.now()).replace(microsecond=0, second=0, minute=0)).tz_localize(TimeUtils.Timezone):]
-        
+        plot.predictions = plot.predictions.loc[pd.Timestamp((datetime.now()).replace(
+            microsecond=0, second=0, minute=0)).tz_localize(timezone_name):]
+
     # Align predictions with historical data
     align_with_latest_sensor_values(plot)
-    
+
     # Calculate when threshold will be meet
-    plot.threshold_timestamp = calc_threshold(plot.predictions, 'smoothed_values', plot)
+    plot.threshold_timestamp = calc_threshold(
+        plot.predictions, 'smoothed_values', plot)
 
     # Add volumetric water content
     if plot.sensor_kind == 'tension':
-        plot.predictions = add_volumetric_col_to_df(plot.predictions, "smoothed_values", plot)
+        plot.predictions = add_volumetric_col_to_df(
+            plot.predictions, "smoothed_values", plot)
 
     # Runs every 3h on the RPi: return the freed frames to the OS before idling.
     # No clear_keras - plot.best_model must stay usable for the next cycle.
     free_memory(label="prediction run")
 
-    # After finished job set active to false
-    state.Currently_active = False
-
     # Return last accumulated reading and threshold timestamp currentSoilTension, threshold_timestamp, predictions
     return plot.data['rolling_mean_grouped_soil'][-1], plot.threshold_timestamp, plot.predictions
+
+
+def predict_with_updated_data(plot):
+    """Run prediction while holding the process-wide model resource lock."""
+    with state.model_operation():
+        return _predict_with_updated_data_unlocked(plot)
 
 
 def data_pipeline(plot, training=True):
@@ -117,27 +154,22 @@ def data_pipeline(plot, training=True):
 
     # Search for gaps in data again (quick fix) => tackle problem with latest data "nan", in case of irrigations saved
     if plot.data.isna().any().any():
-        #Data.drop(Data.index[-1], inplace=True)
+        # Data.drop(Data.index[-1], inplace=True)
         plot.data.dropna(inplace=True)
 
     # Split dataset
-    train, val, test = split_by_ratio(plot.data) # here a split is done to rule out the models that are overfitting
+    # here a split is done to rule out the models that are overfitting
+    train, val, test = split_by_ratio(plot.data)
 
     # NN
-    X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = prepare_data_for_cnn2(plot, train, val, test, 'rolling_mean_grouped_soil', training=training)
+    X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler = prepare_data_for_cnn2(
+        plot, train, val, test, 'rolling_mean_grouped_soil', training=training)
 
-    return train, val, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler 
+    return train, val, test, X_train, X_val, X_test, y_train, y_val, y_test, X_train_scaled, X_val_scaled, X_test_scaled, X_train_cnn, X_val_cnn, X_test_cnn, scaler
 
 
-def main(plot) -> int:
-# (flag now lives in state module)
-
-    while state.Currently_active:
-        print(f"[{plot.user_given_name}] Waiting for resources...")
-        time.sleep(Resource_wait_time_seconds)
-
-    state.Currently_active = True
-
+def _train_model_cycle_unlocked(plot) -> int:
+    timezone_name = TimeUtils.for_plot(plot)
     print("Check version of pycaret:", pycaret.__version__, "should be >= 3.0")
     plot.config = plot.read_config()
 
@@ -145,8 +177,8 @@ def main(plot) -> int:
     # DATA PIPELINE
     # ---------------------------
     train, val, test, X_train, X_val, X_test, y_train, y_val, y_test, \
-    X_train_scaled, X_val_scaled, X_test_scaled, \
-    X_train_cnn, X_val_cnn, X_test_cnn, scaler = data_pipeline(plot)
+        X_train_scaled, X_val_scaled, X_test_scaled, \
+        X_train_cnn, X_val_cnn, X_test_cnn, scaler = data_pipeline(plot)
 
     # ---------------------------
     # TRAIN BASE MODELS (TRAIN ONLY)
@@ -188,7 +220,7 @@ def main(plot) -> int:
     )
 
     # DEBUG: Force pycaret or nn usage for testing purposes
-    #plot.use_pycaret = False
+    # plot.use_pycaret = False
 
     # ---------------------------
     # TUNING + ENSEMBLE (NO TEST!)
@@ -306,7 +338,8 @@ def main(plot) -> int:
                 validation_data=(adapt_X_for_model(m, X_monitor), y_monitor),
                 epochs=50,
                 batch_size=32,
-                callbacks=[EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)],
+                callbacks=[EarlyStopping(
+                    monitor='val_loss', patience=5, restore_best_weights=True)],
                 verbose=state.Verbose_logging
             )
 
@@ -319,7 +352,8 @@ def main(plot) -> int:
             # accuracy rather than improving it. Properly redoing this would mean rerunning the
             # K-fold OOF + meta_model fit from compare_nn_ensembles on the combined data, which
             # isn't exposed here. Leave the already-validly-trained stacking ensemble as-is instead.
-            print("[INFO] Skipping train+val refit for stacking ensemble (would decalibrate meta_model).")
+            print(
+                "[INFO] Skipping train+val refit for stacking ensemble (would decalibrate meta_model).")
 
         elif isinstance(plot.best_model, EnsemblePredictor):
             # average/bagging have no meta-model calibration to invalidate - refitting each
@@ -353,6 +387,31 @@ def main(plot) -> int:
             y_test
         )
 
+    # Persist the exact final model used for inference. Publishing the manifest
+    # retains the previous generation as an explicit rollback target.
+    # Every promotion gets immutable filenames so the manifest's previous
+    # generation remains usable after a later training run.
+    generation_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    final_prefix = (
+        f"models/{plot.user_given_name}/generations/{generation_id}/"
+    )
+    if plot.use_pycaret:
+        model_artifacts = save_models(
+            plot.user_given_name,
+            plot.best_exp,
+            plot.best_model,
+            final_prefix + "soil_tension_prediction_",
+        )
+    else:
+        model_artifacts = save_models_nn(
+            plot.user_given_name,
+            plot.best_model,
+            final_prefix + "soil_tension_prediction_",
+        )
+    if not model_artifacts:
+        raise RuntimeError("Final model could not be persisted safely")
+    plot.model_artifacts = model_artifacts
+
     # ---------------------------
     # FUTURE PREDICTIONS
     # ---------------------------
@@ -378,7 +437,9 @@ def main(plot) -> int:
             plot.best_model,
             Z_scaled,
             future_features.index[0],
-            future_features.index[-1]
+            future_features.index[-1],
+            interval_minutes=int(
+                getattr(plot, "forecast_interval_minutes", 60)),
         )
 
     plot.predictions = preds
@@ -389,13 +450,14 @@ def main(plot) -> int:
 
     # Ensure the index of plot.predictions is datetime with the same timezone
     if plot.predictions.index.tz is None:
-        #plot.predictions.index = pd.to_datetime(plot.predictions.index).tz_localize('UTC').tz_convert(TimeUtils.Timezone)
-        plot.predictions.index = pd.to_datetime(plot.predictions.index).tz_localize(TimeUtils.Timezone)
+        plot.predictions.index = pd.to_datetime(
+            plot.predictions.index).tz_localize(timezone_name)
     else:
-        plot.predictions.index = plot.predictions.index.tz_convert(TimeUtils.Timezone)
+        plot.predictions.index = plot.predictions.index.tz_convert(
+            timezone_name)
 
     # Create a Timestamp from the current date and time (without microseconds, seconds, and minutes)
-    current_time = pd.Timestamp.now(tz=TimeUtils.Timezone).floor('H')
+    current_time = pd.Timestamp.now(tz=timezone_name).floor('H')
 
     # Now, slice the predictions DataFrame based on the timestamp
     # Cut passed time from predictions
@@ -404,20 +466,174 @@ def main(plot) -> int:
 
     # Align predictions with historical data -> TODO: dodgy fix, only trigger in case of bad performance? DEBUG
     align_with_latest_sensor_values(plot)
-    #plot.predictions['smoothed_values'] = plot.predictions['prediction_label']
+    # plot.predictions['smoothed_values'] = plot.predictions['prediction_label']
 
     # Calculate when threshold will be meet
-    plot.threshold_timestamp = calc_threshold(plot.predictions, 'smoothed_values', plot)
+    plot.threshold_timestamp = calc_threshold(
+        plot.predictions, 'smoothed_values', plot)
 
     # Add volumetric water content
     if plot.sensor_kind == 'tension':
-        plot.predictions = add_volumetric_col_to_df(plot.predictions, "smoothed_values", plot)
-
-    # After finished job set active to false
-    state.Currently_active = False
+        plot.predictions = add_volumetric_col_to_df(
+            plot.predictions, "smoothed_values", plot)
 
     return (
         plot.data['rolling_mean_grouped_soil'][-1],
         plot.threshold_timestamp,
         plot.predictions
     )
+
+
+def main(plot) -> int:
+    """Train and forecast while holding the process-wide model resource lock."""
+    with state.model_operation():
+        return _train_model_cycle_unlocked(plot)
+
+
+def _build_tension_forecast(predictions: pd.DataFrame) -> dict:
+    """Convert timestamped model output into decision-engine horizon labels."""
+    from decision_engine import build_timestamp_forecast
+
+    return build_timestamp_forecast(predictions)
+
+
+def _build_forecast_metadata(predictions: pd.DataFrame) -> tuple:
+    """Return forecast values plus explicit timestamps, cadence, and horizon."""
+    forecast = _build_tension_forecast(predictions)
+    if not isinstance(predictions, pd.DataFrame) or predictions.empty:
+        return forecast, [], None, None
+
+    index = pd.DatetimeIndex(predictions.index).sort_values().unique()
+    now = pd.Timestamp.now(
+        tz=index.tz) if index.tz is not None else pd.Timestamp.now()
+    future = index[index > now]
+    timestamps = [timestamp.isoformat() for timestamp in future]
+    if len(future) == 0:
+        return forecast, timestamps, None, None
+
+    horizon_hours = (future[-1] - now).total_seconds() / 3600.0
+    interval_hours = None
+    if len(future) > 1:
+        deltas = pd.Series(future[1:] - future[:-1])
+        interval_hours = round(
+            float(deltas.dt.total_seconds().median() / 3600.0), 3)
+    return (
+        forecast,
+        timestamps,
+        interval_hours,
+        round(max(0.0, horizon_hours), 3),
+    )
+
+
+def _runtime_metadata(runtime_state) -> tuple:
+    """Flatten runtime-state freshness and source details for the API contract."""
+    if runtime_state is None:
+        return {}, {}
+    freshness = {
+        "weather_age_hours": getattr(runtime_state, "weather_data_age_hours", None),
+        "satellite_age_hours": getattr(runtime_state, "sat_data_age_hours", None),
+        "satellite_ndvi_age_hours": getattr(runtime_state, "sat_ndvi_age_hours", None),
+    }
+    sources = {
+        "soil_tension": "plot sensor/model",
+        "weather": getattr(runtime_state, "weather_provider", "unknown"),
+        "satellite": getattr(runtime_state, "satellite_provider", "unavailable"),
+    }
+    return freshness, sources
+
+
+def run_complete_cycle(plot, training: bool = False) -> PipelineCycleResult:
+    """Run model inference, crop-state computation, and decision evaluation."""
+    import actuation
+    from decision_engine import evaluate_forecast
+
+    # Weather/satellite phenology is resolved first so one stage-aware threshold
+    # is used consistently by prediction interpretation and the decision engine.
+    runtime_state = actuation.get_runtime_crop_state(plot)
+    if runtime_state is not None:
+        plot.threshold = float(runtime_state.stress_threshold_cbar)
+
+    try:
+        model_result = main(
+            plot) if training else predict_with_updated_data(plot)
+        current_tension, threshold_timestamp, predictions = model_result
+        (
+            forecast,
+            forecast_timestamps,
+            forecast_interval_hours,
+            forecast_horizon_hours,
+        ) = _build_forecast_metadata(predictions)
+        data_freshness, data_sources = _runtime_metadata(runtime_state)
+        threshold = (
+            float(runtime_state.stress_threshold_cbar)
+            if runtime_state is not None
+            else float(getattr(plot, "threshold", 0.0))
+        )
+        # Decision horizons come from the model timestamps built above
+        recommendation = evaluate_forecast(
+            current_tension=float(current_tension),
+            tension_forecast=forecast,
+            stress_threshold=threshold,
+            current_timestamp=pd.Timestamp.now().to_pydatetime(),
+            advise_horizon_hours=float(
+                getattr(plot, "look_ahead_time", 24) or 24),
+            watch_horizon_hours=float(
+                getattr(plot, "watch_horizon_time", 72) or 72),
+        )
+        result = PipelineCycleResult(
+            current_tension=float(current_tension),
+            threshold_timestamp=threshold_timestamp,
+            predictions=predictions,
+            tension_forecast=forecast,
+            forecast_timestamps=forecast_timestamps,
+            forecast_interval_hours=forecast_interval_hours,
+            forecast_horizon_hours=forecast_horizon_hours,
+            stress_threshold_cbar=threshold,
+            crop_state=runtime_state,
+            recommendation=recommendation,
+            data_freshness=data_freshness,
+            data_sources=data_sources,
+            model_status="trained" if training else "prediction_only",
+            inference_source=getattr(plot, "_inference_source", "live"),
+        )
+    except Exception as exc:
+        # Keep a structured failure available to the API before retrying.
+        result = PipelineCycleResult(
+            current_tension=float(getattr(plot, "threshold", 0.0)),
+            threshold_timestamp=getattr(plot, "threshold_timestamp", ""),
+            predictions=getattr(plot, "predictions", pd.DataFrame()),
+            tension_forecast={},
+            forecast_timestamps=[],
+            forecast_interval_hours=None,
+            forecast_horizon_hours=None,
+            stress_threshold_cbar=(
+                float(runtime_state.stress_threshold_cbar)
+                if runtime_state is not None else None
+            ),
+            crop_state=runtime_state,
+            recommendation=None,
+            data_freshness={},
+            data_sources={},
+            model_status="failed",
+            inference_source=getattr(plot, "_inference_source", "error"),
+            fallback_used=False,
+            fallback_reason=None,
+            error=str(exc),
+        )
+        plot.pipeline_result = result
+        raise
+
+    plot.pipeline_result = result
+    return result
+
+
+def run_training_cycle(plot):
+    """Run the complete model training and prediction cycle for one plot."""
+    result = run_complete_cycle(plot, training=True)
+    return result.current_tension, result.threshold_timestamp, result.predictions
+
+
+def run_prediction_cycle(plot):
+    """Run the prediction-only cycle using the plot's loaded model state."""
+    result = run_complete_cycle(plot, training=False)
+    return result.current_tension, result.threshold_timestamp, result.predictions
