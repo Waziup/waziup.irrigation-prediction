@@ -68,6 +68,10 @@ class PredictionThread(threading.Thread):
                     f"Prediction cycle started for {self.currentPlot.user_given_name} at: {start_time}")
 
                 cycle = self.run_cycle()
+                # A completed cycle does not override cancellation requested
+                # while inference was running.
+                if self.stop_event.is_set():
+                    break
                 if cycle is None:
                     print(
                         f"[{self.currentPlot.user_given_name}] No usable cached prediction "

@@ -2,18 +2,49 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
+import hashlib
+import hmac
 import pickle
+import math
+import os
 
 
 # Increment whenever the persisted payload shape changes.
-CACHE_VERSION = 2
+CACHE_VERSION = 4
 
 
-def cache_path(plot_id, root="data/cache") -> Path:
-    return Path(root) / f"saved_variables_plot_{plot_id}.pkl"
+def _signature_path(path: Path) -> Path:
+    return path.with_suffix(f"{path.suffix}.sig")
 
 
-def save_cycle(plot, current_tension, threshold_timestamp, predictions, result=None, root="data/cache") -> Path:
+def _signing_key(path: Path, create: bool) -> bytes | None:
+    configured = os.getenv("IRRIGATION_CACHE_SIGNING_KEY", "")
+    if configured:
+        return configured.encode("utf-8")
+    key_path = path.parent / ".cache_hmac_key"
+    try:
+        return key_path.read_bytes()
+    except FileNotFoundError:
+        if not create:
+            return None
+    key = os.urandom(32)
+    temporary = key_path.with_suffix(".tmp")
+    temporary.write_bytes(key)
+    os.chmod(temporary, 0o600)
+    temporary.replace(key_path)
+    return key
+
+
+def _signature(data: bytes, key: bytes) -> str:
+    return hmac.new(key, data, hashlib.sha256).hexdigest()
+
+
+def cache_path(plot_id, root=None) -> Path:
+    cache_root = root or os.getenv("IRRIGATION_CACHE_DIR", "data/cache")
+    return Path(cache_root) / f"saved_variables_plot_{plot_id}.pkl"
+
+
+def save_cycle(plot, current_tension, threshold_timestamp, predictions, result=None, root=None) -> Path:
     """Atomically save the worker-compatible and unified cycle payload."""
     path = cache_path(plot.id, root)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -26,21 +57,36 @@ def save_cycle(plot, current_tension, threshold_timestamp, predictions, result=N
         "pipeline_result": result if result is not None else getattr(plot, "pipeline_result", None),
     }
     temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+    serialized = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
+    key = _signing_key(path, create=True)
+    signature_path = _signature_path(path)
+    temporary_signature = signature_path.with_suffix(
+        f"{signature_path.suffix}.tmp")
     with temporary_path.open("wb") as handle:
-        pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        handle.write(serialized)
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary_signature.write_text(
+        _signature(serialized, key), encoding="ascii")
     # Publish only a fully written payload.
     temporary_path.replace(path)
+    temporary_signature.replace(signature_path)
     return path
 
 
-def load_cycle(plot_id, root="data/cache"):
+def load_cycle(plot_id, root=None):
     """Load and validate a cache payload, returning (payload, reason)."""
     path = cache_path(plot_id, root)
     if not path.is_file():
         return None, "missing"
     try:
-        with path.open("rb") as handle:
-            payload = pickle.load(handle)
+        serialized = path.read_bytes()
+        key = _signing_key(path, create=False)
+        signature = _signature_path(path).read_text(encoding="ascii").strip()
+        if key is None or not hmac.compare_digest(
+                signature, _signature(serialized, key)):
+            return None, "invalid"
+        payload = pickle.loads(serialized)
     except (OSError, EOFError, KeyError, TypeError, ValueError, pickle.UnpicklingError):
         return None, "invalid"
     if not isinstance(payload, dict) or payload.get("cache_version") != CACHE_VERSION:
@@ -65,8 +111,11 @@ def cache_age_hours(payload, now=None):
         if saved_at.tzinfo is None:
             saved_at = saved_at.replace(tzinfo=timezone.utc)
         current = now or datetime.now(timezone.utc)
-        return max(0.0, (current - saved_at.astimezone(timezone.utc)).total_seconds() / 3600.0)
-    except (KeyError, TypeError, ValueError):
+        age = (current - saved_at.astimezone(timezone.utc)).total_seconds() / 3600.0
+        # A future save time is not fresh evidence. This also rejects invalid
+        # reference clocks instead of letting NaN bypass the expiry comparison.
+        return age if math.isfinite(age) and age >= 0 else None
+    except (KeyError, TypeError, ValueError, OverflowError):
         return None
 
 

@@ -55,7 +55,7 @@ from .constants import *
 # VWC with splines scale
 def soil_tension_to_volumetric_water_content_spline(soil_tension, soil_water_retention_curve):
     """
-    Convert soil tension (kPa) to volumetric water content (fraction) using cubic spline interpolation.
+    Convert soil tension (kPa) to VWC using monotonic log-tension interpolation.
     
     Parameters:
         soil_tension (float): Soil tension value in kPa.
@@ -65,17 +65,17 @@ def soil_tension_to_volumetric_water_content_spline(soil_tension, soil_water_ret
     Returns:
         float: Volumetric water content as a fraction (between 0 and 1).
     """
-    # Extract tension and water content values from the curve
-    tensions, water_contents = zip(*soil_water_retention_curve)
-    
-    # Create a cubic spline interpolator
-    spline = CubicSpline(tensions, water_contents, bc_type='natural')
-
-    # Evaluate the spline at the given soil tension
-    interpolated_water_content = spline(soil_tension)
-    
-    # Clip the result to ensure it remains within the valid range [0, 1]
-    return np.clip(interpolated_water_content, 0, 1)
+    # Keep the public name for callers, but use the same monotonic log-tension
+    # interpolation as crop_model. Outside the measured range, report unknown
+    # rather than extrapolating an unsupported water content.
+    from crop_model import _retention_curve_points
+    tensions, water_contents = _retention_curve_points(soil_water_retention_curve)
+    values = np.asarray(soil_tension, dtype=float)
+    valid = np.isfinite(values) & (values >= tensions[0]) & (values <= tensions[-1])
+    result = np.interp(np.log1p(np.maximum(values, 0)),
+                       np.log1p(tensions), water_contents)
+    result = np.where(valid, result, np.nan)
+    return float(result) if result.ndim == 0 else result
 
 
 def add_volumetric_col_to_df(df, col_name, plot):

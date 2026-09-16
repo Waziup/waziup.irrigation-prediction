@@ -57,6 +57,12 @@ def _fetch_model_window(start, end, plot):
             f"{start_local.isoformat()}..{end_local.isoformat()}"
         )
 
+    # The shared provider includes a compatibility Timestamp column for API
+    # consumers, but the model contract stores time only in its named index.
+    # Keeping both makes later reset_index() calls fail with
+    # "cannot insert Timestamp, already exists".
+    frame = frame.drop(columns=["Timestamp"], errors="ignore")
+
     for column in LEGACY_WEATHER_COLUMNS:
         if column in frame.columns:
             frame[column] = pd.to_numeric(frame[column], errors="coerce")

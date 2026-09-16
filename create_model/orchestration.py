@@ -1,14 +1,19 @@
 """Unified training, prediction, crop-state, and decision orchestration."""
 
+from __future__ import annotations
+
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import os
 import pycaret
 from pycaret.regression import *
 import pandas as pd
 import numpy as np
+from tensorflow.keras.callbacks import EarlyStopping
 
 from api_contract import json_safe
 from utils import TimeUtils
+from sensor_quality import evaluate_tension_sensor_safety
 
 from . import state
 from .constants import *
@@ -36,12 +41,16 @@ class PipelineCycleResult:
     forecast_interval_hours: float | None
     forecast_horizon_hours: float | None
     stress_threshold_cbar: float | None
+    stress_threshold_forecast: dict
+    stress_threshold_timestamps: dict
     crop_state: object | None
     recommendation: object | None
     data_freshness: dict
     data_sources: dict
     model_status: str
     inference_source: str
+    calculated_at: str | None = None
+    previous_calculated_at: str | None = None
     fallback_used: bool = False
     fallback_reason: str | None = None
     error: str | None = None
@@ -78,12 +87,16 @@ class PipelineCycleResult:
             "forecast_interval_hours": self.forecast_interval_hours,
             "forecast_horizon_hours": self.forecast_horizon_hours,
             "stress_threshold_cbar": self.stress_threshold_cbar,
+            "stress_threshold_forecast": dict(self.stress_threshold_forecast),
+            "stress_threshold_timestamps": dict(self.stress_threshold_timestamps),
             "crop_state": crop_state,
             "recommendation": recommendation,
             "data_freshness": dict(self.data_freshness),
             "data_sources": dict(self.data_sources),
             "model_status": self.model_status,
             "inference_source": self.inference_source,
+            "calculated_at": self.calculated_at,
+            "previous_calculated_at": self.previous_calculated_at,
             "fallback_used": self.fallback_used,
             "fallback_reason": self.fallback_reason,
             "error": self.error,
@@ -214,7 +227,7 @@ def _train_model_cycle_unlocked(plot) -> int:
     # ---------------------------
     # MODEL SELECTION (VALIDATION ONLY)
     # ---------------------------
-    index, plot.use_pycaret = eval_approach_mix(
+    _, plot.use_pycaret = eval_approach_mix(
         results_pycaret,
         results_nn
     )
@@ -232,7 +245,10 @@ def _train_model_cycle_unlocked(plot) -> int:
         free_memory(clear_keras=True, label="discarding NN branch")
 
         # only use best 3 models for tuning and ensemble creation
-        best_pycaret = best_pycaret[:3]
+        best_pycaret = evaluate_results_and_choose_top_n(
+            results_pycaret, best_pycaret, 3, pycaret_format=True)
+        if not best_pycaret:
+            raise ValueError("No successfully evaluated classical candidates")
         if state.Use_subprocess:
             plot.best_model = init_pycaret_subprocess_tuning_and_ensemble(
                 plot.user_given_name,
@@ -490,22 +506,35 @@ def main(plot) -> int:
         return _train_model_cycle_unlocked(plot)
 
 
-def _build_tension_forecast(predictions: pd.DataFrame) -> dict:
+def _build_tension_forecast(
+    predictions: pd.DataFrame,
+    current_timestamp=None,
+) -> dict:
     """Convert timestamped model output into decision-engine horizon labels."""
     from decision_engine import build_timestamp_forecast
 
-    return build_timestamp_forecast(predictions)
+    return build_timestamp_forecast(predictions, current_timestamp)
 
 
-def _build_forecast_metadata(predictions: pd.DataFrame) -> tuple:
+def _build_forecast_metadata(
+    predictions: pd.DataFrame,
+    current_timestamp=None,
+) -> tuple:
     """Return forecast values plus explicit timestamps, cadence, and horizon."""
-    forecast = _build_tension_forecast(predictions)
+    forecast = _build_tension_forecast(predictions, current_timestamp)
     if not isinstance(predictions, pd.DataFrame) or predictions.empty:
         return forecast, [], None, None
 
     index = pd.DatetimeIndex(predictions.index).sort_values().unique()
-    now = pd.Timestamp.now(
-        tz=index.tz) if index.tz is not None else pd.Timestamp.now()
+    now = pd.Timestamp(current_timestamp) if current_timestamp is not None else (
+        pd.Timestamp.now(tz=index.tz)
+        if index.tz is not None else pd.Timestamp.now())
+    if index.tz is None and now.tzinfo is not None:
+        now = now.tz_localize(None)
+    elif index.tz is not None and now.tzinfo is None:
+        now = now.tz_localize(index.tz)
+    elif index.tz is not None and now.tzinfo is not None:
+        now = now.tz_convert(index.tz)
     future = index[index > now]
     timestamps = [timestamp.isoformat() for timestamp in future]
     if len(future) == 0:
@@ -525,19 +554,30 @@ def _build_forecast_metadata(predictions: pd.DataFrame) -> tuple:
     )
 
 
-def _runtime_metadata(runtime_state) -> tuple:
+def _runtime_metadata(runtime_state, plot=None, current_tension=None) -> tuple:
     """Flatten runtime-state freshness and source details for the API contract."""
-    if runtime_state is None:
-        return {}, {}
     freshness = {
         "weather_age_hours": getattr(runtime_state, "weather_data_age_hours", None),
         "satellite_age_hours": getattr(runtime_state, "sat_data_age_hours", None),
         "satellite_ndvi_age_hours": getattr(runtime_state, "sat_ndvi_age_hours", None),
     }
+    if plot is not None:
+        sensor_quality = evaluate_tension_sensor_safety(
+            plot, current_value=current_tension)
+        freshness["soil_tension_age_hours"] = sensor_quality.get(
+            "latest_age_hours")
+        freshness["soil_tension_safe_for_automatic"] = sensor_quality.get(
+            "safe_for_automatic", False)
+        freshness["soil_tension_quality"] = sensor_quality
     sources = {
         "soil_tension": "plot sensor/model",
         "weather": getattr(runtime_state, "weather_provider", "unknown"),
         "satellite": getattr(runtime_state, "satellite_provider", "unavailable"),
+        "crop_state": (
+            "configured"
+            if runtime_state is not None
+            else getattr(plot, "runtime_crop_state_error", "unavailable")
+        ),
     }
     return freshness, sources
 
@@ -545,10 +585,22 @@ def _runtime_metadata(runtime_state) -> tuple:
 def run_complete_cycle(plot, training: bool = False) -> PipelineCycleResult:
     """Run model inference, crop-state computation, and decision evaluation."""
     import actuation
-    from decision_engine import evaluate_forecast
+    from crop_model import build_forecast_thresholds
+    from decision_engine import (
+        error_recommendation,
+        evaluate_forecast,
+        inactive_season_recommendation,
+    )
 
-    # Weather/satellite phenology is resolved first so one stage-aware threshold
-    # is used consistently by prediction interpretation and the decision engine.
+    previous_result = getattr(plot, "pipeline_result", None)
+    if isinstance(previous_result, dict):
+        previous_calculated_at = previous_result.get("calculated_at")
+    else:
+        previous_calculated_at = getattr(
+            previous_result, "calculated_at", None)
+
+    # Resolve the current crop state first; forecast thresholds are then
+    # projected independently at every model horizon.
     runtime_state = actuation.get_runtime_crop_state(plot)
     if runtime_state is not None:
         plot.threshold = float(runtime_state.stress_threshold_cbar)
@@ -557,29 +609,133 @@ def run_complete_cycle(plot, training: bool = False) -> PipelineCycleResult:
         model_result = main(
             plot) if training else predict_with_updated_data(plot)
         current_tension, threshold_timestamp, predictions = model_result
+        decision_now = pd.Timestamp.now(tz="UTC")
         (
             forecast,
             forecast_timestamps,
             forecast_interval_hours,
             forecast_horizon_hours,
-        ) = _build_forecast_metadata(predictions)
-        data_freshness, data_sources = _runtime_metadata(runtime_state)
+        ) = _build_forecast_metadata(predictions, decision_now)
+        data_freshness, data_sources = _runtime_metadata(
+            runtime_state, plot, current_tension)
         threshold = (
             float(runtime_state.stress_threshold_cbar)
             if runtime_state is not None
             else float(getattr(plot, "threshold", 0.0))
         )
-        # Decision horizons come from the model timestamps built above
-        recommendation = evaluate_forecast(
-            current_tension=float(current_tension),
-            tension_forecast=forecast,
-            stress_threshold=threshold,
-            current_timestamp=pd.Timestamp.now().to_pydatetime(),
-            advise_horizon_hours=float(
-                getattr(plot, "look_ahead_time", 24) or 24),
-            watch_horizon_hours=float(
-                getattr(plot, "watch_horizon_time", 72) or 72),
+        threshold_forecast = {}
+        threshold_timestamps = {}
+        threshold_forecast_error = None
+        if runtime_state is not None and getattr(
+                runtime_state, "season_active", True):
+            try:
+                forecast_farm = actuation._build_runtime_farm_config(plot)
+                forecast_farm.planting_date = getattr(
+                    runtime_state, "phenology_reference_date", None
+                ) or getattr(plot, "planting_date", "")
+                threshold_forecast = build_forecast_thresholds(
+                    forecast_farm,
+                    runtime_state.gdd_cumulative,
+                    forecast,
+                    getattr(runtime_state, "weather_forecast_frame", None),
+                    decision_now,
+                )
+                ordered_labels = sorted(
+                    threshold_forecast,
+                    key=lambda label: float(str(label).lower().removesuffix("h")),
+                )
+                available_timestamps = [
+                    pd.Timestamp(value) for value in forecast_timestamps]
+                threshold_timestamps = {}
+                for label in ordered_labels:
+                    target = decision_now + pd.Timedelta(hours=float(
+                        str(label).lower().removesuffix("h")))
+                    if available_timestamps:
+                        distances = []
+                        for value in available_timestamps:
+                            comparable_target = target
+                            if value.tzinfo is None:
+                                comparable_target = target.tz_localize(None)
+                            elif comparable_target.tzinfo is None:
+                                comparable_target = comparable_target.tz_localize(
+                                    value.tzinfo)
+                            else:
+                                comparable_target = comparable_target.tz_convert(
+                                    value.tzinfo)
+                            distances.append(abs(
+                                (value - comparable_target).total_seconds()))
+                        timestamp = available_timestamps[int(np.argmin(distances))]
+                        threshold_timestamps[timestamp.isoformat()] = (
+                            threshold_forecast[label])
+            except (TypeError, ValueError) as exc:
+                threshold_forecast_error = str(exc)
+        sensor_quality = data_freshness.get("soil_tension_quality", {})
+        if runtime_state is None:
+            recommendation = error_recommendation(
+                current_tension=float(current_tension),
+                tension_forecast=forecast,
+                stress_threshold=threshold,
+                message=(
+                    "The tension forecast is available, but crop-specific "
+                    "irrigation advice is disabled because crop state or "
+                    "threshold calibration is unavailable: "
+                    + str(getattr(
+                        plot, "runtime_crop_state_error", "unavailable"))
+                ),
+            )
+        elif not getattr(runtime_state, "season_active", True):
+            recommendation = inactive_season_recommendation(
+                current_tension=float(current_tension),
+                tension_forecast=forecast,
+                stress_threshold=threshold,
+                message=(
+                    "Irrigation recommendations are disabled because the crop "
+                    "season is inactive: "
+                    + str(getattr(
+                        runtime_state, "season_end_reason", "outside_season"))
+                ),
+            )
+        elif threshold_forecast_error is not None:
+            recommendation = error_recommendation(
+                current_tension=float(current_tension),
+                tension_forecast=forecast,
+                stress_threshold=threshold,
+                message=(
+                    "Dynamic forecast thresholds are unavailable: "
+                    + threshold_forecast_error
+                ),
+            )
+        elif sensor_quality.get("safe_for_advisory", False):
+            # Decision horizons come from the model timestamps built above.
+            recommendation = evaluate_forecast(
+                current_tension=float(current_tension),
+                tension_forecast=forecast,
+                stress_threshold=threshold,
+                stress_thresholds=threshold_forecast,
+                current_timestamp=decision_now.to_pydatetime(),
+                advise_horizon_hours=float(
+                    getattr(plot, "look_ahead_time", 24) or 24),
+                watch_horizon_hours=float(
+                    getattr(plot, "watch_horizon_time", 72) or 72),
+            )
+        else:
+            reasons = sensor_quality.get("advisory_reasons") or [
+                "soil_tension_evidence_unavailable"]
+            recommendation = error_recommendation(
+                current_tension=float(current_tension),
+                tension_forecast=forecast,
+                stress_threshold=threshold,
+                message=(
+                    "No irrigation alert was evaluated because current raw "
+                    "soil-tension evidence is unsafe for advisory use: "
+                    + ", ".join(reasons)
+                ),
+            )
+        threshold_timestamp = (
+            recommendation.first_breach_timestamp
+            if recommendation.first_breach_timestamp is not None else False
         )
+        plot.threshold_timestamp = threshold_timestamp
         result = PipelineCycleResult(
             current_tension=float(current_tension),
             threshold_timestamp=threshold_timestamp,
@@ -589,12 +745,16 @@ def run_complete_cycle(plot, training: bool = False) -> PipelineCycleResult:
             forecast_interval_hours=forecast_interval_hours,
             forecast_horizon_hours=forecast_horizon_hours,
             stress_threshold_cbar=threshold,
+            stress_threshold_forecast=threshold_forecast,
+            stress_threshold_timestamps=threshold_timestamps,
             crop_state=runtime_state,
             recommendation=recommendation,
             data_freshness=data_freshness,
             data_sources=data_sources,
             model_status="trained" if training else "prediction_only",
             inference_source=getattr(plot, "_inference_source", "live"),
+            calculated_at=decision_now.isoformat(),
+            previous_calculated_at=previous_calculated_at,
         )
     except Exception as exc:
         # Keep a structured failure available to the API before retrying.
@@ -610,12 +770,21 @@ def run_complete_cycle(plot, training: bool = False) -> PipelineCycleResult:
                 float(runtime_state.stress_threshold_cbar)
                 if runtime_state is not None else None
             ),
+            stress_threshold_forecast={},
+            stress_threshold_timestamps={},
             crop_state=runtime_state,
             recommendation=None,
             data_freshness={},
             data_sources={},
             model_status="failed",
             inference_source=getattr(plot, "_inference_source", "error"),
+            # A failed cycle does not advance the water-calculation checkpoint.
+            calculated_at=previous_calculated_at,
+            previous_calculated_at=(
+                previous_result.get("previous_calculated_at")
+                if isinstance(previous_result, dict)
+                else getattr(previous_result, "previous_calculated_at", None)
+            ),
             fallback_used=False,
             fallback_reason=None,
             error=str(exc),

@@ -90,7 +90,8 @@ class EnsemblePredictor:
             if self.method == "average":
                 return np.mean(preds, axis=1, keepdims=True)
             elif self.method == "bagging":
-                return np.median(preds, axis=1, keepdims=True)
+                # Match the mean used to score bagged members during selection.
+                return np.mean(preds, axis=1, keepdims=True)
 
 
 # create and compare different nn ensemble techniques

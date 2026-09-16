@@ -83,8 +83,17 @@ class TrainingThread(threading.Thread):
                       "started at:", start_time)
 
                 cycle = self.run_cycle()
+                # stop() may have arrived while the model cycle was running.
+                # Do not publish its result or start downstream work afterward.
+                if self.stop_event.is_set():
+                    self.currentPlot.training_finished = False
+                    break
                 if cycle is None:
                     self.currentPlot.training_finished = False
+                    actuation._trace_event(
+                        "training.unavailable", self.currentPlot,
+                        reason=self.currentPlot.pipeline_cache_reason,
+                    )
                     print(
                         f"[{self.currentPlot.user_given_name}] No usable cached training result "
                         f"({self.currentPlot.pipeline_cache_reason}); stopping training thread."
@@ -104,6 +113,16 @@ class TrainingThread(threading.Thread):
 
                 end_time = datetime.now().replace(microsecond=0)
                 duration = end_time - start_time
+                prediction_points = (
+                    len(self.currentPlot.predictions)
+                    if self.currentPlot.predictions is not None else 0
+                )
+                actuation._trace_event(
+                    "training.completed", self.currentPlot,
+                    duration_seconds=duration.total_seconds(),
+                    prediction_points=prediction_points,
+                    threshold_timestamp=self.currentPlot.threshold_timestamp,
+                )
                 print("Training finished for plot: " + self.currentPlot.user_given_name +
                       ", at: ", end_time, "Duration:", duration)
 
@@ -128,6 +147,8 @@ class TrainingThread(threading.Thread):
                 self.currentPlot.training_finished = False
                 self.currentPlot.pipeline_cache_status = "error"
                 self.currentPlot.pipeline_cache_reason = str(e)
+                actuation._trace_event(
+                    "training.failed", self.currentPlot, error=str(e))
                 print(
                     f"[{self.currentPlot.user_given_name}] Training thread error: {e}. "
                     f"Retrying after {runtime_config.get_timing_config(self.currentPlot).error_retry_seconds / 60} minutes.")
@@ -159,6 +180,8 @@ def start(currentPlot):
     # Reset flags
     currentPlot.training_finished = False
     currentPlot.currently_training = True
+    currentPlot.pipeline_cache_status = "running"
+    currentPlot.pipeline_cache_reason = None
 
     # Create and start a new training process
     currentPlot.training_thread = TrainingThread(

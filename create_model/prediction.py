@@ -7,6 +7,7 @@ from .constants import *
 from .features import Weather_derived_feature_cols, add_weather_derived_features
 from .nn_architectures import adapt_X_for_model, safe_model_name
 from .weather import get_weather_forecast_api, only_get_historical_weather_api
+from weather_quality import deduplicate_weather_frame
 
 
 # Create future value testset for prediction
@@ -20,11 +21,23 @@ def create_future_values(data, plot):
     # to orchestration and the decision engine.
     horizon_days = float(
         getattr(plot, "forecast_horizon_days", Forecast_horizon))
-    interval_minutes = int(
+    interval_minutes = float(
         getattr(plot, "forecast_interval_minutes", Sample_rate))
-    if horizon_days <= 0 or interval_minutes <= 0:
+    if (not np.isfinite(horizon_days) or not np.isfinite(interval_minutes)
+            or horizon_days <= 0 or interval_minutes <= 0):
         raise ValueError(
             "forecast_horizon_days and forecast_interval_minutes must be positive")
+    # Training resampling and antecedent feature windows use Sample_rate.
+    # Until interval-total resampling is defined end-to-end, do not interpolate
+    # Rain/ET0 or silently change the temporal meaning of trained inputs.
+    if interval_minutes != Sample_rate:
+        raise ValueError("Forecast cadence must match the training sample rate")
+    interval_minutes = int(interval_minutes)
+    if (not isinstance(data.index, pd.DatetimeIndex) or data.index.hasnans
+            or not data.index.is_unique or not data.index.is_monotonic_increasing
+            or not (data.index.to_series().diff().dropna()
+                    == pd.Timedelta(minutes=interval_minutes)).all()):
+        raise ValueError("Training history must have a regular training cadence")
     end = train_end + pd.Timedelta(days=horizon_days)
     print("end after adding: ", end, "\n")
     all_dates = pd.date_range(start=train_end, end=end,
@@ -38,14 +51,26 @@ def create_future_values(data, plot):
     else:
         data_weather_api_cut = get_weather_forecast_api(
             train_end, end, plot, data)
-    data_weather_api_cut.rename_axis('Timestamp', inplace=True)
+    if not isinstance(data_weather_api_cut.index, pd.DatetimeIndex):
+        raise ValueError("Forecast weather requires a datetime index")
+    data_weather_api_cut = deduplicate_weather_frame(data_weather_api_cut)
+    in_window = data_weather_api_cut.loc[
+        (data_weather_api_cut.index >= train_end)
+        & (data_weather_api_cut.index <= end)]
+    if not in_window.index.isin(all_dates).all():
+        raise ValueError("Weather cadence must match the model timestamp grid")
 
     # Create features and merge data from weather API
-    new_data = (pd.DataFrame())
-
-    # weather forecast
-    new_data.index = all_dates
-    new_data = pd.concat([new_data, data_weather_api_cut], axis=1)
+    # Keep precisely the model grid, never the union with off-grid provider rows.
+    new_data = data_weather_api_cut.reindex(all_dates).copy()
+    required = ['Temperature', 'Humidity', 'Rain', 'Et0_evapotranspiration',
+                'Soil_temperature_7-28']
+    if not set(required).issubset(new_data.columns):
+        raise ValueError("Forecast weather is missing required model inputs")
+    numeric = new_data.apply(pd.to_numeric, errors='coerce')
+    if not np.isfinite(numeric.to_numpy(dtype=float)).all():
+        raise ValueError("Forecast weather must provide finite inputs at every model timestamp")
+    new_data = numeric.rename_axis('Timestamp')
     new_data.reset_index(inplace=True)  # Reset the index
     new_data.rename(columns={'index': 'Timestamp'}, inplace=True)
 
@@ -97,37 +122,45 @@ def create_future_values(data, plot):
 
 # Compare dataframes cols to be sure that they match, otherwise drop
 def compare_train_predictions_cols(train, future_features):
-    # Identify missing columns in the prediction data
-    missing_columns = set(train.columns) - \
-        set(future_features.columns)  # data.columns
-    # use array from setup function
-    missing_columns.remove('rolling_mean_grouped_soil')
-    missing_columns.remove('gradient')
-    missing_columns.remove('grouped_soil')
-    missing_columns.remove('grouped_soil_temp')
+    """Match the ordered training inputs without fabricating missing values."""
+    if not train.columns.is_unique or not future_features.columns.is_unique:
+        raise ValueError("Training and prediction feature columns must be unique")
+    excluded = set(To_be_dropped) | {"rolling_mean_grouped_soil"}
+    expected = [column for column in train.columns if column not in excluded]
+    missing = [column for column in expected if column not in future_features.columns]
+    if missing:
+        raise ValueError(f"Missing prediction feature columns: {missing}")
+    aligned = future_features.copy()
+    if "Timestamp" in aligned.columns:
+        aligned = aligned.set_index("Timestamp")
+    elif not isinstance(aligned.index, pd.DatetimeIndex):
+        raise ValueError("Prediction features require a Timestamp column or DatetimeIndex")
+    # Extra provider fields and historical-only/target columns are not inputs.
+    # Selecting by the ordered list also protects array-based scaler/model use.
+    return aligned.loc[:, expected].copy()
 
-    print(missing_columns)
-    print(To_be_dropped)
 
-    # drop missing
-    for col in missing_columns:
-        future_features.drop(columns=col, inplace=True)
-
-    # set_index again on timestamp
-    future_features.set_index('Timestamp', inplace=True)
-    future_features.head()
-
-    return future_features
+def _validated_predictions(values, expected_rows):
+    """Require one finite, real numeric prediction per input row before clipping."""
+    array = np.asarray(values)
+    if (array.shape not in ((expected_rows,), (expected_rows, 1))
+            or expected_rows == 0 or array.dtype.kind not in 'iuf'
+            or not np.isfinite(array).all()):
+        raise ValueError("Model outputs must contain one finite numeric prediction per input row")
+    return array.reshape(-1)
 
 
 # Generate prediction with best_model and impute generated future_values
 def generate_predictions(best, exp, features):
     # Generate predictions
     predictions = exp.predict_model(best, data=features)
+    if not isinstance(predictions, pd.DataFrame) or 'prediction_label' not in predictions:
+        raise ValueError("Model outputs require a prediction_label column")
+    values = _validated_predictions(predictions['prediction_label'], len(features))
+    predictions = predictions.copy()
 
     # Clip neg predictions to zero
-    predictions.loc[predictions['prediction_label']
-                    < 0, 'prediction_label'] = 0
+    predictions['prediction_label'] = np.maximum(values, 0)
 
     return predictions
 
@@ -146,6 +179,7 @@ def generate_predictions_nn(best_model_nn, features, start, end, interval_minute
 
     # Generate predictions
     predictions = best_model_nn.predict(X_pred)
+    predictions = _validated_predictions(predictions, len(X_pred))
 
     # Clip neg predictions to zero
     predictions = np.maximum(predictions, 0)
@@ -184,6 +218,8 @@ def exponential_weights(length):
 def align_with_latest_sensor_values(plot):
     # Extract the last actual value
     last_actual_value = plot.data['rolling_mean_grouped_soil'].iloc[-1]
+    _validated_predictions([last_actual_value], 1)
+    _validated_predictions(plot.predictions['prediction_label'], len(plot.predictions))
 
     # Generate weights for the prediction range
     weights = exponential_weights(len(plot.predictions))
@@ -197,12 +233,13 @@ def align_with_latest_sensor_values(plot):
 
 # Calculates the time when threshold will be meet, according to predictions
 def calc_threshold(predictions, col, plot):
+    _validated_predictions(predictions[col], len(predictions))
     threshold = plot.threshold
     strategy = plot.sensor_kind
 
     # Define comparison logic based on strategy
-    comparison_fn = (lambda value, threshold: value > threshold) if strategy == "tension" else (
-        lambda value, threshold: value < threshold
+    comparison_fn = (lambda value, threshold: value >= threshold) if strategy == "tension" else (
+        lambda value, threshold: value <= threshold
     )
 
     # calculate next occurance
