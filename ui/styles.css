@@ -773,24 +773,6 @@ body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #
   color: #234b8a;
 }
 
-.data-staleness-notification {
-  display: none;
-  align-items: center;
-  gap: 12px;
-  background: #fef3c7;
-  color: #7a4b00;
-  border: 1px solid #fcd34d;
-  border-radius: 10px;
-  padding: 10px 14px;
-  margin-bottom: 16px;
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.data-staleness-notification.visible {
-  display: flex;
-}
-
 /* Pump specific styles */
 .pump-details {
   display: flex;
@@ -1329,6 +1311,8 @@ body {
 .status-chip.critical { background: #fee2e2; color: #991b1b; }
 .status-chip.advise { background: #ffedd5; color: #9a3412; }
 .status-chip.watch { background: #fef9c3; color: #854d0e; }
+.status-chip.demonstration { background: #fef3c7; color: #854d0e; }
+.status-chip.observation { background: #dbeafe; color: #1e40af; }
 .data-state.stale, .data-state.unavailable { background: #fff7ed; color: #9a3412; }
 .data-state.fresh { background: #dcfce7; color: #166534; }
 
@@ -1552,6 +1536,21 @@ body {
 .tooltip { font-size: 0; cursor: help; display:inline-flex; align-items:center; }
 .tooltip.has-tooltip::before { content: '?'; font-size: 12px; color: var(--gray-600); display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:#f1f5f9; border:1px solid var(--gray-200); margin-left:6px; }
 .tooltip .tooltiptext { font-size: 12px; }
+.tooltip.help-question {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 6px;
+  border: 1px solid var(--gray-300);
+  border-radius: 50%;
+  background: #f1f5f9;
+  color: var(--gray-700);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
 
 /* Pump card header tweaks */
 .pump-card .pump-header { display:flex; align-items:center; gap:8px; justify-content:space-between; }

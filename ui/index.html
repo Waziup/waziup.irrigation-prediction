@@ -17,9 +17,21 @@
       // It intentionally avoids hardcoded farm data and uses API calls.
 
       let forecastChart;
+      let chartRefreshGeneration = 0;
+      let metricsRefreshGeneration = 0;
+      let thresholdRefreshGeneration = 0;
+      let recommendationRefreshGeneration = 0;
+      let topbarRefreshGeneration = 0;
+      let farmDashboardRefreshGeneration = 0;
+      let weatherRefreshGeneration = 0;
+      let phenologyRefreshGeneration = 0;
       let currentIrrigationActuatorBased = null;
-      let currentTensionUnit = "kPa";
+      let currentTensionUnit = "cbar";
+      function tensionUnitLabel(value) {
+        return /cbar|soil tension|moisture in/i.test(value || '') ? 'cbar' : (value || 'cbar');
+      }
       let waitForTraining = false;
+      let activeTrainingPlotId = null;
       const TrainingReadyCheck = 10000;
 
       async function safeFetchJson(path) {
@@ -34,14 +46,27 @@
       }
 
       async function updateMetrics() {
-        const dashboard = await safeFetchJson('../api/getValuesForDashboard');
+        const generation = ++metricsRefreshGeneration;
+        const payload = await safeFetchJson('../api/getValuesForDashboard');
+        if (generation !== metricsRefreshGeneration) return;
+        // Every refresh replaces the displayed measurements, including failures.
+        // Never retain an old value under a current-reading label after an outage.
+        const dashboard = payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? payload : {};
         const active = await safeFetchJson('../api/checkActiveIrrigation');
+        if (generation !== metricsRefreshGeneration) return;
         const alert = await safeFetchJson('../api/getAlertStatus');
+        if (generation !== metricsRefreshGeneration) return;
 
         if (dashboard) {
-          const tensionValue = Number(dashboard.moisture_average);
-          const tempValue = Number(dashboard.temp_average);
-          const vwcValue = Number(dashboard.vwc_average);
+          const readingNumber = (value) => {
+            if (typeof value !== 'number' && typeof value !== 'string') return NaN;
+            if (typeof value === 'string' && !value.trim()) return NaN;
+            return Number(value);
+          };
+          const tensionValue = readingNumber(dashboard.moisture_average);
+          const tempValue = readingNumber(dashboard.temp_average);
+          const vwcValue = readingNumber(dashboard.vwc_average);
           const sensorKind = String(dashboard.sensor_kind || '').toLowerCase();
 
           const tensionEl = document.getElementById('summary-tension');
@@ -53,7 +78,7 @@
           const tensionLabel = document.getElementById('summary-tension-label');
           if (tensionLabel) {
             tensionLabel.textContent = (sensorKind === 'tension' || sensorKind === 'both')
-              ? `Soil Tension (${currentTensionUnit || "kPa"})`
+              ? 'Soil tension'
               : 'Soil Tension';
           }
 
@@ -61,11 +86,21 @@
           if (tempEl) {
             tempEl.textContent = Number.isFinite(tempValue) ? `${tempValue.toFixed(1)} °C` : '--';
           }
+          const readingSource = dashboard.data_source || 'IoT sensor';
+          const tensionSourceEl = document.getElementById('summary-tension-source');
+          const tempSourceEl = document.getElementById('summary-temp-source');
+          if (tensionSourceEl) tensionSourceEl.textContent = Number.isFinite(tensionValue)
+            ? `${readingSource} · ${dashboard.recorded_or_live || 'observed'} reading` : 'Reading unavailable';
+          if (tempSourceEl) tempSourceEl.textContent = Number.isFinite(tempValue)
+            ? `${readingSource} · latest sensor average` : 'Reading unavailable';
 
           const vwcEl = document.getElementById('summary-vwc');
           if (vwcEl) {
             vwcEl.textContent = Number.isFinite(vwcValue) ? `${vwcValue.toFixed(1)} %` : '--';
           }
+          const vwcSourceEl = document.getElementById('summary-vwc-source');
+          if (vwcSourceEl) vwcSourceEl.textContent = Number.isFinite(vwcValue)
+            ? 'Volumetric water content' : 'Reading unavailable';
 
         }
 
@@ -99,66 +134,110 @@
       }
 
       async function loadCharts() {
-        const hist = await safeFetchJson('../api/getHistoricalChartData');
-        const pred = await safeFetchJson('../api/getPredictionChartData');
+        console.info('[IRRIGATION_TRACE] plot charts: requesting sensor history and predictions');
+        const generation = ++chartRefreshGeneration;
+        const chartPayload = (value) => {
+          if (!value || value.available === false || !Array.isArray(value.timestamps)
+              || !Array.isArray(value.moistureSeries) || !value.timestamps.length
+              || value.timestamps.length !== value.moistureSeries.length
+              || !value.timestamps.every(t => typeof t === 'string' && Number.isFinite(Date.parse(t)))
+              || !value.moistureSeries.every(v => v === null || (typeof v === 'number' && Number.isFinite(v)))
+              || !value.moistureSeries.some(v => typeof v === 'number' && Number.isFinite(v))) return null;
+          return value;
+        };
+        const hist = chartPayload(await safeFetchJson('../api/getHistoricalChartData'));
+        if (generation !== chartRefreshGeneration) return;
+        const pred = chartPayload(await safeFetchJson('../api/getPredictionChartData'));
+        if (generation !== chartRefreshGeneration) return;
+        console.info('[IRRIGATION_TRACE] plot charts: completed', {
+          sensorPoints: hist?.timestamps?.length || 0,
+          predictionAvailable: Boolean(pred),
+          predictionPoints: pred?.timestamps?.length || 0,
+          thresholdMode: pred?.threshold_mode || hist?.threshold_mode,
+        });
+        // Only the newest refresh may publish series, units, metadata or warnings.
 
         const detectedUnit = pred?.unit || hist?.unit;
         if (detectedUnit) {
-          currentTensionUnit = detectedUnit;
+          currentTensionUnit = tensionUnitLabel(detectedUnit);
         }
 
         const histLabels = hist && hist.timestamps ? hist.timestamps.map(t => new Date(t).toLocaleString()) : [];
         const predLabels = pred && pred.timestamps ? pred.timestamps.map(t => new Date(t).toLocaleString()) : [];
         const histSeries = hist && hist.moistureSeries ? hist.moistureSeries : [];
         const predSeries = pred && pred.moistureSeries ? pred.moistureSeries : [];
+        const chartMeta = pred?.available === false ? hist : (pred || hist);
 
+        let chartError = null;
+        try {
         if (histLabels.length || predLabels.length) {
-          initForecastChart(histLabels, histSeries, predLabels, predSeries, pred);
+          if (typeof Chart === 'undefined') throw new Error('Chart library failed to load. Check JavaScript response headers.');
+          initForecastChart(histLabels, histSeries, predLabels, predSeries, hist, chartMeta);
+        } else {
+          if (forecastChart) forecastChart.destroy();
+          forecastChart = null;
         }
+        } catch (error) {
+          chartError = error;
+          console.error('Forecast chart rendering failed', error);
+        }
+        const chartStatus = document.getElementById('chart-data-status');
+        if (chartStatus) chartStatus.textContent = chartError ? `Chart unavailable: ${chartError.message}` : hist && pred ? ''
+          : hist ? 'Forecast unavailable. Showing observations only.'
+          : pred ? 'Observations unavailable. Showing forecast only.'
+          : 'Chart data unavailable.';
 
+        const thresholdMode = chartMeta?.threshold_mode === 'dynamic'
+          ? 'dynamic'
+          : 'static';
         const badge = document.getElementById('threshold-source-badge');
         if (badge) {
-          const dynamic = isDynamicThresholdMode(pred);
-          badge.textContent = dynamic ? 'Dynamic threshold active' : 'Static threshold active';
-          badge.classList.toggle('dynamic', dynamic);
-          badge.classList.toggle('static', !dynamic);
+          badge.textContent = thresholdMode === 'dynamic'
+            ? 'Dynamic crop-stage trigger'
+            : chartMeta ? 'Static field trigger' : 'Threshold mode unavailable';
+          badge.classList.toggle('dynamic', thresholdMode === 'dynamic');
+          badge.classList.toggle('static', !!chartMeta && thresholdMode !== 'dynamic');
         }
 
         const phenoSource = document.getElementById('pheno-threshold-source');
         if (phenoSource) {
-          const dynamic = isDynamicThresholdMode(pred);
-          phenoSource.textContent = dynamic ? 'Dynamic threshold active' : 'Static threshold active';
-          phenoSource.classList.toggle('dynamic', dynamic);
-          phenoSource.classList.toggle('static', !dynamic);
+          phenoSource.textContent = thresholdMode === 'dynamic'
+            ? 'Dynamic crop-stage trigger'
+            : chartMeta ? 'Static field trigger' : 'Threshold mode unavailable';
+          phenoSource.classList.toggle('dynamic', thresholdMode === 'dynamic');
+          phenoSource.classList.toggle('static', !!chartMeta && thresholdMode !== 'dynamic');
         }
 
         const phenoThreshold = document.getElementById('pheno-threshold-value');
         if (phenoThreshold) {
-          const dynamic = isDynamicThresholdMode(pred);
-          const thresholdValue = Number(
-            dynamic
-              ? (pred?.threshold_cbar_dynamic ?? pred?.threshold_cbar)
-              : (pred?.threshold_cbar_static ?? pred?.threshold_cbar)
-          );
+          const thresholdRaw =
+            chartMeta?.threshold_cbar ?? chartMeta?.threshold_cbar_static;
+          const thresholdValue = thresholdRaw === null || thresholdRaw === undefined
+            ? NaN
+            : Number(thresholdRaw);
           phenoThreshold.textContent = Number.isFinite(thresholdValue)
             ? thresholdValue.toFixed(1)
             : '--';
         }
 
-        const phenoNote = document.getElementById('pheno-threshold-note');
-        if (phenoNote) {
-          const dynamic = isDynamicThresholdMode(pred);
-          phenoNote.textContent = dynamic
-            ? 'Dynamic threshold uses crop stage and soil texture to adjust the trigger. The chart also keeps the fixed farmer threshold for comparison.'
-            : 'Static threshold uses the fixed value from the farm configuration. The chart still shows the dynamic crop-stage line for comparison.';
-        }
+
       }
 
       async function loadTopbar() {
+        const generation = ++topbarRefreshGeneration;
         const plots = await safeFetchJson('../api/getPlots');
+        if (generation !== topbarRefreshGeneration) return null;
         const farmReg = await safeFetchJson('../api/getFarmRegistry');
+        if (generation !== topbarRefreshGeneration) return null;
+        const configResponse = await safeFetchJson('../api/returnConfig');
+        if (generation !== topbarRefreshGeneration) return null;
+        const alert = await safeFetchJson('../api/getAlertStatus');
+        // Publish farm, plot, spatial metadata and alert as one current snapshot.
+        if (generation !== topbarRefreshGeneration) return null;
+        const activeConfig = configResponse?.data || {};
         const currentPlot = parseInt(plots?.currentPlot, 10);
         const currentPlotId = plots?.current_plot_id;
+        activeTrainingPlotId = currentPlotId || null;
         const farms = Array.isArray(farmReg?.farms) ? farmReg.farms : [];
         const plotRecord = Array.isArray(plots?.plots)
           ? plots.plots.find((entry) => entry.plot_id === currentPlotId)
@@ -185,9 +264,23 @@
         }
         const plotTitle = document.getElementById('selectedPlotTitle');
         if (plotTitle) plotTitle.textContent = plotName || 'Plot details';
-
+        const gps = activeConfig.Gps_info || {};
+        const latitude = Number(gps.latitude ?? gps.lattitude);
+        const longitude = Number(gps.longitude);
+        const area = Number(activeConfig.Plot_area_m2);
+        const areaUnit = activeConfig.Plot_area_unit || 'm2';
+        const areaDivisors = {m2: 1, ha: 10000, acre: 4046.8564224};
+        const displayArea = area / (areaDivisors[areaUnit] || 1);
+        const areaLabels = {m2: 'm²', ha: 'ha', acre: 'acres'};
+        const locationMeta = document.getElementById('plot-location-meta');
+        const areaMeta = document.getElementById('plot-area-meta');
+        if (locationMeta) locationMeta.textContent = Number.isFinite(latitude) && Number.isFinite(longitude)
+          ? `Plot/EO reference point ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+          : 'Plot/EO reference point unavailable';
+        if (areaMeta) areaMeta.textContent = area > 0
+          ? `Area ${displayArea.toLocaleString(undefined, {maximumFractionDigits: 4})} ${areaLabels[areaUnit] || 'm²'}`
+          : 'Area not measured';
         // Check alert status and update badge
-        const alert = await safeFetchJson('../api/getAlertStatus');
         const badge = document.getElementById('alertsBadge');
         if (alert && alert.available === true) {
           if (badge) { badge.style.display = 'inline-block'; badge.textContent = '1'; }
@@ -208,7 +301,7 @@
         return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
       }
 
-      function renderFarmDashboard(data, cached = false) {
+      function renderFarmDashboard(data) {
         const summary = data?.summary || {};
         const setText = (id, value) => {
           const node = document.getElementById(id);
@@ -224,24 +317,27 @@
 
         const connectivity = document.getElementById('connectivity-notification');
         if (connectivity) {
-          connectivity.classList.toggle('visible', cached);
-          connectivity.textContent = cached
-            ? `Offline — showing the last farm overview saved ${formatDashboardTime(data.generated_at)}. Commands are disabled until connection returns.`
-            : '';
+          connectivity.classList.remove('visible');
+          connectivity.textContent = '';
         }
 
         const plots = Array.isArray(data?.plots) ? data.plots : [];
         const plotContainer = document.getElementById('farm-plot-list');
         if (plotContainer) {
           plotContainer.innerHTML = plots.length ? plots.map((plot) => {
+            const farmName = data?.farm?.name || "";
+            const prefix = `${farmName} Plot `;
+            const rawName = plot.name || 'Unnamed plot';
+            const plotName = farmName && rawName.startsWith(prefix) && /^\d+$/.test(rawName.slice(prefix.length))
+              ? rawName.slice(farmName.length + 1) : rawName;
             const margin = Number(plot.threshold_margin_cbar);
             const marginText = Number.isFinite(margin)
               ? (margin >= 0 ? `${margin.toFixed(1)} cbar remaining` : `${Math.abs(margin).toFixed(1)} cbar over threshold`)
               : 'Threshold margin unavailable';
             const urgency = String(plot.urgency || 'unknown').toLowerCase();
             return `<button type="button" class="farm-plot-card urgency-${escapeHtml(urgency)}" onclick="switchDashboardPlot('${escapeHtml(plot.plot_id)}')">
-              <div class="farm-plot-main"><strong>${escapeHtml(plot.name || 'Unnamed plot')}</strong><span>${escapeHtml(plot.crop_type || 'Crop not set')} · ${escapeHtml(plot.growth_stage || 'Stage unavailable')}</span></div>
-              <div class="farm-plot-condition"><strong>${escapeHtml(plot.next_action || 'Awaiting forecast')}</strong><span>${escapeHtml(marginText)} · ${escapeHtml(formatDashboardTime(plot.next_action_time))}</span></div>
+              <div class="farm-plot-main"><strong>${escapeHtml(plotName)}</strong><span>Farm: ${escapeHtml(farmName)}</span><span>${escapeHtml(plot.crop_type || '--')} · ${escapeHtml(plot.growth_stage || '--')}</span></div>
+              <div class="farm-plot-condition"><strong>${escapeHtml(plot.next_action || '')}</strong><span>${escapeHtml(marginText)} · ${escapeHtml(formatDashboardTime(plot.next_action_time))}</span></div>
               <div class="farm-plot-meta"><span class="status-chip ${escapeHtml(urgency)}">${escapeHtml(urgency)}</span><span class="plot-open-hint">View plot →</span></div>
             </button>`;
           }).join('') : '<div class="dashboard-empty">No plots are configured for this farm.</div>';
@@ -256,27 +352,15 @@
       }
 
       async function loadFarmDashboard() {
+        const generation = ++farmDashboardRefreshGeneration;
         const data = await safeFetchJson('../api/farmDashboard');
+        if (generation !== farmDashboardRefreshGeneration) return null;
         if (data) {
-          localStorage.setItem('wazifarm.dashboardCache', JSON.stringify(data));
           renderFarmDashboard(data, false);
           return data;
         }
-        try {
-          const cached = JSON.parse(localStorage.getItem('wazifarm.dashboardCache') || 'null');
-          if (cached) renderFarmDashboard(cached, true);
-          else {
-            const connectivity = document.getElementById('connectivity-notification');
-            if (connectivity) {
-              connectivity.textContent = 'Farm overview unavailable. Add a farm and at least one plot in Settings.';
-              connectivity.classList.add('visible');
-            }
-          }
-          return cached;
-        } catch (error) {
-          console.warn('Could not restore dashboard cache', error);
-          return null;
-        }
+        renderFarmDashboard({});
+        return null;
       }
 
       async function switchDashboardPlot(plotId) {
@@ -307,6 +391,8 @@
       }
 
       async function loadPhenologySummary() {
+        console.info('[IRRIGATION_TRACE] phenology: requesting crop stage and dynamic threshold');
+        const generation = ++phenologyRefreshGeneration;
         const pageTitle = document.getElementById('pageTitle');
         const pageFarmName = document.getElementById('pageFarmName');
         if (pageTitle && document.body.dataset.page === 'phenology') {
@@ -319,39 +405,60 @@
           pageFarmName.style.display = 'inline-flex';
         }
         const summary = await safeFetchJson('../api/getPhenologySummary');
+        console.info('[IRRIGATION_TRACE] phenology: completed', summary);
+        if (generation !== phenologyRefreshGeneration) return null;
+        const sourceEl = document.getElementById('pheno-threshold-source');
+        const valueEl = document.getElementById('pheno-threshold-value');
+        const mode = summary?.available ? summary.threshold_mode : null;
+        if (sourceEl) {
+          sourceEl.textContent = mode === 'dynamic' ? 'Dynamic crop-stage trigger'
+            : mode === 'static' ? 'Static field trigger' : 'Threshold unavailable';
+          sourceEl.classList.toggle('dynamic', mode === 'dynamic');
+          sourceEl.classList.toggle('static', mode === 'static');
+        }
+        if (valueEl) valueEl.textContent = summary?.available
+          && Number.isFinite(summary.threshold_active_cbar)
+          ? summary.threshold_active_cbar.toFixed(1) : '--';
         const cropNameEl = document.getElementById('pheno-crop-name');
+        const dateLabelEl = document.getElementById('pheno-date-label');
         const plantingEl = document.getElementById('pheno-planting-date');
         const daysEl = document.getElementById('pheno-days');
         const tableBody = document.getElementById('pheno-stage-table');
+        const thresholdNote = document.getElementById('pheno-threshold-note');
 
         if (!summary || !summary.available) {
-          if (cropNameEl) cropNameEl.textContent = '--';
-          if (plantingEl) plantingEl.textContent = '--';
+          if (cropNameEl) cropNameEl.textContent = summary?.crop_type || 'Not specified';
+          if (dateLabelEl) dateLabelEl.textContent = 'Phenology reference';
+          if (plantingEl) plantingEl.textContent = 'Not available';
           if (daysEl) daysEl.textContent = '--';
           if (tableBody) {
-            tableBody.innerHTML = '<tr><td colspan="4">No phenology data available.</td></tr>';
+            tableBody.innerHTML = `<tr><td colspan="4">${escapeHtml(summary?.reason || 'No phenology data available.')}</td></tr>`;
           }
           return;
         }
 
         if (cropNameEl) cropNameEl.textContent = summary.crop_name || summary.crop_type || '--';
+        const referenceDate = summary.planting_date || summary.phenology_reference_date;
+        const referenceIsEO = summary.phenology_reference_source === 'eo_estimated_emergence';
+        if (dateLabelEl) dateLabelEl.textContent = referenceIsEO
+          ? 'EO-estimated emergence' : 'Planting date';
         if (plantingEl) {
-          if (summary.planting_date) {
-            const planted = new Date(summary.planting_date);
+          if (referenceDate) {
+            const planted = new Date(referenceDate);
             plantingEl.textContent = Number.isNaN(planted.getTime())
-              ? summary.planting_date
-              : planted.toLocaleDateString();
+              ? referenceDate
+              : `${planted.toLocaleDateString()}${referenceIsEO ? ` (${summary.phenology_reference_confidence || 'estimated'})` : ''}`;
           } else {
             plantingEl.textContent = '--';
           }
         }
         if (daysEl) {
-          if (summary.planting_date) {
-            const planted = new Date(summary.planting_date);
+          if (referenceDate) {
+            const planted = new Date(referenceDate);
             if (!Number.isNaN(planted.getTime())) {
-              const diffMs = Date.now() - planted.getTime();
+              const diffMs = (summary.evaluated_at ? Date.parse(summary.evaluated_at) : Date.now()) - planted.getTime();
               const days = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
-              daysEl.textContent = `${days} days`;
+              daysEl.textContent = `${days} days${referenceIsEO ? ' since estimated emergence' : ''}`;
             } else {
               daysEl.textContent = '--';
             }
@@ -361,116 +468,262 @@
         }
 
         setActiveGrowthStage(summary.current_stage || summary.growth_stage);
+        if (thresholdNote) thresholdNote.textContent = summary.threshold_mode === 'dynamic'
+          ? 'Stage-entry reference triggers calculated using current ET0. They change with weather; the active trigger reflects the current crop stage.' : '';
 
         if (tableBody) {
           const rows = Array.isArray(summary.stage_rows) ? summary.stage_rows : [];
           if (!rows.length) {
-            tableBody.innerHTML = '<tr><td colspan="4">No stage thresholds configured.</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="4">No crop-stage data available.</td></tr>';
           } else {
             tableBody.innerHTML = rows.map((row) => {
               const gddRange = formatRange(row.gdd_start, row.gdd_end, 0);
               const kcRange = formatRange(row.kc_start, row.kc_end, 2);
-              const delta = Number(row.delta_cbar);
-              const deltaText = Number.isFinite(delta) ? delta.toFixed(1) : '--';
+              const trigger = row.threshold_cbar === null || row.threshold_cbar === undefined
+                ? NaN
+                : Number(row.threshold_cbar);
+              const triggerText = Number.isFinite(trigger)
+                ? `${trigger.toFixed(1)} cbar`
+                : (['fao56_root_zone_depletion', 'existing_soil_curve_crop_demand']
+                    .includes(row.threshold_source)
+                    ? 'Unavailable: weather or calibration missing'
+                    : row.threshold_source === 'inactive_season' ? 'Not applicable' : '--');
               return `
                 <tr>
                   <td>${row.stage || '--'}</td>
                   <td>${gddRange}</td>
                   <td>${kcRange}</td>
-                  <td>${deltaText}</td>
+                  <td>${triggerText}</td>
                 </tr>`;
             }).join('');
           }
         }
       }
 
-      // Chart initializers (use Chart.js)
-      function initForecastChart(histLabels, histSeries, predLabels, predSeries, predMeta) {
+      const soilChartDecorations = {
+        id: 'soilChartDecorations',
+        beforeDraw(chart, args, options) {
+          const {ctx, chartArea, scales} = chart;
+          if (!chartArea || !scales.y || !options?.enabled) return;
+          const y = scales.y;
+          const refs = options.references || {};
+          const finite = value => Number.isFinite(Number(value));
+          const clamp = value => Math.max(y.min, Math.min(y.max, Number(value)));
+          const boundaries = [
+            {to: refs.fieldCapacityLower, color: 'rgba(191, 219, 254, .34)'},
+            {from: refs.fieldCapacityLower, to: refs.fieldCapacityUpper, color: 'rgba(187, 247, 208, .34)'},
+            {from: refs.fieldCapacityUpper, to: refs.permanentWiltingPoint, color: 'rgba(254, 215, 170, .32)'},
+            {from: refs.permanentWiltingPoint, to: y.max, color: 'rgba(254, 202, 202, .38)'},
+          ];
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(chartArea.left, chartArea.top, chartArea.width, chartArea.height);
+          ctx.clip();
+          boundaries.forEach(zone => {
+            const from = finite(zone.from) ? clamp(zone.from) : y.min;
+            const to = finite(zone.to) ? clamp(zone.to) : y.max;
+            if (!(to > from)) return;
+            const top = y.getPixelForValue(to);
+            const bottom = y.getPixelForValue(from);
+            ctx.fillStyle = zone.color;
+            ctx.fillRect(chartArea.left, top, chartArea.width, bottom - top);
+          });
+          ctx.restore();
+        },
+        afterDatasetsDraw(chart, args, options) {
+          const {ctx, chartArea, scales} = chart;
+          if (!chartArea || !scales.x || !scales.y || !options?.enabled) return;
+          const x = scales.x;
+          const y = scales.y;
+          const refs = options.references || {};
+          const finite = value => Number.isFinite(Number(value));
+          const label = (text, value, color = '#475569', background = 'rgba(255,255,255,.9)') => {
+            if (!finite(value) || Number(value) < y.min || Number(value) > y.max) return;
+            const py = y.getPixelForValue(Number(value));
+            ctx.save();
+            ctx.font = '600 11px system-ui, sans-serif';
+            const width = ctx.measureText(text).width + 10;
+            const height = 20;
+            const left = Math.max(chartArea.left + 4, chartArea.right - width - 6);
+            ctx.fillStyle = background;
+            ctx.fillRect(left, py - height / 2, width, height);
+            ctx.fillStyle = color;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, left + 5, py);
+            ctx.restore();
+          };
+          const rule = (value, color, dash = [5, 5], width = 1) => {
+            if (!finite(value) || Number(value) < y.min || Number(value) > y.max) return;
+            const py = y.getPixelForValue(Number(value));
+            ctx.save();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width;
+            ctx.setLineDash(dash);
+            ctx.beginPath();
+            ctx.moveTo(chartArea.left, py);
+            ctx.lineTo(chartArea.right, py);
+            ctx.stroke();
+            ctx.restore();
+          };
+
+          rule(refs.saturation, '#93c5fd', [], 1);
+          rule(refs.fieldCapacityLower, '#86efac', [], 1);
+          rule(refs.fieldCapacityUpper, '#fdba74', [], 1);
+          rule(refs.permanentWiltingPoint, '#fca5a5', [], 1);
+          label('Saturation', refs.saturation);
+          label('Field Capacity Lower', refs.fieldCapacityLower);
+          label('Field Capacity Higher', refs.fieldCapacityUpper);
+          label('Permanent Wilting Point', refs.permanentWiltingPoint);
+          if (finite(refs.activeThreshold)) {
+            label('Threshold for irrigation', refs.activeThreshold, '#fff', '#ff4560');
+          }
+
+          const labels = chart.data.labels || [];
+          let previousDay = null;
+          labels.forEach((value, index) => {
+            const parsed = new Date(value);
+            if (Number.isNaN(parsed.getTime())) return;
+            const day = `${parsed.getFullYear()}-${parsed.getMonth()}-${parsed.getDate()}`;
+            if (previousDay !== null && day !== previousDay) {
+              const px = x.getPixelForValue(index);
+              ctx.save();
+              ctx.strokeStyle = 'rgba(249, 115, 22, .55)';
+              ctx.lineWidth = 1;
+              ctx.setLineDash([5, 5]);
+              ctx.beginPath();
+              ctx.moveTo(px, chartArea.top);
+              ctx.lineTo(px, chartArea.bottom);
+              ctx.stroke();
+              ctx.restore();
+            }
+            previousDay = day;
+          });
+
+          const historyCount = Number(options.historyCount || 0);
+          if (historyCount > 0 && historyCount < labels.length) {
+            const leftPixel = x.getPixelForValue(historyCount - 1);
+            const rightPixel = x.getPixelForValue(historyCount);
+            const divider = (leftPixel + rightPixel) / 2;
+            ctx.save();
+            ctx.strokeStyle = '#64748b';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.moveTo(divider, chartArea.top);
+            ctx.lineTo(divider, chartArea.bottom);
+            ctx.stroke();
+            ctx.fillStyle = '#475569';
+            ctx.font = '600 11px system-ui, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText('Historical Data', (chartArea.left + divider) / 2, chartArea.bottom + 54);
+            ctx.fillText('Forecast Period', (divider + chartArea.right) / 2, chartArea.bottom + 54);
+            ctx.restore();
+          }
+        },
+      };
+
+      // Chart initializer styled after the original clear dual-axis forecast.
+      function initForecastChart(histLabels, histSeries, predLabels, predSeries, histMeta, predMeta) {
+        // Preserve the former five-argument entry point for embedded consumers.
+        if (predMeta === undefined) {
+          predMeta = histMeta;
+          histMeta = null;
+        }
         try { if (forecastChart) forecastChart.destroy(); } catch(e){}
         const ctx = document.getElementById('chart_forecast')?.getContext('2d');
         if (!ctx) return;
 
         const combinedLabels = histLabels.concat(predLabels);
         const histData = histSeries.concat(predLabels.map(() => null));
-        const predData = histLabels.map(() => null).concat(predSeries);
-        const useDynamicThreshold = Boolean(predMeta?.use_dynamic_threshold);
-        const dynamicThresholdSeries = Array.isArray(predMeta?.threshold_series_dynamic) ? predMeta.threshold_series_dynamic : [];
-        const staticThresholdSeries = Array.isArray(predMeta?.threshold_series_static) ? predMeta.threshold_series_static : [];
-        const dynamicThresholdData = histLabels.map(() => null).concat(dynamicThresholdSeries);
-        const staticThresholdData = histLabels.map(() => null).concat(staticThresholdSeries);
-
+        const predData = histLabels.map((value, index) => index === histLabels.length - 1
+          ? histSeries[histSeries.length - 1] : null).concat(predSeries);
         const datasets = [];
+        const cleanVwc = (values, expected) => Array.isArray(values) && values.length === expected
+          ? values.map(value => Number.isFinite(Number(value)) ? Number(value) : null)
+          : Array(expected).fill(null);
+        const histVwc = cleanVwc(histMeta?.moistureSeriesVol, histLabels.length);
+        const predVwc = cleanVwc(predMeta?.moistureSeriesVol, predLabels.length);
+        const hasVwc = histVwc.concat(predVwc).some(value => Number.isFinite(value));
 
         if (predMeta && predMeta.kind === 'tension') {
           const saturation = Number(predMeta.saturation);
           const fcl = Number(predMeta.fieldCapacityLower);
-          const fcu = Number(predMeta.fieldCapacityUpper);
           const pwp = Number(predMeta.permanentWiltingPoint);
-          const activeThreshold = Number(
-            useDynamicThreshold
-              ? (predMeta.threshold_cbar_dynamic ?? predMeta.threshold_cbar)
-              : (predMeta.threshold_cbar_static ?? predMeta.threshold_cbar)
-          );
+          const thresholdMode = predMeta.threshold_mode === 'dynamic'
+            ? 'dynamic'
+            : 'static';
+          const activeThresholdRaw =
+            predMeta.threshold_cbar ?? predMeta.threshold_cbar_static;
+          const baselineThresholdRaw = predMeta.threshold_cbar_static;
+          const activeThreshold = activeThresholdRaw === null || activeThresholdRaw === undefined
+            ? NaN
+            : Number(activeThresholdRaw);
+          const baselineThreshold = baselineThresholdRaw === null || baselineThresholdRaw === undefined
+            ? NaN
+            : Number(baselineThresholdRaw);
+          const projectedThresholds = Array.isArray(predMeta.threshold_series)
+            ? predMeta.threshold_series.map((value) => {
+                if (value === null || value === undefined) return null;
+                const parsed = Number(value);
+                return Number.isFinite(parsed) ? parsed : null;
+              })
+            : [];
 
-          const hasBands = [saturation, fcl, fcu, pwp].every((val) => Number.isFinite(val));
-          if (hasBands) {
-            const bandBase = combinedLabels.map(() => saturation);
-            const bandFcl = combinedLabels.map(() => fcl);
-            const bandFcu = combinedLabels.map(() => fcu);
-            const bandPwp = combinedLabels.map(() => pwp);
-
-            datasets.push(
-              { label: 'Saturation', data: bandBase, borderWidth: 0, pointRadius: 0, fill: false, band: true },
-              { label: 'Field Capacity (Lower)', data: bandFcl, borderWidth: 0, pointRadius: 0, fill: '-1', backgroundColor: 'rgba(46, 125, 50, 0.08)', band: true },
-              { label: 'Field Capacity (Upper)', data: bandFcu, borderWidth: 0, pointRadius: 0, fill: '-1', backgroundColor: 'rgba(251, 191, 36, 0.12)', band: true },
-              { label: 'Permanent Wilting Point', data: bandPwp, borderWidth: 0, pointRadius: 0, fill: '-1', backgroundColor: 'rgba(239, 68, 68, 0.12)', band: true }
-            );
-          }
-
-          const hasDynamicSeries = dynamicThresholdSeries.some((value) => value !== null && value !== undefined);
-          const hasStaticSeries = staticThresholdSeries.some((value) => value !== null && value !== undefined);
-
-          if (hasStaticSeries) {
+          if (thresholdMode === 'dynamic' && Number.isFinite(activeThreshold)) {
+            const dynamicValues = projectedThresholds.length === predLabels.length
+              ? projectedThresholds.map(value => Number.isFinite(value) ? value : activeThreshold)
+              : predLabels.map(() => activeThreshold);
+            const dynamicData = predLabels.length
+              ? histLabels.map(() => null).concat(dynamicValues)
+              : combinedLabels.map(() => activeThreshold);
             datasets.push({
-              label: 'Static threshold',
-              data: staticThresholdData,
-              borderColor: '#94a3b8',
+              label: 'Dynamic forecast trigger',
+              data: dynamicData,
+              borderColor: '#ff4560',
               borderDash: [4, 4],
-              borderWidth: useDynamicThreshold ? 1.5 : 2.5,
-              pointRadius: 0,
-              fill: false,
-            });
-          }
-
-          if (hasDynamicSeries) {
-            datasets.push({
-              label: 'Dynamic threshold',
-              data: dynamicThresholdData,
-              borderColor: '#ef4444',
-              borderDash: useDynamicThreshold ? [] : [6, 4],
-              borderWidth: useDynamicThreshold ? 2.75 : 1.75,
-              pointRadius: 0,
-              fill: false,
-            });
-          }
-
-          if (!hasDynamicSeries && !hasStaticSeries && Number.isFinite(activeThreshold)) {
-            datasets.push({
-              label: useDynamicThreshold ? 'Dynamic threshold' : 'Static threshold',
-              data: combinedLabels.map(() => activeThreshold),
-              borderColor: useDynamicThreshold ? '#ef4444' : '#94a3b8',
-              borderDash: useDynamicThreshold ? [] : [4, 4],
               borderWidth: 2,
               pointRadius: 0,
               fill: false,
+              yAxisID: 'y',
+            });
+          } else if (thresholdMode !== 'dynamic' && Number.isFinite(activeThreshold)) {
+            datasets.push({
+              label: 'Static field trigger',
+              data: combinedLabels.map(() => activeThreshold),
+              borderColor: '#ff4560',
+              borderDash: [],
+              borderWidth: 2,
+              pointRadius: 0,
+              fill: false,
+              yAxisID: 'y',
             });
           }
+          // The configured static value remains a backend safety fallback,
+          // but it is not plotted or labelled as the active trigger while the
+          // dynamic crop/ETc threshold is available.
         }
 
         datasets.push(
-          { label:'Observed', data: histData, borderColor:'#1f77b4', borderWidth:2, tension:0.35 },
-          { label:'Forecast', data: predData, borderColor:'#2ca02c', borderDash:[6,4], borderWidth:2, tension:0.35 }
+          { label:'Observed', data: histData, borderColor:'#3b82b6', borderWidth:3,
+            pointRadius:0, pointHoverRadius:4, tension:0.2, yAxisID:'y' },
+          { label:'Forecast', data: predData, borderColor:'#3b82b6', borderDash:[7,5],
+            borderWidth:3, pointRadius:0, pointHoverRadius:4, tension:0.2, yAxisID:'y' }
         );
+        if (hasVwc) {
+          datasets.push(
+            { label:'Historical VWC', data: histVwc.concat(predLabels.map(() => null)), borderColor:'#34d399',
+              borderWidth:3, pointRadius:0, pointHoverRadius:4, tension:0.25, yAxisID:'vwc' },
+            { label:'Forecast VWC', data: histLabels.map((value, index) => index === histLabels.length - 1
+                ? histVwc[histVwc.length - 1] : null).concat(predVwc), borderColor:'#2dd4bf',
+              borderDash:[7,5], borderWidth:3, pointRadius:0, pointHoverRadius:4,
+              tension:0.25, yAxisID:'vwc' }
+          );
+        }
+
+        const referenceMeta = predMeta || histMeta || {};
+        const activeThreshold = Number(referenceMeta.threshold_cbar ?? referenceMeta.threshold_cbar_static);
 
         forecastChart = new Chart(ctx, {
           type: 'line',
@@ -478,21 +731,59 @@
             labels: combinedLabels,
             datasets,
           },
+          plugins: [soilChartDecorations],
           options: {
             responsive: true,
             maintainAspectRatio: false,
+            interaction: {mode:'index', intersect:false},
+            layout: {padding: {top:8, right:8, bottom:70, left:4}},
             plugins: {
-              legend: {
-                display: true,
-                position: 'top',
-                labels: {
-                  filter: (item, data) => !data.datasets[item.datasetIndex].band,
+              legend: {display:false},
+              tooltip: {
+                backgroundColor:'rgba(15, 23, 42, .92)',
+                padding:10,
+                callbacks: {
+                  label: context => `${context.dataset.label}: ${Number(context.parsed.y).toFixed(
+                    context.dataset.yAxisID === 'vwc' ? 3 : 1)}`,
+                },
+              },
+              soilChartDecorations: {
+                enabled: predMeta?.kind === 'tension' || histMeta?.kind === 'tension',
+                historyCount: histLabels.length,
+                references: {
+                  saturation: Number(referenceMeta.saturation),
+                  fieldCapacityLower: Number(referenceMeta.fieldCapacityLower),
+                  fieldCapacityUpper: Number(referenceMeta.fieldCapacityUpper),
+                  permanentWiltingPoint: Number(referenceMeta.permanentWiltingPoint),
+                  activeThreshold,
                 },
               },
             },
             scales: {
-              x: { ticks: { autoSkip: true, maxTicksLimit: 6, maxRotation: 0 } },
-              y: { title: { display: true, text: currentTensionUnit || 'kPa' } }
+              x: {
+                grid:{display:false},
+                ticks:{autoSkip:true, maxTicksLimit:12, minRotation:48, maxRotation:48,
+                  color:'#475569', font:{size:10}, padding:6},
+              },
+              y: {
+                beginAtZero:true,
+                grid:{color:'rgba(148, 163, 184, .24)'},
+                border:{display:false},
+                ticks:{color:'#475569', precision:1, maxTicksLimit:9},
+                title:{display:true, text:`Moisture in ${currentTensionUnit || 'cbar'} (Soil Tension)`,
+                  color:'#334155', font:{weight:'600'}},
+              },
+              vwc: {
+                display:hasVwc,
+                position:'right',
+                beginAtZero:true,
+                grid:{drawOnChartArea:false},
+                border:{display:false},
+                ticks:{color:'#475569', maxTicksLimit:9,
+                  callback:value => Number(value).toFixed(2)},
+                title:{display:hasVwc, text:'Volumetric Water Content', color:'#334155',
+                  font:{weight:'600'}},
+              },
             }
           }
         });
@@ -526,26 +817,45 @@
           Promise.allSettled([loadFarmDashboard(), loadWeatherForecast()]);
         }, 0);
         if (page === 'plot') setTimeout(() => {
-          Promise.allSettled([updateMetrics(), fetchIrrigationRecommendation(), loadCharts(), fetchThreshold()]);
+          Promise.allSettled([updateMetrics(), fetchIrrigationRecommendation(), loadCharts(), fetchThreshold(), loadEOObservationTrace()]);
         }, 0);
         if (page === 'phenology') setTimeout(() => {
-          Promise.allSettled([loadPhenologySummary(), fetchIrrigationRecommendation()]);
+          Promise.allSettled([loadPhenologySummary(), fetchIrrigationRecommendation(), loadEOObservationTrace()]);
         }, 0);
       }
 
       function fetchThreshold() {
+        const generation = ++thresholdRefreshGeneration;
         return fetch("../api/getThreshold")
-          .then((response) => response.json())
+          .then((response) => {
+            if (!response.ok) throw new Error('Threshold request failed');
+            return response.json();
+          })
           .then((timestamp_data) => {
-            if (timestamp_data.threshold == false) {
-              document.getElementById("timestamp_txt").innerHTML =
-                "The threshold is not reached in the current forecast horizon.";
+            if (generation !== thresholdRefreshGeneration) return;
+            if (!timestamp_data || typeof timestamp_data !== 'object' || Array.isArray(timestamp_data)) {
+              throw new Error('Invalid threshold response');
+            }
+            if (timestamp_data.threshold === false) {
+              document.getElementById("timestamp_txt").textContent =
+                timestamp_data.available === false
+                  ? "No forecast available yet. Train this plot to evaluate the threshold."
+                  : "The threshold is not reached in the current forecast horizon.";
             } else {
-              document.getElementById("timestamp_txt").innerHTML =
+              // The backend's crossing response contains a timestamp without
+              // a threshold flag. Do not turn absent/invalid data into a forecast.
+              if ((timestamp_data.threshold !== undefined && timestamp_data.threshold !== true)
+                  || typeof timestamp_data.timestamp !== 'string'
+                  || !timestamp_data.timestamp.trim()
+                  || !Number.isFinite(Date.parse(timestamp_data.timestamp))) {
+                throw new Error('Invalid threshold timestamp');
+              }
+              document.getElementById("timestamp_txt").textContent =
                 "The threshold is forecast to be reached " + formatDashboardTime(timestamp_data.timestamp) + ".";
             }
           })
           .catch((error) => {
+            if (generation !== thresholdRefreshGeneration) return;
             console.error("Error fetching threshold:", error);
             const timestampTxt = document.getElementById("timestamp_txt");
             if (timestampTxt) {
@@ -555,9 +865,13 @@
       }
 
       function fetchIrrigationRecommendation() {
+        const generation = ++recommendationRefreshGeneration;
         return fetch("../api/getIrrigationRecommendation")
           .then((response) => response.json())
           .then((data) => {
+            // The recommendation is a single UI snapshot. A response superseded
+            // while in flight must not publish any part of its state.
+            if (generation !== recommendationRefreshGeneration) return null;
             const note = document.getElementById("irrigation-recommendation");
             const pumpInput = document.getElementById("irrigation_value_form");
             const scheduleButton = document.getElementById("schedule_irrigation");
@@ -578,11 +892,22 @@
             const adviceMode = document.getElementById("advice-mode");
             const adviceModeBasis = document.getElementById("advice-mode-basis");
             const actionTitle = document.getElementById("plot-action-title");
+            const decisionCard = document.getElementById("plot-decision-card");
+            const decisionCopy = document.getElementById("plot-decision-copy");
+            const waterGrid = document.getElementById("plot-water-grid");
             const cropMeta = document.getElementById("plot-crop-meta");
             const stageMeta = document.getElementById("plot-stage-meta");
+            const asNumber = (value) => value === null || value === undefined ? NaN : Number(value);
 
             if (!data.available) {
-              note.textContent = data.reason || "Irrigation recommendation unavailable.";
+              if (decisionCard) decisionCard.hidden = true;
+              if (decisionCopy) decisionCopy.hidden = true;
+              if (waterGrid) waterGrid.hidden = true;
+              const unavailableCrop = data.crop || {};
+              const unavailableCondition = data.condition || {};
+              const configuredThreshold = asNumber(unavailableCondition.threshold_cbar);
+              const reason = data.reason || "Irrigation recommendation unavailable.";
+              note.textContent = reason.startsWith('Planting date is not available.') ? '' : reason;
               if (scheduleButton) scheduleButton.disabled = true;
               if (ndviEl) ndviEl.textContent = "--";
               if (ndreEl) ndreEl.textContent = "--";
@@ -590,21 +915,44 @@
               if (phenoStageEl) phenoStageEl.textContent = "--";
               if (phenoGddEl) phenoGddEl.textContent = "--";
               if (phenoKcEl) phenoKcEl.textContent = "--";
-              if (summaryThreshold) summaryThreshold.textContent = "--";
+              if (summaryThreshold) {
+                summaryThreshold.textContent = Number.isFinite(configuredThreshold)
+                  ? `${configuredThreshold.toFixed(1)} cbar`
+                  : "--";
+              }
               if (phenoEtcEl) phenoEtcEl.textContent = "--";
               if (adviceVolume) adviceVolume.textContent = "--";
-              if (adviceVolumeBasis) adviceVolumeBasis.textContent = "Add the plot area and irrigation method in Settings";
+              if (adviceVolumeBasis) adviceVolumeBasis.textContent = "Plot area and complete weather data are required to calculate volume";
               if (adviceTime) adviceTime.textContent = "Unavailable";
               if (adviceTimeBasis) adviceTimeBasis.textContent = "No recommendation time is available";
               if (adviceMode) adviceMode.textContent = "Not configured";
               if (adviceModeBasis) adviceModeBasis.textContent = "Choose a mode in Settings";
-              if (actionTitle) actionTitle.textContent = "Recommendation unavailable";
+              if (actionTitle) actionTitle.textContent = data.model_forecast_available
+                ? "Tension forecast available"
+                : "Recommendation unavailable";
+              if (cropMeta) {
+                const cropLabel = unavailableCrop.crop_name
+                  || unavailableCrop.type
+                  || data.crop_type;
+                cropMeta.textContent = !cropLabel
+                  ? "--"
+                  : cropLabel;
+              }
+              if (stageMeta) {
+                stageMeta.textContent = unavailableCrop.current_stage
+                  || data.growth_stage
+                  || "--";
+              }
               if (stalenessBanner) {
                 stalenessBanner.classList.remove("visible");
                 stalenessBanner.textContent = "";
               }
               return data;
             }
+
+            if (decisionCard) decisionCard.hidden = false;
+            if (decisionCopy) decisionCopy.hidden = false;
+            if (waterGrid) waterGrid.hidden = false;
 
             const action = data.action || {};
             const condition = data.condition || {};
@@ -614,9 +962,11 @@
             const satellite = data.satellite || {};
             const freshness = data.freshness || {};
             const timing = data.timing || {};
-            const asNumber = (value) => value === null || value === undefined ? NaN : Number(value);
-            const depthMm = asNumber(water.net_depth_mm ?? water.recommended_depth_mm);
             const volumeM3 = asNumber(water.recommended_volume_m3);
+            const calculatedRequirementM3 = asNumber(
+              water.calculated_requirement_volume_m3);
+            const appliedSinceCalculationM3 = asNumber(
+              water.applied_since_previous_calculation_m3);
             const actuatorBased = action.advisory_only === false;
             const etcDailyValue = asNumber(weather.etc_daily_mm);
             const satNdvi = satellite.ndvi;
@@ -632,9 +982,9 @@
             const gddCumulative = crop.gdd_cumulative;
             const kcValue = crop.kc;
             const thresholdCbar = asNumber(condition.threshold_cbar);
-            const irrigationNeeded = Number.isFinite(depthMm) && depthMm > 0;
-            const farmerReason = condition.status === "threshold_exceeded"
-              ? "The soil is too dry."
+            const irrigationNeeded = action.should_irrigate === true;
+            const farmerReason = ["threshold_exceeded", "at_threshold"].includes(condition.status)
+              ? "The soil has reached the irrigation trigger."
               : "The soil is expected to become too dry.";
             const modeDetails = {
               automatic: ["Automatic", "The system starts irrigation"],
@@ -668,8 +1018,8 @@
 
             currentIrrigationActuatorBased = actuatorBased;
             if (actionTitle) actionTitle.textContent = actionHeading;
-            if (cropMeta) cropMeta.textContent = crop.crop_name || crop.crop_type || "Crop not configured";
-            if (stageMeta) stageMeta.textContent = growthStage || "Stage unavailable";
+            if (cropMeta) cropMeta.textContent = crop.crop_name || crop.crop_type || "--";
+            if (stageMeta) stageMeta.textContent = growthStage || "--";
             setPumpActuatorVisibility(actuatorBased);
             if (scheduleButton) {
               scheduleButton.textContent = action.mode === "approval_required"
@@ -682,17 +1032,13 @@
               if (pumpInput && !Number.isNaN(volumeM3) && volumeM3 > 0) {
                 pumpInput.value = volumeM3.toFixed(2);
               }
-              note.textContent = `${farmerReason} Recent and expected rain are already included in the recommended amount.`;
+              note.textContent = `${farmerReason} The displayed volume is calculated from crop demand, effective rain, efficiency, and plot area.`;
             } else {
               if (scheduleButton) scheduleButton.disabled = true;
               if (pumpInput) pumpInput.value = "0.00";
               note.textContent = irrigationNeeded
-                ? `${farmerReason} Recent and expected rain are already included in the recommended amount.`
+                ? `${farmerReason} The calculated amount is shown below for manual application.`
                 : `No irrigation is needed today. ${condition.message || "The crop water need and expected rain have been considered."}`;
-            }
-
-            if (Number.isNaN(depthMm)) {
-              note.textContent = condition.message || note.textContent;
             }
 
             if (ndviEl) {
@@ -743,10 +1089,29 @@
                 : "Amount unavailable";
             }
             if (adviceVolumeBasis) {
-              if (Number.isFinite(volumeM3)) {
-                adviceVolumeBasis.textContent = `${volumeM3.toFixed(2)} m³. Rain has already been considered.`;
+              if (!irrigationNeeded && Number.isFinite(volumeM3)) {
+                adviceVolumeBasis.textContent = (
+                  Number.isFinite(appliedSinceCalculationM3)
+                  && appliedSinceCalculationM3 > 0
+                  && Number.isFinite(calculatedRequirementM3)
+                  && appliedSinceCalculationM3 >= calculatedRequirementM3
+                )
+                  ? "Recorded irrigation already covers this calculated requirement."
+                  : "Soil conditions do not call for irrigation now.";
+              } else if (Number.isFinite(volumeM3)) {
+                const requirement = water.outlook?.requirement || {};
+                const net = asNumber(requirement.remaining_net_irrigation_mm);
+                const remainingGross = asNumber(
+                  requirement.remaining_gross_irrigation_mm);
+                const appliedText = Number.isFinite(appliedSinceCalculationM3)
+                  && appliedSinceCalculationM3 > 0
+                  ? ` ${Math.round(appliedSinceCalculationM3 * 1000).toLocaleString()} litres already recorded as applied since the previous calculation.`
+                  : "";
+                adviceVolumeBasis.textContent = Number.isFinite(net) && Number.isFinite(remainingGross)
+                  ? `${net.toFixed(1)} mm net demand / ${remainingGross.toFixed(1)} mm gross remaining.${appliedText}`
+                  : `${volumeM3.toFixed(2)} m³ remaining crop requirement.${appliedText}`;
               } else {
-                adviceVolumeBasis.textContent = "Add the plot area and irrigation method in Settings";
+                adviceVolumeBasis.textContent = "Volume needs plot area plus complete ET₀ and rainfall forecasts";
               }
             }
             if (adviceTime) {
@@ -760,50 +1125,36 @@
             if (adviceMode) adviceMode.textContent = configuredMode[0];
             if (adviceModeBasis) adviceModeBasis.textContent = configuredMode[1];
 
-            if (stalenessBanner) {
-              if (freshness.stale === true) {
-                const parts = [];
-                if (staleWeather) {
-                  const wText = typeof weatherAge === "number"
-                    ? `${weatherAge.toFixed(1)}h old`
-                    : "stale";
-                  parts.push(`Weather ${wText}`);
-                }
-                if (staleSatellite) {
-                  const sText = typeof satAge === "number"
-                    ? `${satAge.toFixed(1)}h old`
-                    : "stale";
-                  parts.push(`Satellite ${sText}`);
-                }
-                stalenessBanner.textContent =
-                  `External data is stale: ${parts.join("; ")}. Forecasts use cached data.`;
-                stalenessBanner.classList.add("visible");
-              } else {
-                stalenessBanner.classList.remove("visible");
-                stalenessBanner.textContent = "";
-              }
-            }
-
             syncIrrigationScheduleState();
 
             return data;
           })
           .catch((error) => {
             console.error("Error fetching irrigation recommendation:", error);
+            const actionTitle = document.getElementById("plot-action-title");
+            const note = document.getElementById("irrigation-recommendation");
+            const decisionCard = document.getElementById("plot-decision-card");
+            const decisionCopy = document.getElementById("plot-decision-copy");
+            const waterGrid = document.getElementById("plot-water-grid");
+            if (decisionCard) decisionCard.hidden = true;
+            if (decisionCopy) decisionCopy.hidden = true;
+            if (waterGrid) waterGrid.hidden = true;
+            if (actionTitle) actionTitle.textContent = "Recommendation unavailable";
+            if (note) note.textContent = "The recommendation response could not be loaded.";
           });
       }
 
       async function loadWeatherForecast() {
+        console.info('[IRRIGATION_TRACE] weather forecast: request started');
+        const generation = ++weatherRefreshGeneration;
         const forecast = await safeFetchJson('../api/getWeatherForecast');
+        console.info('[IRRIGATION_TRACE] weather forecast: request completed', forecast);
+        if (generation !== weatherRefreshGeneration) return null;
         const container = document.getElementById('weather-forecast-grid');
         if (!container) return;
 
         if (!forecast || !Array.isArray(forecast.days)) {
           container.innerHTML = '<div class="weather-empty">No forecast data.</div>';
-          const todayValue = document.getElementById('farm-today-weather');
-          const todayDetail = document.getElementById('farm-today-weather-detail');
-          if (todayValue) todayValue.textContent = '--';
-          if (todayDetail) todayDetail.textContent = 'Forecast unavailable';
           return;
         }
 
@@ -811,13 +1162,6 @@
         const todayMin = Number(today.temperature_min_c);
         const todayMax = Number(today.temperature_max_c);
         const todayRain = Number(today.rain_mm);
-        const todayValue = document.getElementById('farm-today-weather');
-        const todayDetail = document.getElementById('farm-today-weather-detail');
-        if (todayValue) todayValue.textContent = Number.isFinite(todayMin) && Number.isFinite(todayMax)
-          ? `${todayMin.toFixed(0)}–${todayMax.toFixed(0)} °C` : '--';
-        if (todayDetail) todayDetail.textContent = Number.isFinite(todayRain)
-          ? `Rain total ${todayRain.toFixed(1)} mm` : 'Rain unavailable';
-
         container.innerHTML = forecast.days.map((day, index) => {
           const numberOrNaN = (value) => value === null || value === undefined ? NaN : Number(value);
           const parsedDate = day.date ? new Date(`${day.date}T12:00:00`) : null;
@@ -842,6 +1186,13 @@
               <div class="weather-detail">Avg wind ${Number.isFinite(wind) ? wind.toFixed(1) : '--'} km/h</div>
             </div>`;
         }).join('');
+      }
+
+      async function loadEOObservationTrace() {
+        console.info('[IRRIGATION_TRACE] EO observation: request started');
+        const observation = await safeFetchJson('../api/getEOObservation');
+        console.info('[IRRIGATION_TRACE] EO observation: request completed', observation);
+        return observation;
       }
 
       function setActiveGrowthStage(stageLabel) {
@@ -869,13 +1220,6 @@
         });
       }
 
-      function isDynamicThresholdMode(payload) {
-        const mode = String(payload?.threshold_mode || '').toLowerCase();
-        if (mode === 'dynamic') return true;
-        if (mode === 'static') return false;
-        return Boolean(payload?.use_dynamic_threshold);
-      }
-
       function syncIrrigationScheduleState() {
         // Placeholder for future schedule state sync.
       }
@@ -892,17 +1236,17 @@
       let manualIrrigationRequestKey = null;
 
       function irrigateManually() {
-        const inputElement = document.getElementById("irrigation_value_form");
         const button = document.getElementById("schedule_irrigation");
-        const amount = parseFloat(inputElement.value);
-
-        if (!isNaN(amount) && amount >= 0.01) {
-          if (!manualIrrigationRequestKey) {
-            manualIrrigationRequestKey = (window.crypto?.randomUUID?.() ||
-              `manual-${Date.now()}-${amount}`);
-          }
-          if (button) button.disabled = true;
-          fetch(`../api/irrigateManually?amount=${encodeURIComponent(amount)}&idempotency_key=${encodeURIComponent(manualIrrigationRequestKey)}`)
+        if (!manualIrrigationRequestKey) {
+          manualIrrigationRequestKey = (window.crypto?.randomUUID?.() ||
+            `manual-${Date.now()}`);
+        }
+        if (button) button.disabled = true;
+        return fetch('../api/irrigateManually', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+          body: new URLSearchParams({idempotency_key: manualIrrigationRequestKey}).toString()
+        })
             .then((response) => response.text())
             .then((data) => {
               const dataObject = JSON.parse(data);
@@ -927,9 +1271,6 @@
               manualIrrigationRequestKey = null;
               if (button && currentIrrigationActuatorBased) button.disabled = false;
             });
-        } else {
-          alert("First type a valid amount in m³ to be irrigated!(min 0.01m³=10l)");
-        }
       }
 
       function startTraining() {
@@ -944,13 +1285,15 @@
           <div class="btn-ripple"></div>
         `;
 
-        fetch(`../api/startTraining`)
-          .then((response) => response.text())
-          .then((data) => {
-            if (data == "") {
-              alert(
-                "Training process was started, page will reload when procedure is finished!"
-              );
+        const plotQuery = activeTrainingPlotId
+          ? `?plot_id=${encodeURIComponent(activeTrainingPlotId)}` : '';
+        fetch(`../api/startTraining${plotQuery}`)
+          .then(async (response) => ({
+            ok: response.ok,
+            payload: await response.json().catch(() => ({})),
+          }))
+          .then(({ok, payload}) => {
+            if (ok && payload.status === "started") {
               waitForTraining = true;
               isTrainingReady();
             } else {
@@ -961,9 +1304,11 @@
                 <span class="btn-text">Start Training</span>
                 <div class="btn-ripple"></div>
               `;
-              alert("Cannot start, see console for more info! Error:", data);
+              const details = Array.isArray(payload.missing)
+                ? ` Missing: ${payload.missing.join(', ')}.` : '';
+              alert(`${payload.message || 'Training could not be started.'}${details}`);
             }
-            console.log(data);
+            console.log(payload);
           })
           .catch((error) => {
             // Re-enable button if there's an error
@@ -974,7 +1319,7 @@
               <div class="btn-ripple"></div>
             `;
             console.error("Error starting training:", error);
-          });
+            });
       }
 
       function sleep(ms) {
@@ -985,22 +1330,27 @@
         const train_button = document.getElementById("train_btn");
 
         while (waitForTraining) {
-          fetch(`../api/isTrainingReady`)
-            .then((response) => response.json())
-            .then((response_data) => {
-              if (response_data.isTrainingFinished == true) {
-                waitForTraining = false;
-                // Re-enable button when training is finished
-                train_button.disabled = false;
-                train_button.innerHTML = `
-                  <span class="material-symbols-outlined">psychology</span>
-                  <span class="btn-text">Start Training</span>
-                  <div class="btn-ripple"></div>
-                `;
-                loadStuff();
-                alert("Training process is finished!");
-              }
-            });
+          const plotQuery = activeTrainingPlotId
+            ? `?plot_id=${encodeURIComponent(activeTrainingPlotId)}` : '';
+          const response_data = await safeFetchJson(`../api/isTrainingReady${plotQuery}`);
+          if (response_data?.isTrainingFinished === true || response_data?.status === 'error') {
+            waitForTraining = false;
+            train_button.disabled = false;
+            train_button.innerHTML = `
+              <span class="material-symbols-outlined">psychology</span>
+              <span class="btn-text">Start Training</span>
+              <div class="btn-ripple"></div>
+            `;
+            if (response_data.status === 'error') {
+              alert(`Training failed: ${response_data.error || 'See application logs.'}`);
+            } else {
+              await loadStuff();
+              alert(response_data.recommendation_available
+                ? 'Training completed. Forecast and irrigation decision are available.'
+                : `Training completed, but the irrigation recommendation is unavailable: ${response_data.recommendation_error || 'Check the plot status for missing inputs or safety restrictions.'}`);
+            }
+            break;
+          }
           await sleep(TrainingReadyCheck);
         }
       }
@@ -1010,9 +1360,9 @@
         console.log("Starting dashboard data load...");
         const currentPage = document.body.dataset.page || 'dashboard';
         const pageLoaders = currentPage === 'plot'
-          ? [updateMetrics(), fetchIrrigationRecommendation(), loadCharts(), fetchThreshold()]
+          ? [updateMetrics(), fetchIrrigationRecommendation(), loadCharts(), fetchThreshold(), loadEOObservationTrace()]
           : currentPage === 'phenology'
-            ? [loadPhenologySummary(), fetchIrrigationRecommendation()]
+            ? [loadPhenologySummary(), fetchIrrigationRecommendation(), loadEOObservationTrace()]
             : [loadFarmDashboard(), loadWeatherForecast()];
         const loadPromises = Promise.allSettled(pageLoaders);
 
@@ -1038,7 +1388,13 @@
         };
 
         loadPromises
-          .then(() => finishLoading())
+          .then((results) => {
+            results.forEach((result, index) => {
+              if (result.status === 'rejected') console.error(
+                `Dashboard loader ${index} failed`, result.reason);
+            });
+            finishLoading();
+          })
           .catch((err) => {
             console.error("Error loading one or more resources:", err);
             finishLoading();
@@ -1094,22 +1450,6 @@
         }, 60000);
       });
 
-      function adjustAmount(change) {
-        const input = document.getElementById("irrigation_value_form");
-        let currentValue = parseFloat(input.value) || 0;
-        let newValue = currentValue + change;
-        newValue = Math.round(newValue * 100) / 100; // Round to 2 decimal places
-
-        // Safety checks
-        if (newValue < 0.01) {
-          newValue = 0.01;
-        }
-        if (newValue > 1000) {
-          newValue = 1000;
-        }
-
-        input.value = newValue;
-      }
     </script>
   </head>
 
@@ -1169,7 +1509,6 @@
     <div class="main-content">
       <div id="alert-notification" class="alert-notification"></div>
       <div id="connectivity-notification" class="connectivity-notification" role="status"></div>
-      <div id="data-staleness-notification" class="data-staleness-notification"></div>
 
       <div id="page-dashboard" class="page active">
 
@@ -1181,13 +1520,12 @@
           <div class="farm-summary-card"><span>Total plots</span><strong id="farm-total-plots">--</strong></div>
           <div class="farm-summary-card attention"><span>Need attention</span><strong id="farm-attention-count">--</strong></div>
           <div class="farm-summary-card"><span>Scheduled irrigations</span><strong id="farm-scheduled-irrigations">--</strong><small id="farm-scheduled-water">--</small></div>
-          <div class="farm-summary-card weather-summary-card"><span>Today’s weather</span><strong id="farm-today-weather">--</strong><small id="farm-today-weather-detail">--</small></div>
         </div>
         <div class="farm-operations-grid">
           <div class="card farm-plots-panel"><div class="panel-title">Plot status</div><div id="farm-plot-list" class="farm-plot-list"><div class="dashboard-empty">Loading plots…</div></div></div>
         </div>
         <div class="card dashboard-weather-forecast">
-          <div class="weather-heading"><div class="weather-title">Farm weather forecast</div><span class="weather-source-note">Daily outlook</span></div>
+          <div class="weather-heading"><div class="weather-title">Farm weather forecast</div></div>
           <div id="weather-forecast-grid" class="weather-grid"></div>
         </div>
       </section>
@@ -1201,7 +1539,8 @@
             <div class="plot-title-copy">
               <span class="context-label">Selected plot</span>
               <h1 id="selectedPlotTitle">Plot details</h1>
-              <div class="plot-context"><span id="plot-crop-meta">Crop not configured</span><span id="plot-stage-meta">Stage unavailable</span></div>
+              <div class="plot-context" hidden><span id="plot-crop-meta">--</span><span id="plot-stage-meta">--</span></div>
+              <div class="plot-context plot-spatial-context" hidden><span id="plot-location-meta">Plot/EO reference point unavailable</span><span id="plot-area-meta">Area not measured</span></div>
             </div>
           </header>
 
@@ -1210,39 +1549,39 @@
             <button type="button" data-plot-view="phenology" onclick="navigateTo('phenology', this)">Growth &amp; Water Demand</button>
           </nav>
 
-          <section class="plot-decision-card" aria-labelledby="plot-action-title">
+          <section id="plot-decision-card" class="plot-decision-card" aria-labelledby="plot-action-title" hidden>
             <div class="plot-decision-heading">
               <span>Today’s plot status</span>
               <div class="alert-pill" hidden></div>
             </div>
-            <div class="plot-decision-copy">
+            <div id="plot-decision-copy" class="plot-decision-copy" hidden>
               <h2 id="plot-action-title">Loading recommendation…</h2>
               <p id="irrigation-recommendation">Waiting for irrigation recommendation...</p>
             </div>
-            <div class="plot-water-grid" aria-label="Today’s irrigation details">
-              <div class="plot-water-item plot-water-amount"><span>Water to apply</span><strong id="advice-volume">--</strong><small id="advice-volume-basis">Rain has already been considered</small></div>
+            <div id="plot-water-grid" class="plot-water-grid" aria-label="Today’s irrigation details" hidden>
+              <div class="plot-water-item plot-water-amount"><span>Calculated water to apply</span><strong id="advice-volume">--</strong><small id="advice-volume-basis">ETc, effective rain, and application efficiency are included</small></div>
               <div class="plot-water-item"><span>When to irrigate</span><strong id="advice-time">--</strong><small id="advice-time-basis">Before the soil becomes too dry</small></div>
               <div class="plot-water-item"><span>Irrigation mode</span><strong id="advice-mode">--</strong><small id="advice-mode-basis">Configured by the farmer</small></div>
             </div>
           </section>
 
           <section class="plot-readings-section" aria-labelledby="plot-readings-title">
-            <div class="plot-content-heading"><div><h2 id="plot-readings-title">Current readings</h2><p>Latest plot measurements and the active irrigation trigger.</p></div></div>
+            <div class="plot-content-heading"><div><h2 id="plot-readings-title">Current readings</h2></div></div>
             <div class="plot-readings-grid">
-              <div class="plot-reading-card"><span id="summary-tension-label">Soil tension</span><strong id="summary-tension">--</strong><small>Current root-zone reading</small></div>
-              <div class="plot-reading-card"><span>Today’s dynamic threshold</span><strong id="summary-threshold">--</strong><small>Active irrigation trigger</small></div>
-              <div class="plot-reading-card"><span>Soil temperature</span><strong id="summary-temp">--</strong><small>Latest sensor average</small></div>
-              <div class="plot-reading-card"><span>Soil VWC</span><strong id="summary-vwc">--</strong><small>Volumetric water content</small></div>
+              <div class="plot-reading-card"><span id="summary-tension-label">Soil tension</span><strong id="summary-tension">--</strong><small id="summary-tension-source" hidden>Current sensor reading</small></div>
+              <div class="plot-reading-card"><span>Active field threshold</span><strong id="summary-threshold">--</strong><small id="threshold-source-badge" class="threshold-badge static" hidden>Threshold unavailable</small></div>
+              <div class="plot-reading-card"><span>Soil temperature</span><strong id="summary-temp">--</strong><small id="summary-temp-source" hidden>Latest sensor average</small></div>
+              <div class="plot-reading-card"><span>Soil VWC</span><strong id="summary-vwc">--</strong><small id="summary-vwc-source" hidden>Volumetric water content</small></div>
             </div>
           </section>
 
           <section class="plot-trend-card" aria-labelledby="plot-trend-title">
             <div class="plot-content-heading trend-heading">
-              <div><h2 id="plot-trend-title">Soil tension trend</h2><p>Past sensor observations followed by the prediction returned by the backend.</p></div>
-              <span id="threshold-source-badge" class="threshold-badge static">Static threshold</span>
+              <div><h2 id="plot-trend-title">Predicted sensor values <span class="chart-info" aria-hidden="true">ⓘ</span></h2><p id="timestamp_txt" role="status"></p></div>
             </div>
             <div class="forecast-chart-frame"><canvas id="chart_forecast" class="chart-area"></canvas></div>
-            <div class="chart-footnotes"><p id="timestamp_txt"></p><p id="forecast_horizons_txt"></p></div>
+            <p id="chart-data-status" role="status"></p>
+            <div class="chart-footnotes"><p id="forecast_horizons_txt"></p><p id="sensor-data-provenance"></p></div>
           </section>
         </div>
       </div>
@@ -1256,7 +1595,6 @@
           <div class="phenology-header">
             <div>
               <h2>Growth Stage Timeline</h2>
-              <p class="phenology-subtitle">Stage tracking, crop coefficients, and threshold context.</p>
             </div>
             <div class="phenology-meta">
               <div class="meta-item">
@@ -1264,7 +1602,7 @@
                 <strong id="pheno-crop-name">--</strong>
               </div>
               <div class="meta-item">
-                <span>Planting date</span>
+                <span id="pheno-date-label">Planting date</span>
                 <strong id="pheno-planting-date">--</strong>
               </div>
               <div class="meta-item">
@@ -1279,7 +1617,7 @@
           <div class="phenology-metric">
             <div class="metric-label">Threshold</div>
             <div class="metric-value"><span id="pheno-threshold-value">--</span> <span class="metric-unit">cbar</span></div>
-            <div class="metric-subtext" id="pheno-threshold-source">Static threshold</div>
+            <div class="metric-subtext" id="pheno-threshold-source">Threshold unavailable</div>
           </div>
           <div class="phenology-metric">
             <div class="metric-label">Kc today</div>
@@ -1311,8 +1649,8 @@
 
         <div class="card phenology-table">
           <div class="table-header">
-            <h3>Stage thresholds</h3>
-            <p id="pheno-threshold-note" class="table-subtitle">Thresholds reflect crop stage and soil texture.</p>
+            <h3>Crop development reference</h3>
+            <p id="pheno-threshold-note" class="table-subtitle" hidden></p>
           </div>
           <div class="phenology-table-wrap">
             <table>
@@ -1321,17 +1659,18 @@
                   <th>Stage</th>
                   <th>GDD range</th>
                   <th>Kc range</th>
-                  <th>Threshold delta (cbar)</th>
+                  <th>Tension trigger</th>
                 </tr>
               </thead>
               <tbody id="pheno-stage-table">
                 <tr>
-                  <td colspan="4">Loading crop thresholds...</td>
+                  <td colspan="4">Loading crop development data...</td>
                 </tr>
               </tbody>
             </table>
           </div>
         </div>
+
       </div>
 
       <div class="page-switcher">

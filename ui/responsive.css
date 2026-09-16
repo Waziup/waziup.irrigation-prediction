@@ -746,7 +746,7 @@ body {
 .plot-decision-copy h2 {
   margin: 0;
   color: #24612d;
-  font-size: clamp(1.75rem, 3.4vw, 2.45rem);
+  font-size: clamp(1.4rem, 2.3vw, 1.8rem);
   line-height: 1.08;
   letter-spacing: -.035em;
 }
@@ -796,7 +796,8 @@ body {
 
 .plot-water-amount strong {
   color: #245f2b;
-  font-size: clamp(1.45rem, 3vw, 1.85rem);
+  font-size: clamp(1.05rem, 1.8vw, 1.35rem);
+  overflow-wrap: break-word;
 }
 
 @media (max-width: 760px) {
@@ -860,9 +861,9 @@ body {
 
 .plot-reading-card strong {
   color: #182332;
-  font-size: clamp(1.35rem, 2.5vw, 1.75rem);
-  line-height: 1.05;
-  overflow-wrap: anywhere;
+  font-size: clamp(1.15rem, 1.8vw, 1.4rem);
+  line-height: 1.25;
+  overflow-wrap: normal;
 }
 
 .plot-trend-card {
@@ -880,8 +881,22 @@ body {
   padding: 0;
 }
 
+.plot-trend-card .trend-heading h2 {
+  color: #0f172a;
+  font-size: 1.14rem;
+  font-weight: 700;
+}
+
+.chart-info {
+  display: inline-block;
+  margin-left: 5px;
+  color: #64748b;
+  font-size: .9em;
+  font-weight: 500;
+}
+
 .plot-trend-card .forecast-chart-frame {
-  height: clamp(310px, 40vw, 480px);
+  height: clamp(410px, 46vw, 560px);
 }
 
 .plot-trend-card .chart-footnotes {
@@ -947,7 +962,7 @@ body {
   }
 
   .plot-trend-card .forecast-chart-frame {
-    height: 315px;
+    height: 390px;
   }
 }
 
@@ -955,4 +970,10 @@ body {
   .plot-readings-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Intentionally removed UI copy must stay hidden even when a component rule
+   assigns its own display mode. */
+[hidden] {
+  display: none !important;
 }
