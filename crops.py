@@ -1,9 +1,10 @@
 """
 
-Sources:
-    FAO-56 (Allen et al. 1998)   Kc values, stage definitions
-    McMaster & Wilhelm (1997)    GDD clipping methodology
-    Gebeyhu et al. (2022)        Ethiopian GDD-Kc field validation
+Sources and status:
+    FAO-56 supports the Kc method and representative Kc values.
+    McMaster & Wilhelm (1997) discusses GDD calculation methods.
+
+
 
 Adding a new crop:
     1. Add a CropParams entry to CROP_PARAMS.
@@ -20,10 +21,8 @@ class CropParams:
     """
     Immutable crop-specific parameters for the phenology engine.
 
-    GDD thresholds and Kc values come from FAO-56. Threshold delta offsets
-    are the agronomic tuning layer — they convert a soil-texture irrigation
-    trigger baseline into a
-    crop-stage-aware irrigation trigger point.
+    Kc and depletion-fraction values are FAO-style priors. GDD thresholds are
+    engineering estimates and require local validation.
     """
     name: str
 
@@ -42,14 +41,9 @@ class CropParams:
     kc_mid: float   # mid-season peak (full canopy)
     kc_end: float   # late-season end (senescence)
 
-    # Irrigation threshold offsets per stage (cbar added to trigger_base)
-    # Tension sensors irrigate when current_tension > threshold.
-    #   Negative -> irrigate EARLIER (lower trigger, more conservative)
-    #   Positive -> allow MORE drying (higher trigger; controlled deficit)
-    delta_pre_emergence: float = 0.0
-    delta_development: float = -6.0
-    delta_mid_season: float = -15.0
-    delta_late_season: float = 4.0
+    # FAO-56 Table 22 depletion fraction for ETc near 5 mm/day. Installations
+    # may override this with a locally calibrated value.
+    depletion_fraction: float = 0.50
 
     # Perennials (olive, grape) reset GDD at the annual phenological start
     # date rather than at a planting event.
@@ -66,10 +60,7 @@ CROP_PARAMS: Final[Dict[str, CropParams]] = {
         t_base=10.0, t_ceiling=30.0,
         gdd_emergence=100, gdd_dev_end=700, gdd_mid_end=1100, gdd_maturity=1400,
         kc_ini=0.30, kc_mid=1.20, kc_end=0.35,
-        delta_pre_emergence=0.0,
-        delta_development=-5.0,     # leaf expansion — slightly proactive irrigation
-        delta_mid_season=-15.0,     # flowering/grain fill — most proactive window
-        delta_late_season=10.0,     # controlled deficit improves starch deposition
+        depletion_fraction=0.55,
         validation_lag_days=5.0,
     ),
     "beans": CropParams(
@@ -77,10 +68,7 @@ CROP_PARAMS: Final[Dict[str, CropParams]] = {
         t_base=10.0, t_ceiling=30.0,
         gdd_emergence=80, gdd_dev_end=400, gdd_mid_end=700, gdd_maturity=1100,
         kc_ini=0.35, kc_mid=1.10, kc_end=0.30,
-        delta_pre_emergence=0.0,
-        delta_development=-6.0,     # pod-set stage highly sensitive
-        delta_mid_season=-16.0,     # flower drop under moderate stress
-        delta_late_season=8.0,      # mild deficit OK for pod drying
+        depletion_fraction=0.45,
         validation_lag_days=4.0,
     ),
     "wheat": CropParams(
@@ -88,10 +76,7 @@ CROP_PARAMS: Final[Dict[str, CropParams]] = {
         t_base=0.0, t_ceiling=26.0,
         gdd_emergence=120, gdd_dev_end=500, gdd_mid_end=1000, gdd_maturity=1500,
         kc_ini=0.30, kc_mid=1.15, kc_end=0.25,
-        delta_pre_emergence=0.0,
-        delta_development=-5.0,
-        delta_mid_season=-12.0,     # anthesis window critical
-        delta_late_season=8.0,      # grain hardening benefits from deficit
+        depletion_fraction=0.55,
         validation_lag_days=6.0,
     ),
     "tomato": CropParams(
@@ -99,10 +84,7 @@ CROP_PARAMS: Final[Dict[str, CropParams]] = {
         t_base=10.0, t_ceiling=30.0,
         gdd_emergence=90, gdd_dev_end=450, gdd_mid_end=800, gdd_maturity=1200,
         kc_ini=0.45, kc_mid=1.15, kc_end=0.70,
-        delta_pre_emergence=0.0,
-        delta_development=-8.0,     # fruit set requires consistent moisture
-        delta_mid_season=-18.0,     # flower drop, blossom-end rot
-        delta_late_season=10.0,     # deficit improves fruit Brix
+        depletion_fraction=0.40,
         validation_lag_days=3.0,
     ),
     "sorghum": CropParams(
@@ -110,36 +92,29 @@ CROP_PARAMS: Final[Dict[str, CropParams]] = {
         t_base=10.0, t_ceiling=38.0,    # higher ceiling: heat-tolerant
         gdd_emergence=100, gdd_dev_end=600, gdd_mid_end=900, gdd_maturity=1500,
         kc_ini=0.30, kc_mid=1.00, kc_end=0.55,
-        delta_pre_emergence=0.0,
-        delta_development=-4.0,
-        delta_mid_season=-10.0,     # more drought-tolerant than maize
-        delta_late_season=12.0,     # significant late-season deficit tolerated
+        depletion_fraction=0.55,
         validation_lag_days=6.0,
+    ),
+    "rice": CropParams(
+        name="Rice (Oryza sativa)",
+
+        t_base=10.0, t_ceiling=35.0,
+        gdd_emergence=100, gdd_dev_end=650, gdd_mid_end=1050, gdd_maturity=1450,
+        # FAO-56 rice priors; flooded-soil evaporation is not modelled here.
+        kc_ini=1.05, kc_mid=1.20, kc_end=0.90,
+        depletion_fraction=0.20,
+        validation_lag_days=5.0,
     ),
     "olive": CropParams(
         name="Olive (Olea europaea)",
         t_base=7.0, t_ceiling=35.0,
         gdd_emergence=0, gdd_dev_end=400, gdd_mid_end=1200, gdd_maturity=2000,
         kc_ini=0.55, kc_mid=0.70, kc_end=0.65,
-        delta_pre_emergence=0.0,
-        delta_development=-3.0,     # drought-adapted but fruit set needs moisture
-        delta_mid_season=-7.0,      # less sensitive than annual crops
-        delta_late_season=9.0,      # deficit irrigation standard practice
+        depletion_fraction=0.65,
         is_perennial=True,
         validation_lag_days=8.0,
     ),
-    # Generic fallback — conservative mid-sensitivity.
-    "generic": CropParams(
-        name="Generic crop (default)",
-        t_base=10.0, t_ceiling=30.0,
-        gdd_emergence=100, gdd_dev_end=500, gdd_mid_end=900, gdd_maturity=1300,
-        kc_ini=0.30, kc_mid=1.15, kc_end=0.40,
-        delta_pre_emergence=0.0,
-        delta_development=-6.0,
-        delta_mid_season=-15.0,
-        delta_late_season=4.0,
-        validation_lag_days=5.0,
-    ),
+
 }
 
 
@@ -161,8 +136,9 @@ STAGE_NAMES: Final[Dict[int, str]] = {
 
 # SOIL TEXTURE -> IRRIGATION TRIGGER BASE LOOKUP
 #
-# Practical irrigation trigger tensions (cbar) by USDA texture class (0–11).
-# Source: van Genuchten / FAO tables.
+# Legacy texture-only trigger estimates.  These are retained for analysis and
+# migration diagnostics but are not used by the production threshold path.
+# Soil texture alone cannot define a safe tension trigger.
 # Keys match TEXTURE_CLASS_MAP in fetch_soil_data.py.
 
 IRRIGATION_TRIGGER_BASE_BY_TEXTURE: Final[Dict[int, float]] = {
@@ -187,7 +163,7 @@ IRRIGATION_TRIGGER_BASE_DEFAULT = 45.0
 def get_crop_params(crop_type: str) -> CropParams:
 
     if crop_type not in CROP_PARAMS:
-        known = [k for k in CROP_PARAMS if k != "generic"]
+        known = list(CROP_PARAMS)
         raise KeyError(
             f"Unknown crop_type '{crop_type}'. "
             f"Known crops: {known}. Add the crop to crops.py."

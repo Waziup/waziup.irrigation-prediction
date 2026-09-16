@@ -7,6 +7,7 @@ from typing import Iterable, Optional
 import numpy as np
 import pandas as pd
 import requests
+from weather_quality import deduplicate_weather_frame
 
 
 DEFAULT_BASE_URL = "https://www.smartafrihub.com/spaceiotbox/api"
@@ -204,6 +205,64 @@ def coordinates_supported_by_spaceiotbox(lat: float, lon: float) -> bool:
     )
 
 
+def diagnose_agro_climate_land(lat: float, lon: float) -> dict:
+    """Return a sanitized provider diagnostic without credentials or raw data."""
+    diagnostic = {
+        "provider": "SpaceIoTBox",
+        "endpoint": "/v1/agro_climate/land",
+        "coordinates": {"latitude": float(lat), "longitude": float(lon)},
+        "coordinates_supported": coordinates_supported_by_spaceiotbox(lat, lon),
+        "status": "not_requested",
+        "weather": {"rows": 0, "available_fields": [], "missing_fields": []},
+        "vegetation": {"available_fields": []},
+    }
+    if not diagnostic["coordinates_supported"]:
+        diagnostic["status"] = "outside_documented_coverage"
+        return diagnostic
+    try:
+        payload = fetch_agro_climate("land", lat, lon)
+        frame = normalize_weather_frame(payload)
+        available = [
+            column for column in LEGACY_WEATHER_COLUMNS
+            if column in frame and frame[column].notna().any()
+        ]
+        diagnostic["weather"] = {
+            "rows": int(len(frame)),
+            "start": (
+                pd.Timestamp(frame.index.min()).isoformat()
+                if not frame.empty else None),
+            "end": (
+                pd.Timestamp(frame.index.max()).isoformat()
+                if not frame.empty else None),
+            "available_fields": available,
+            "missing_fields": [
+                column for column in LEGACY_WEATHER_COLUMNS
+                if column not in available
+            ],
+        }
+        root = payload.get("data", payload) if isinstance(payload, dict) else {}
+        vegetation = (
+            root.get("vegetation_indices", {})
+            if isinstance(root, dict) else {})
+        diagnostic["vegetation"] = {
+            "available_fields": sorted(str(key) for key in vegetation.keys()),
+            "observation_date": (
+                vegetation.get("date") or vegetation.get("datetime")
+                or vegetation.get("timestamp")
+            ),
+        }
+        diagnostic["status"] = "ok" if available else "partial"
+    except Exception as exc:
+        response = getattr(exc, "response", None)
+        diagnostic.update({
+            "status": "error",
+            "http_status": getattr(response, "status_code", None),
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        })
+    return diagnostic
+
+
 def _tabular_frame_from_value(value: object) -> Optional[pd.DataFrame]:
     if isinstance(value, list):
         frame = pd.DataFrame(value)
@@ -348,19 +407,35 @@ def normalize_weather_frame(payload: object, start_date=None, end_date=None) -> 
         raise ValueError(
             f"Weather response had no rows within requested window {start_label}..{end_label}"
         )
-    return result
+    return deduplicate_weather_frame(result)
 
 
 def _covers_requested_window(frame: pd.DataFrame, start_bound, end_bound) -> bool:
-    """Require both requested date boundaries, not merely an overlap."""
+    """Require boundary coverage and every intervening UTC calendar date.
+
+    Both daily and hourly tables are supported by the normalizer. Do not
+    infer completeness from endpoints alone, or invent hourly observations
+    for a daily table. Sub-day cadence and field quality remain separate
+    validation concerns for consumers.
+    """
     if frame is None or frame.empty:
         return False
-    first_timestamp = pd.Timestamp(frame.index.min())
-    last_timestamp = pd.Timestamp(frame.index.max())
-    return (
+    index = pd.DatetimeIndex(frame.index)
+    if index.hasnans:
+        return False
+    first_timestamp = pd.Timestamp(index.min())
+    last_timestamp = pd.Timestamp(index.max())
+    if not (
         (start_bound is None or first_timestamp <= start_bound)
         and (end_bound is None or last_timestamp >= end_bound)
+    ):
+        return False
+    required_days = pd.date_range(
+        (start_bound if start_bound is not None else first_timestamp).normalize(),
+        (end_bound if end_bound is not None else last_timestamp).normalize(),
+        freq="D",
     )
+    return bool(required_days.isin(index.normalize()).all())
 
 
 def _fetch_open_meteo_segment(url, fields, lat, lon, start_bound, end_bound):
@@ -442,7 +517,7 @@ def fetch_weather_frame(lat: float, lon: float, start_date=None, end_date=None) 
                 except ValueError:
                     spaceiotbox_partial = None
                 fallback_reasons.append(
-                    "SpaceIoTBox returned only "
+                    "SpaceIoTBox has incomplete date coverage; returned "
                     f"{full_frame.index.min().date()}..{full_frame.index.max().date()}"
                 )
         except requests.HTTPError as exc:

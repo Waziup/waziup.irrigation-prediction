@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 phenology_engine.py — Growing Degree Days, crop growth stage tracking,
-                      dynamic Kc computation, and dynamic irrigation thresholds.
+                      dynamic Kc computation, and stage-aware tension triggers.
 
 Satellite fusion strategy:
-    NDVI  — best for sparse canopy (pre-emergence, development, senescence)
-    NDRE  — preferred for dense canopy when supplied by the EO/STAC proxy
+    NDVI  — conservative production input across crop stages
+    NDRE  — observational by default; experimental Kc input only when enabled
     SAR   — optional future input; not supplied by the current runtime source
     GDD   — biological plausibility check; caps satellite weight when the
             observed Kc implies a stage the thermal budget cannot support
@@ -41,11 +41,12 @@ log = logging.getLogger(__name__)
 # Kc from NDVI (Glenn et al. 2011 / Kamble et al. 2013)
 # Calibrated across irrigated crop studies; linear fit between NDVI and Kc.
 NDVI_KC_SLOPE = 1.457   # Kc_NDVI = NDVI_KC_SLOPE * NDVI + NDVI_KC_INTERCEPT
-NDVI_KC_INTERCEPT = -0.10
+NDVI_KC_INTERCEPT = -0.1725
 KC_NDVI_UPPER_CAP = 1.35    # global cap before crop-specific ceiling is applied
 
-# Kc from NDRE (Delegido et al. 2013, adapted)
-# Slope scaled so NDRE 0.1–0.6 maps to the same Kc range as NDVI 0–1.
+# Experimental Kc from NDRE. Delegido et al. (2011) supports red-edge use for
+# LAI/chlorophyll retrieval, not this Kc equation. This internal range mapping
+# is disabled in production fusion unless explicitly enabled for a field trial.
 NDRE_KC_SLOPE = 2.5     # Kc_NDRE = NDRE_KC_SLOPE * NDRE + NDRE_KC_INTERCEPT
 NDRE_KC_INTERCEPT = -0.05
 KC_NDRE_UPPER_CAP = 1.35    # same cap as NDVI
@@ -58,9 +59,9 @@ KC_UPPER_TOLERANCE = 1.10
 # Quality weight for satellite blending
 # w_base = clip(ndvi * NDVI_WEIGHT_SLOPE, 0, NDVI_WEIGHT_CAP)
 # slope=0.85 → weight saturates at NDVI ≈ 0.88 (healthy canopy range)
-# cap=0.75   → GDD always contributes ≥ 25% (satellite alone insufficient)
+# cap=0.35   → uncalibrated EO remains a correction to the GDD prior
 NDVI_WEIGHT_SLOPE = 0.85
-NDVI_WEIGHT_CAP = 0.75
+NDVI_WEIGHT_CAP = 0.35
 
 # NDRE-to-NDVI proxy scale factor when NDVI is absent at mid-season.
 # Empirical: NDRE 0.1–0.6 ≈ NDVI 0.15–0.90 for annual field crops.
@@ -99,6 +100,35 @@ _FORECAST_HORIZON_RE = re.compile(
     r"^(\d+(?:\.\d+)?)(?:h|hours?)?$", re.IGNORECASE)
 
 
+def phenology_season_start(
+    timestamp: Union[str, datetime, pd.Timestamp],
+    planting_date: Union[str, datetime, pd.Timestamp],
+    crop_type: str,
+) -> pd.Timestamp:
+    """Return the active season start for annual or perennial crops."""
+    value = pd.Timestamp(timestamp)
+    planted = pd.Timestamp(planting_date)
+    if value.tzinfo is not None and planted.tzinfo is None:
+        planted = planted.tz_localize(value.tzinfo)
+    elif value.tzinfo is None and planted.tzinfo is not None:
+        planted = planted.tz_localize(None)
+    elif value.tzinfo is not None and planted.tzinfo is not None:
+        planted = planted.tz_convert(value.tzinfo)
+    planted = planted.normalize()
+    if not get_crop_params(crop_type).is_perennial or value < planted:
+        return planted
+    try:
+        anniversary = planted.replace(year=value.year)
+    except ValueError:
+        anniversary = planted.replace(year=value.year, day=28)
+    if value.normalize() < anniversary:
+        try:
+            anniversary = planted.replace(year=value.year - 1)
+        except ValueError:
+            anniversary = planted.replace(year=value.year - 1, day=28)
+    return anniversary.normalize()
+
+
 def compute_daily_gdd(
     tmax: float,
     tmin: float,
@@ -108,13 +138,14 @@ def compute_daily_gdd(
     """
     Compute Growing Degree Days for a single day.
 
-    Uses the modified rectangle method (McMaster & Wilhelm 1997):
-        GDD = max(0, (min(Tmax, T_ceiling) + min(Tmin, T_ceiling)) / 2 - T_base)
+    Uses a bounded modified-average method:
+        T* = clip(T, T_base, T_ceiling)
+        GDD = max(0, (Tmax* + Tmin*) / 2 - T_base)
 
-    Tmax and Tmin are clipped to T_ceiling INDIVIDUALLY before averaging.
-    Temperatures above T_ceiling denature developmental enzymes — this
-    occurs regardless of nighttime recovery, so per-value clipping is
-    physiologically correct.
+    Tmax and Tmin are clipped to both crop bounds before averaging. This is the
+    rule used by runtime, training, and forecast code. The selected method and
+    its GDD breakpoints must be calibrated together; GDD conventions are not
+    interchangeable.
 
     Args:
         tmax:      Daily maximum temperature (°C)
@@ -128,10 +159,40 @@ def compute_daily_gdd(
     if np.isnan(tmax) or np.isnan(tmin):
         return 0.0
 
-    t_eff_max = min(tmax, t_ceiling)
-    t_eff_min = min(tmin, t_ceiling)
+    t_eff_max = float(np.clip(tmax, t_base, t_ceiling))
+    t_eff_min = float(np.clip(tmin, t_base, t_ceiling))
     t_mean = (t_eff_max + t_eff_min) / 2.0
     return max(0.0, t_mean - t_base)
+
+
+def daily_temperature_extrema(
+    temperature_series: pd.Series,
+    timezone_name: Optional[str] = None,
+    through=None,
+) -> Tuple[pd.Series, pd.Series]:
+    """Aggregate temperatures by local calendar day, optionally only to now."""
+    values = pd.to_numeric(temperature_series, errors="coerce").copy()
+    if not isinstance(values.index, pd.DatetimeIndex):
+        raise ValueError("temperature series must use a DatetimeIndex")
+    if timezone_name:
+        # Naive training indices already represent plot-local wall time. Aware
+        # provider indices are converted from their source zone.
+        if values.index.tz is not None:
+            values.index = values.index.tz_convert(timezone_name)
+    values = values.sort_index()
+    if through is not None:
+        cutoff = pd.Timestamp(through)
+        if values.index.tz is None and cutoff.tzinfo is not None:
+            cutoff = cutoff.tz_localize(None)
+        elif values.index.tz is not None and cutoff.tzinfo is None:
+            cutoff = cutoff.tz_localize(values.index.tz)
+        elif values.index.tz is not None and cutoff.tzinfo is not None:
+            cutoff = cutoff.tz_convert(values.index.tz)
+        values = values[values.index <= cutoff]
+    if values.dropna().empty:
+        return pd.Series(dtype=float), pd.Series(dtype=float)
+    daily = values.resample("D")
+    return daily.max(), daily.min()
 
 
 def compute_gdd_series(
@@ -144,11 +205,9 @@ def compute_gdd_series(
     """
     Compute cumulative GDD from planting_date forward.
 
-    Production use only — one crop, one known planting date from farms.yaml.
-    There is no multi-season reset logic and no estimation from data boundaries.
-    Farmers in the target regions (Africa, irrigation-based) do not follow
-    temperate annual planting calendars. The planting date is an explicit
-    management decision recorded in the farm configuration.
+    Annual crops accumulate from their explicit planting date. Perennial crops
+    use that date's month/day as their configured annual phenological-season
+    start and reset GDD at each anniversary.
 
     Rows before planting_date have GDD = 0.0 (sensor may have been running
     before the crop was planted).
@@ -228,11 +287,21 @@ def compute_gdd_series(
     # Accumulate GDD: zero before planting_date, initial_gdd + daily GDD after.
     cumulative_gdd = pd.Series(0.0, index=tmax_series.index, dtype=float)
     running_sum = initial_gdd if planting_ts < data_start else 0.0
+    perennial_season_start = None
 
     for date in tmax_series.index:
         if date < planting_ts:
             cumulative_gdd[date] = 0.0
             continue
+
+        if params.is_perennial:
+            anniversary = phenology_season_start(
+                date, planting_ts, crop_type)
+            if perennial_season_start is None:
+                perennial_season_start = anniversary
+            elif anniversary != perennial_season_start:
+                running_sum = 0.0
+                perennial_season_start = anniversary
 
         running_sum += compute_daily_gdd(
             tmax=tmax_series[date],
@@ -298,85 +367,6 @@ def get_growth_stage_series(
     )
     return pd.Series(stages, index=cumulative_gdd_series.index, dtype=int)
 
-# DYNAMIC IRRIGATION THRESHOLD
-
-
-def get_dynamic_threshold(
-    cumulative_gdd: float,
-    crop_type: str,
-    trigger_base: float,
-) -> float:
-    """
-    Compute the dynamic irrigation threshold for the current growth stage.
-
-    threshold(t) = trigger_base + delta_offset(growth_stage, crop_type)
-
-    Where:
-        trigger_base is the soil-texture baseline irrigation trigger (cbar),
-        approximately near field-capacity/depletion setpoints used operationally.
-        delta_offset is growth-stage-dependent for tension sensors
-        (irrigate when measured tension > threshold):
-            Negative delta -> irrigate EARLIER (lower threshold; triggers at
-                              less tension). Used during stress-sensitive stages.
-            Positive delta -> allow MORE drying (higher threshold; controlled
-                              deficit). Used during maturation.
-
-    Example (maize on loam, trigger_base=45 cbar):
-        Pre-emergence: 45 + 0   = 45 cbar
-        Development:   45 - 5   = 40 cbar  (irrigate earlier -- leaf expansion)
-        Mid-season:    45 - 15  = 30 cbar  (irrigate MUCH earlier -- flowering)
-        Late-season:   45 + 10  = 55 cbar  (allow drying -- kernel hardening)
-
-    Args:
-        cumulative_gdd: Current accumulated GDD
-        crop_type:      Key into CROP_PARAMS
-        trigger_base:   Soil-type-specific base threshold (cbar). Typical
-                values: Sandy=35, Sandy Loam=40, Loam=45, Clay Loam=50
-
-    Returns:
-        Dynamic threshold in cbar. Always >= 0.
-    """
-    params = get_crop_params(crop_type)
-    stage = get_growth_stage(cumulative_gdd, crop_type)
-
-    delta_map = {
-        STAGE_PRE_EMERGENCE: params.delta_pre_emergence,
-        STAGE_DEVELOPMENT:   params.delta_development,
-        STAGE_MID_SEASON:    params.delta_mid_season,
-        STAGE_LATE_SEASON:   params.delta_late_season,
-        STAGE_POST_MATURITY: 0.0,
-    }
-    delta = delta_map.get(stage, 0.0)
-    return max(0.0, trigger_base + delta)
-
-
-def get_dynamic_threshold_series(
-    cumulative_gdd_series: pd.Series,
-    crop_type: str,
-    trigger_base: float,
-) -> pd.Series:
-    """Vectorized dynamic threshold computation for a GDD time series."""
-    params = get_crop_params(crop_type)
-    stages = get_growth_stage_series(cumulative_gdd_series, crop_type).values
-    deltas = np.select(
-        [
-            stages == STAGE_PRE_EMERGENCE,
-            stages == STAGE_DEVELOPMENT,
-            stages == STAGE_MID_SEASON,
-            stages == STAGE_LATE_SEASON,
-        ],
-        [
-            params.delta_pre_emergence,
-            params.delta_development,
-            params.delta_mid_season,
-            params.delta_late_season,
-        ],
-        default=0.0,
-    )
-    return pd.Series(
-        np.maximum(0.0, trigger_base + deltas),
-        index=cumulative_gdd_series.index,
-    )
 
 # CROP COEFFICIENT -- GDD-BASED
 
@@ -429,10 +419,9 @@ def compute_kc_gdd(
     Compute the GDD-based crop coefficient using linear interpolation
     between FAO-56 stage Kc values.
 
-    Indexing by GDD instead of calendar days is the physically correct
-    approach -- crop development is driven by thermal time, not elapsed time.
-    The same maize variety reaches Kc_mid=1.20 at ~700 GDD regardless of
-    whether that takes 60 days (Nabeul) or 90 days (Dresden).
+    GDD can be a better phenology index than fixed calendar days, but the
+    breakpoints are cultivar- and environment-dependent.  Values in crops.py
+    are priors and require local calibration before operational use.
     """
     params = get_crop_params(crop_type)
     return _compute_kc_gdd_from_params(cumulative_gdd, params)
@@ -475,7 +464,7 @@ def compute_kc_ndvi(
     """
     Compute Kc from satellite-observed NDVI (Glenn et al. 2011).
 
-        Kc_NDVI = clip(1.457 * NDVI - 0.10, Kc_ini, 1.35)
+        Kc_NDVI = clip(1.457 * NDVI - 0.1725, Kc_ini, 1.35)
 
     Coefficients calibrated for irrigated crops across multiple studies.
     Physical basis: NDVI linearly correlates with fractional vegetation
@@ -483,8 +472,8 @@ def compute_kc_ndvi(
     evaporation.
 
     Limitation: NDVI saturates at NDVI >= 0.7-0.8 in dense canopies
-    (mid-season), suppressing sensitivity to real Kc variation. Use
-    compute_kc_ndre for mid-season where NDRE is available.
+    (mid-season), suppressing sensitivity to real Kc variation. NDRE may be
+    evaluated there, but its internal Kc mapping is experimental and opt-in.
 
     Returns NaN if NDVI is NaN (missing optical data).
     """
@@ -504,7 +493,7 @@ def compute_kc_ndre(
     crop_type: str,
 ) -> Union[float, np.ndarray]:
     """
-    Compute Kc from satellite-observed NDRE (Delegido et al. 2013, adapted).
+    Compute an experimental Kc from satellite-observed NDRE.
 
         Kc_NDRE = clip(2.5 * NDRE - 0.05, Kc_ini, 1.35)
 
@@ -518,9 +507,9 @@ def compute_kc_ndre(
         At NDRE=0.45 (full canopy): Kc ~= 1.075, consistent with Kc_mid
         for most annual crops.
 
-    Preferred over NDVI during STAGE_MID_SEASON where NDVI saturates.
-    Falls back to NDVI during development and late-season where NDRE
-    loses sensitivity to chlorophyll degradation patterns.
+    This range mapping is not a published Delegido Kc relationship and is
+    disabled by default in dynamic Kc fusion. It exists only for explicitly
+    configured, locally evaluated field trials.
 
     Returns NaN if NDRE is NaN.
     """
@@ -539,24 +528,21 @@ def _select_satellite_kc(
     ndvi: float,
     ndre: float,
     crop_type: str,
+    allow_experimental_ndre: bool = False,
 ) -> tuple:
     """
     Stage-aware selection between NDVI- and NDRE-derived Kc.
 
     Selection logic:
-        STAGE_MID_SEASON:
-            NDRE preferred -- NDVI saturates at dense canopy (>= 0.7).
-            Falls back to NDVI if NDRE is unavailable.
-        All other stages:
-            NDVI preferred -- better signal for sparse canopy (development)
-            and during senescence where NDRE shifts non-linearly with
-            chlorophyll degradation.
+        NDVI is the default in every stage. When the experimental flag is
+        enabled, valid NDRE replaces it only at mid-season.
 
     Args:
         cumulative_gdd: Current accumulated GDD
         ndvi:           Latest NDVI value (NaN if unavailable)
         ndre:           Latest NDRE value (NaN if unavailable)
         crop_type:      Key into CROP_PARAMS
+        allow_experimental_ndre: Permit the unvalidated NDRE Kc mapping.
 
     Returns:
         (kc_satellite, source) where source is 'ndre', 'ndvi', or 'none'.
@@ -564,7 +550,7 @@ def _select_satellite_kc(
     """
     stage = get_growth_stage(cumulative_gdd, crop_type)
 
-    if stage == STAGE_MID_SEASON and not np.isnan(ndre):
+    if allow_experimental_ndre and stage == STAGE_MID_SEASON and not np.isnan(ndre):
         kc_sat = compute_kc_ndre(ndre, crop_type)
         if not np.isnan(kc_sat):
             return kc_sat, "ndre"
@@ -723,35 +709,9 @@ def sar_adjusted_ndvi_age(
     return adjusted
 
 
-def _stage_validation_delta(params: CropParams, stage: int) -> float:
-    delta_map = {
-        STAGE_PRE_EMERGENCE: params.delta_pre_emergence,
-        STAGE_DEVELOPMENT: params.delta_development,
-        STAGE_MID_SEASON: params.delta_mid_season,
-        STAGE_LATE_SEASON: params.delta_late_season,
-        STAGE_POST_MATURITY: 0.0,
-    }
-    return float(delta_map.get(stage, 0.0))
-
-
-def _stage_validation_sensitivity(params: CropParams, stage: int) -> float:
-    if stage == STAGE_POST_MATURITY:
-        return 0.0
-
-    stage_delta = _stage_validation_delta(params, stage)
-    all_deltas = [
-        params.delta_pre_emergence,
-        params.delta_development,
-        params.delta_mid_season,
-        params.delta_late_season,
-        0.0,
-    ]
-    positive_ceiling = max(0.0, max(all_deltas))
-    negative_floor = min(0.0, min(all_deltas))
-    span = positive_ceiling - negative_floor
-    if span <= 0:
-        return 0.5
-    return float(np.clip((positive_ceiling - stage_delta) / span, 0.0, 1.0))
+def _stage_validation_sensitivity(stage: int) -> float:
+    """Canopy consistency is informative during active crop development."""
+    return 0.0 if stage == STAGE_POST_MATURITY else 1.0
 
 
 def _freshness_quality(
@@ -830,7 +790,7 @@ def _select_satellite_validation_value(row: pd.Series, stage: int) -> Tuple[floa
     return float("nan"), "none"
 
 
-def check_satellite_tension_consistency(
+def _legacy_satellite_tension_consistency(
     crop_type: str,
     growth_stage: int,
     gdd_cumulative: float,
@@ -974,7 +934,7 @@ def check_satellite_tension_consistency(
         response_maturity = float(np.clip(
             1.0 - (latest_satellite_age_hours / max(lag_hours * 2.0, lag_hours + 1.0)), 0.0, 1.0))
 
-    stage_sensitivity = _stage_validation_sensitivity(params, growth_stage)
+    stage_sensitivity = _stage_validation_sensitivity(growth_stage)
     et0_adjustment = 0.0
     if et0_today_mm is not None and et0_baseline_mm is not None and et0_std_mm is not None:
         try:
@@ -1071,7 +1031,361 @@ def check_satellite_tension_consistency(
     }
 
 
+def _check_canopy_index(
+    crop_type: str,
+    growth_stage: int,
+    gdd_cumulative: float,
+    current_tension: float = np.nan,
+    stress_threshold_cbar: float = np.nan,
+    tension_forecast: Optional[Dict[str, float]] = None,
+    satellite_history: Optional[pd.DataFrame] = None,
+    satellite_ndvi: float = np.nan,
+    satellite_ndre: float = np.nan,
+    satellite_ndvi_age_hours: float = np.inf,
+    satellite_ndre_age_hours: float = np.inf,
+    satellite_ndvi_quality: Optional[float] = None,
+    satellite_ndre_quality: Optional[float] = None,
+    satellite_data_age_hours: float = np.inf,
+    satellite_vv_db: float = np.nan,
+    et0_today_mm: Optional[float] = None,
+    et0_baseline_mm: Optional[float] = None,
+    et0_std_mm: Optional[float] = None,
+    index_name: str = "ndvi",
+) -> Dict[str, object]:
+    """Assess whether observed canopy development matches the crop stage.
+
+    Tension arguments remain in the signature for API compatibility but are
+    deliberately not used: optical canopy history is not evidence for the
+    accuracy of a short-horizon soil-tension forecast.
+    """
+    del current_tension, stress_threshold_cbar, tension_forecast
+    del satellite_data_age_hours, satellite_vv_db
+    del et0_today_mm, et0_baseline_mm, et0_std_mm
+
+    stage_name = STAGE_NAMES.get(growth_stage, str(growth_stage))
+    history = satellite_history.copy() if isinstance(
+        satellite_history, pd.DataFrame) else pd.DataFrame()
+    if not history.empty and "timestamp" in history:
+        history["timestamp"] = pd.to_datetime(
+            history["timestamp"], utc=True, errors="coerce")
+        history = history.dropna(subset=["timestamp"]).sort_values("timestamp").drop_duplicates("timestamp", keep="last")
+    elif "timestamp" not in history:
+        history = pd.DataFrame()
+
+    source = index_name
+    value_column = f"sat_{source}"
+    values = pd.Series(dtype=float)
+    if not history.empty and value_column in history:
+        values = pd.to_numeric(history[value_column], errors="coerce")
+    values = values.where(values.between(-1.0, 1.0))
+
+    points = []
+    if not history.empty and not values.empty:
+        for timestamp, value in zip(history["timestamp"], values):
+            if pd.notna(value):
+                points.append((timestamp, float(value)))
+    if points:
+        origin = points[0][0]
+        trend_points = [
+            ((timestamp - origin).total_seconds() / 86400.0, value)
+            for timestamp, value in points
+        ]
+        trend_per_day = _fit_slope(trend_points)
+    else:
+        trend_per_day = None
+
+    trend_threshold = 0.003
+    if trend_per_day is None:
+        observed_direction = "unknown"
+    elif trend_per_day > trend_threshold:
+        observed_direction = "increasing"
+    elif trend_per_day < -trend_threshold:
+        observed_direction = "decreasing"
+    else:
+        observed_direction = "stable"
+
+    expected_direction = {
+        STAGE_PRE_EMERGENCE: "increasing",
+        STAGE_DEVELOPMENT: "increasing",
+        STAGE_MID_SEASON: "stable",
+        STAGE_LATE_SEASON: "decreasing",
+        STAGE_POST_MATURITY: "stable",
+    }.get(growth_stage, "unknown")
+    sufficient_data = len(points) >= 3
+    if not sufficient_data or observed_direction == "unknown":
+        direction_agreement = 0.5
+    elif observed_direction == expected_direction:
+        direction_agreement = 0.8
+    elif "stable" in (observed_direction, expected_direction):
+        direction_agreement = 0.5
+    else:
+        direction_agreement = 0.2
+
+    latest_value = (
+        float(satellite_ndvi) if source == "ndvi" and np.isfinite(satellite_ndvi)
+        else float(satellite_ndre) if source == "ndre" and np.isfinite(satellite_ndre)
+        else points[-1][1] if points else np.nan
+    )
+    if not -1 <= latest_value <= 1:
+        latest_value = np.nan
+    kc_gdd = float(compute_kc_gdd(gdd_cumulative, crop_type))
+    kc_eo = (
+        float(compute_kc_ndvi(latest_value, crop_type))
+        if source == "ndvi" and np.isfinite(latest_value) else np.nan
+    )
+    canopy_gap_kc = (
+        float(kc_eo - kc_gdd) if np.isfinite(kc_eo) else np.nan)
+    if source == "ndre" and sufficient_data:
+        # Red-edge trend is evidence of canopy change, not an absolute Kc
+        # calibration or a diagnosis of water stress.
+        canopy_status = ("trend_consistent_with_stage"
+                         if observed_direction == expected_direction
+                         else "trend_differs_from_stage")
+    elif not np.isfinite(canopy_gap_kc):
+        canopy_status = "unknown"
+    elif canopy_gap_kc < -0.15:
+        canopy_status = "below_gdd_expectation"
+    elif canopy_gap_kc > 0.15:
+        canopy_status = "above_gdd_expectation"
+    else:
+        canopy_status = "consistent_with_gdd"
+
+    source_history = (
+        history.loc[values.notna()]
+        if not history.empty and not values.empty else pd.DataFrame()
+    )
+    latest_row = (
+        source_history.iloc[-1]
+        if not source_history.empty else pd.Series(dtype=object)
+    )
+    if source == "ndvi":
+        age_hours = float(satellite_ndvi_age_hours)
+        supplied_quality = satellite_ndvi_quality
+    else:
+        age_hours = float(satellite_ndre_age_hours)
+        supplied_quality = satellite_ndre_quality
+    quality_column = f"sat_{source}_quality"
+    history_quality = latest_row.get(quality_column, np.nan)
+    quality_candidate = supplied_quality
+    if quality_candidate is None or not np.isfinite(quality_candidate):
+        quality_candidate = history_quality
+    data_quality = _freshness_quality(
+        age_hours, growth_stage, quality_candidate)
+    overall_confidence = (
+        float(direction_agreement * data_quality) if sufficient_data else None)
+
+    if not sufficient_data:
+        reason = (
+            f"Insufficient {source.upper()} history for canopy trend assessment: "
+            f"observations={len(points)}, required=3."
+        )
+    else:
+        reason = (
+            f"{stage_name} canopy is {observed_direction}; "
+            f"the stage expectation is {expected_direction}."
+        )
+
+    return {
+        "available": True,
+        "assessment_type": "canopy_consistency",
+        "tension_comparison_performed": False,
+        "insufficient_data": not sufficient_data,
+        "crop_type": crop_type,
+        "growth_stage": stage_name,
+        "growth_stage_code": int(growth_stage),
+        # Retained for clients on schema 1.0; it now means canopy-stage
+        # direction agreement, not agreement with the tension forecast.
+        "direction_agreement": round(float(direction_agreement), 3),
+        "validation_score": round(float(direction_agreement), 3),
+        "data_quality": round(float(data_quality), 3),
+        "overall_confidence": (
+            None if overall_confidence is None
+            else round(float(overall_confidence), 3)
+        ),
+        "canopy_status": canopy_status,
+        "factors": {
+            "satellite_source": source,
+            "satellite_value": (
+                round(float(latest_value), 4) if np.isfinite(latest_value) else None),
+            "satellite_points": len(points),
+            "trend_per_day": (
+                round(float(trend_per_day), 5)
+                if trend_per_day is not None else None),
+            "observed_direction": observed_direction,
+            "expected_direction": expected_direction,
+            "kc_gdd": round(kc_gdd, 4),
+            "kc_eo": round(float(kc_eo), 4) if np.isfinite(kc_eo) else None,
+            "canopy_gap_kc": (
+                round(float(canopy_gap_kc), 4)
+                if np.isfinite(canopy_gap_kc) else None),
+            "latest_satellite_age_hours": (
+                round(age_hours, 1) if np.isfinite(age_hours) else None),
+            "data_quality": round(float(data_quality), 3),
+        },
+        "reason": reason,
+    }
+
+
+def check_canopy_consistency(*args, **kwargs) -> Dict[str, object]:
+    """Assess each index independently; never substitute NDRE values for NDVI."""
+    indices = {name: _check_canopy_index(*args, **kwargs, index_name=name)
+               for name in ("ndvi", "ndre")}
+    usable = [result for result in indices.values()
+              if not result["insufficient_data"]]
+    primary = (usable[0] if usable else indices["ndvi"])
+    result = {**primary, "factors": dict(primary["factors"]), "indices": indices}
+    if len(usable) == 2:
+        result["factors"]["satellite_source"] = "ndvi+ndre"
+        for key in ("direction_agreement", "validation_score", "data_quality"):
+            result[key] = round(float(np.mean([item[key] for item in usable])), 3)
+        result["overall_confidence"] = round(float(np.mean([
+            item["overall_confidence"] for item in usable])), 3)
+        result["reason"] = " ".join(
+            f"{name.upper()}: {item['factors']['observed_direction']}."
+            for name, item in indices.items())
+        if (indices["ndvi"]["factors"]["observed_direction"] !=
+                indices["ndre"]["factors"]["observed_direction"]):
+            result["canopy_status"] = "mixed_index_trends"
+    return result
+
+
+def check_satellite_tension_consistency(*args, **kwargs) -> Dict[str, object]:
+    """Backward-compatible alias for the non-causal canopy assessment."""
+    return check_canopy_consistency(*args, **kwargs)
+
+
 # BLENDED DYNAMIC Kc
+def _compute_single_index_kc_diagnostics(
+    cumulative_gdd: float,
+    crop_type: str,
+    ndvi: float = np.nan,
+    ndvi_age_hours: float = np.inf,
+    ndre: float = np.nan,
+    ndre_age_hours: float = np.inf,
+    ndvi_quality: Optional[float] = None,
+    ndre_quality: Optional[float] = None,
+    allow_experimental_ndre: bool = False,
+) -> Dict[str, object]:
+    """Return the Kc result and every EO factor that influenced it."""
+    kc_gdd = float(compute_kc_gdd(cumulative_gdd, crop_type))
+    stage = get_growth_stage(cumulative_gdd, crop_type)
+    ndvi_usable = bool(np.isfinite(ndvi))
+    ndre_usable = bool(
+        allow_experimental_ndre
+        and np.isfinite(ndre)
+        and stage == STAGE_MID_SEASON
+    )
+    if not ndvi_usable and not ndre_usable:
+        return {
+            "kc_dynamic": kc_gdd, "kc_gdd": kc_gdd, "kc_eo": None,
+            "eo_source": "none", "eo_weight": 0.0, "quality_factor": 0.0,
+            "plausibility_factor": 0.0, "eo_kc_delta": 0.0,
+            "experimental_ndre_enabled": bool(allow_experimental_ndre),
+            "reason": "No usable EO observation; GDD-only Kc.",
+        }
+
+    kc_sat, satellite_source = _select_satellite_kc(
+        cumulative_gdd, ndvi, ndre, crop_type, allow_experimental_ndre)
+    if np.isnan(kc_sat):
+        return {
+            "kc_dynamic": kc_gdd, "kc_gdd": kc_gdd, "kc_eo": None,
+            "eo_source": "none", "eo_weight": 0.0, "quality_factor": 0.0,
+            "plausibility_factor": 0.0, "eo_kc_delta": 0.0,
+            "experimental_ndre_enabled": bool(allow_experimental_ndre),
+            "reason": "EO index could not produce a valid Kc; GDD-only Kc.",
+        }
+
+    if satellite_source == "ndre" and ndvi_usable:
+        ndre_freshness = _freshness_quality(
+            ndre_age_hours, stage, ndre_quality)
+        ndvi_freshness = _freshness_quality(
+            ndvi_age_hours, stage, ndvi_quality)
+        if ndre_freshness <= 0.0 < ndvi_freshness:
+            kc_sat = float(compute_kc_ndvi(ndvi, crop_type))
+            satellite_source = "ndvi"
+
+    ndvi_for_weight = (
+        float(ndvi) if ndvi_usable
+        else float(np.clip(ndre * NDRE_NDVI_PROXY, 0.0, 1.0))
+    )
+    base_weight = float(np.clip(
+        ndvi_for_weight * NDVI_WEIGHT_SLOPE, 0.0, NDVI_WEIGHT_CAP))
+    selected_age = (
+        ndre_age_hours if satellite_source == "ndre" else ndvi_age_hours)
+    selected_quality = (
+        ndre_quality if satellite_source == "ndre" else ndvi_quality)
+    quality_factor = _freshness_quality(
+        selected_age, stage, selected_quality)
+    plausibility = _gdd_plausibility_weight(
+        float(kc_sat), cumulative_gdd, crop_type)
+    weight = float(base_weight * quality_factor * plausibility)
+    kc_dynamic = float((1.0 - weight) * kc_gdd + weight * kc_sat)
+    return {
+        "kc_dynamic": kc_dynamic,
+        "kc_gdd": kc_gdd,
+        "kc_eo": float(kc_sat),
+        "eo_source": satellite_source,
+        "eo_weight": weight,
+        "quality_factor": float(quality_factor),
+        "plausibility_factor": float(plausibility),
+        "eo_kc_delta": float(kc_dynamic - kc_gdd),
+        "experimental_ndre_enabled": bool(allow_experimental_ndre),
+        "reason": (
+            f"{satellite_source.upper()} adjusted the GDD Kc with "
+            f"{weight:.1%} effective weight."
+            if weight > 0 else
+            "EO observation was rejected by quality/plausibility gating; GDD-only Kc."
+        ),
+    }
+
+
+def compute_kc_dynamic_diagnostics(
+    cumulative_gdd: float, crop_type: str,
+    ndvi: float = np.nan, ndvi_age_hours: float = np.inf,
+    ndre: float = np.nan, ndre_age_hours: float = np.inf,
+    ndvi_quality: Optional[float] = None,
+    ndre_quality: Optional[float] = None,
+    allow_experimental_ndre: bool = False,
+) -> Dict[str, object]:
+    """Fuse independent estimates without counting correlated indices twice.
+
+    NDRE availability is independent of permission to use its experimental
+    calibration. A missing/invalid age must never borrow the other index's age.
+    """
+    components = {}
+    for name, value, age, quality in (
+        ("ndvi", ndvi, ndvi_age_hours, ndvi_quality),
+        ("ndre", ndre, ndre_age_hours, ndre_quality),
+    ):
+        valid = bool(np.isfinite(value) and -1 <= value <= 1)
+        item = _compute_single_index_kc_diagnostics(
+            cumulative_gdd, crop_type,
+            **{name: float(value) if valid else np.nan,
+               f"{name}_age_hours": age if np.isfinite(age) and age >= 0 else np.inf,
+               f"{name}_quality": quality},
+            allow_experimental_ndre=allow_experimental_ndre,
+        )
+        item["observation_available"] = valid
+        if name == "ndre" and valid and not allow_experimental_ndre:
+            item["reason"] = "NDRE observed; Kc calibration not enabled."
+        components[name] = item
+    active = [item for item in components.values() if item["eo_weight"] > 0]
+    result = dict(active[0] if active else components["ndvi"])
+    if active:
+        total = sum(item["eo_weight"] for item in active)
+        weight = max(item["eo_weight"] for item in active)
+        kc_eo = sum(item["kc_eo"] * item["eo_weight"] for item in active) / total
+        delta = weight * (kc_eo - result["kc_gdd"])
+        result.update(kc_eo=kc_eo, eo_weight=weight, eo_kc_delta=delta,
+                      kc_dynamic=result["kc_gdd"] + delta,
+                      eo_source="+".join(item["eo_source"] for item in active))
+        result["reason"] = f"{result['eo_source'].upper()} adjusted GDD Kc with {weight:.1%} weight."
+    elif components["ndre"]["observation_available"] and not allow_experimental_ndre:
+        result["reason"] = "GDD-only Kc; NDRE observed but Kc calibration not enabled."
+    result["indices"] = components
+    return result
+
+
 def compute_kc_dynamic(
     cumulative_gdd: float,
     crop_type: str,
@@ -1081,6 +1395,7 @@ def compute_kc_dynamic(
     ndre_age_hours: float = np.inf,
     ndvi_quality: Optional[float] = None,
     ndre_quality: Optional[float] = None,
+    allow_experimental_ndre: bool = False,
 ) -> float:
     """
     Compute the blended dynamic crop coefficient.
@@ -1088,8 +1403,8 @@ def compute_kc_dynamic(
         Kc_dynamic = (1 - w) * Kc_GDD + w * Kc_satellite
 
     Where:
-        Kc_satellite  is NDRE (mid-season) or NDVI (all other stages),
-                      selected by _select_satellite_kc.
+        Kc_satellite  is NDVI by default. Under the experimental flag, a
+                      quality-weighted NDVI/NDRE estimate is used at mid-season.
         w             is a quality weight combining three factors:
                           signal strength  -- scales with NDVI magnitude
                                              (more canopy -> more confident)
@@ -1110,64 +1425,27 @@ def compute_kc_dynamic(
         ndvi_age_hours:  Hours since the last real NDVI observation
         crop_type:       Key into CROP_PARAMS
         ndre:            Latest NDRE value (NaN if unavailable).
-                         Used instead of NDVI during STAGE_MID_SEASON.
+                         Used for Kc only at mid-season when experimental use
+                         is explicitly enabled.
         ndre_age_hours:  Hours since the NDRE observation.
         ndvi_quality:    NDVI freshness score derived from observed cadence.
         ndre_quality:    NDRE freshness score derived from observed cadence.
+        allow_experimental_ndre: Enable the unvalidated NDRE-to-Kc mapping.
 
     Returns:
         Kc_dynamic in range [Kc_ini, ~1.35].
     """
-    kc_gdd = compute_kc_gdd(cumulative_gdd, crop_type)
-
-    # Determine which satellite source is usable at the current stage.
-    # NDRE is only meaningful at mid-season (other stages → fall back to NDVI).
-    stage = get_growth_stage(cumulative_gdd, crop_type)
-    ndre_usable = not np.isnan(ndre) and stage == STAGE_MID_SEASON
-    ndvi_usable = not np.isnan(ndvi)
-
-    if not ndvi_usable and not ndre_usable:
-        return kc_gdd
-
-    kc_sat, satellite_source = _select_satellite_kc(
-        cumulative_gdd, ndvi, ndre, crop_type)
-    if np.isnan(kc_sat):
-        return kc_gdd
-
-    # A listed but stale NDRE must not suppress a usable NDVI observation.
-    # NDRE remains preferred at mid-season whenever its own cadence score is
-    # positive; otherwise the established NDVI path is the transparent fallback.
-    if satellite_source == "ndre" and ndvi_usable:
-        ndre_freshness = _freshness_quality(ndre_age_hours, stage, ndre_quality)
-        ndvi_freshness = _freshness_quality(ndvi_age_hours, stage, ndvi_quality)
-        if ndre_freshness <= 0.0 < ndvi_freshness:
-            kc_sat = float(compute_kc_ndvi(ndvi, crop_type))
-            satellite_source = "ndvi"
-
-    # Signal-strength weight.
-    # Primary: NDVI (all stages). Its magnitude tracks fractional cover and
-    # is the validated signal for scaling the quality weight.
-    # Fallback: when NDVI is absent but NDRE is available at mid-season, derive
-    # a canopy-density proxy from NDRE. At mid-season, NDRE 0.1-0.6 corresponds
-    # roughly to NDVI 0.3-0.85 for annual field crops (empirical scale ≈ ×1.5).
-    # This is conservative: the proxy gives ~0.6 weight at NDRE=0.45, not 0.75.
-    if ndvi_usable:
-        ndvi_for_weight = ndvi
-    else:
-        # NDRE-only at mid-season
-        ndvi_for_weight = float(np.clip(ndre * NDRE_NDVI_PROXY, 0.0, 1.0))
-
-    w_base = np.clip(ndvi_for_weight * NDVI_WEIGHT_SLOPE, 0.0, NDVI_WEIGHT_CAP)
-
-    selected_age = ndre_age_hours if satellite_source == "ndre" else ndvi_age_hours
-    selected_quality = ndre_quality if satellite_source == "ndre" else ndvi_quality
-    quality_factor = _freshness_quality(selected_age, stage, selected_quality)
-
-    # GDD plausibility check.
-    plausibility = _gdd_plausibility_weight(kc_sat, cumulative_gdd, crop_type)
-
-    w = w_base * quality_factor * plausibility
-    return (1.0 - w) * kc_gdd + w * kc_sat
+    return float(compute_kc_dynamic_diagnostics(
+        cumulative_gdd=cumulative_gdd,
+        crop_type=crop_type,
+        ndvi=ndvi,
+        ndvi_age_hours=ndvi_age_hours,
+        ndre=ndre,
+        ndre_age_hours=ndre_age_hours,
+        ndvi_quality=ndvi_quality,
+        ndre_quality=ndre_quality,
+        allow_experimental_ndre=allow_experimental_ndre,
+    )["kc_dynamic"])
 
 
 def compute_kc_dynamic_series(
@@ -1179,138 +1457,27 @@ def compute_kc_dynamic_series(
     ndvi_quality_series: Optional[pd.Series] = None,
     ndre_age_series: Optional[pd.Series] = None,
     ndre_quality_series: Optional[pd.Series] = None,
+    allow_experimental_ndre: bool = False,
 ) -> pd.Series:
-    """
-    Vectorized Kc_dynamic computation for entire DataFrame columns.
+    """Use the same per-index quality and fusion rules as the runtime path."""
+    def values(series, default):
+        if series is None:
+            return [default] * len(gdd_series)
+        return series.reindex(gdd_series.index).fillna(default).to_numpy(dtype=float)
 
-    Args:
-        gdd_series:   Cumulative GDD series
-        ndvi_series:  NDVI observations (NaN where unavailable)
-        age_series:   Hours since last valid NDVI observation
-        crop_type:    Key into CROP_PARAMS
-        ndre_series:  NDRE observations (NaN where unavailable). When
-                      provided, NDRE replaces NDVI during STAGE_MID_SEASON.
-        *_quality_series: Source-derived empirical freshness values.
-
-    Returns:
-        Series of Kc_dynamic values with same index as gdd_series.
-    """
-    params = get_crop_params(crop_type)
-
-    kc_gdd_vals = compute_kc_gdd_series(gdd_series, crop_type).values
-    ndvi_vals = ndvi_series.values.astype(float)
-    age_vals = age_series.values.astype(float)
-
-    # Compute stages once; reused for NDRE selection, weight proxy, and plausibility.
-    stages_arr = get_growth_stage_series(gdd_series, crop_type).values
-    mid_mask_base = stages_arr == STAGE_MID_SEASON
-
-    # Stage-aware satellite Kc: default to NDVI.
-    # np.where returns a new array, so kc_sat is always writeable.
-    kc_sat = compute_kc_ndvi(ndvi_vals, crop_type).copy()
-
-    # Replace with NDRE during mid-season where available.
-    ndre_vals = None
-    ndre_selected_mask = np.zeros(len(gdd_series), dtype=bool)
-    if ndre_series is not None:
-        ndre_vals = ndre_series.values.astype(float)
-        mid_mask = mid_mask_base & ~np.isnan(ndre_vals)
-        ndre_selected_mask = mid_mask
-        if mid_mask.any():
-            kc_sat[mid_mask] = compute_kc_ndre(ndre_vals, crop_type)[mid_mask]
-            log.info(
-                "  NDRE used for Kc in %s mid-season rows (%.1f%% of total)",
-                mid_mask.sum(),
-                mid_mask.mean() * 100.0,
-            )
-
-    # Signal-strength weight.
-    # Primary: NDVI. When NDVI is absent but NDRE is available at mid-season,
-    # derive an NDVI-equivalent proxy (NDRE * 1.5 ≈ NDVI for dense canopy).
-    # This matches the scalar path in compute_kc_dynamic.
-    if ndre_vals is not None:
-        ndre_proxy = np.clip(ndre_vals * NDRE_NDVI_PROXY, 0.0, 1.0)
-        ndvi_for_weight = np.where(
-            np.isnan(ndvi_vals) & mid_mask_base & ~np.isnan(ndre_vals),
-            ndre_proxy,
-            np.where(np.isnan(ndvi_vals), 0.0, ndvi_vals),
+    rows = zip(
+        gdd_series.to_numpy(dtype=float),
+        values(ndvi_series, np.nan), values(age_series, np.inf),
+        values(ndre_series, np.nan), values(ndre_age_series, np.inf),
+        values(ndvi_quality_series, np.nan), values(ndre_quality_series, np.nan),
+    )
+    return pd.Series([
+        compute_kc_dynamic(
+            gdd, crop_type, ndvi, ndvi_age, ndre, ndre_age,
+            ndvi_quality, ndre_quality, allow_experimental_ndre,
         )
-    else:
-        ndvi_for_weight = np.where(np.isnan(ndvi_vals), 0.0, ndvi_vals)
-    w_base = np.clip(ndvi_for_weight * NDVI_WEIGHT_SLOPE, 0.0, NDVI_WEIGHT_CAP)
-
-    # Quality comes from the observed acquisition process. For older datasets
-    # without this column, retain only rows that are exact observations.
-    if ndvi_quality_series is not None:
-        ndvi_quality_vals = np.clip(
-            ndvi_quality_series.reindex(gdd_series.index).fillna(0.0).values.astype(float), 0.0, 1.0)
-    else:
-        ndvi_quality_vals = np.where(age_vals <= 0, 1.0, 0.0)
-    if ndre_age_series is not None:
-        ndre_age_vals = ndre_age_series.reindex(gdd_series.index).fillna(np.inf).values.astype(float)
-    else:
-        ndre_age_vals = age_vals
-    if ndre_quality_series is not None:
-        ndre_quality_vals = np.clip(
-            ndre_quality_series.reindex(gdd_series.index).fillna(0.0).values.astype(float), 0.0, 1.0)
-    else:
-        ndre_quality_vals = np.where(ndre_age_vals <= 0, 1.0, 0.0)
-    stale_ndre_fallback = (
-        ndre_selected_mask & (ndre_quality_vals <= 0.0)
-        & ~np.isnan(ndvi_vals) & (ndvi_quality_vals > 0.0)
-    )
-    if stale_ndre_fallback.any():
-        kc_sat[stale_ndre_fallback] = compute_kc_ndvi(
-            ndvi_vals, crop_type)[stale_ndre_fallback]
-        ndre_selected_mask[stale_ndre_fallback] = False
-    quality = np.where(ndre_selected_mask, ndre_quality_vals, ndvi_quality_vals)
-
-    # GDD plausibility (vectorized) — mirrors _gdd_plausibility_weight scalar logic.
-    # Uses proportional thresholds so narrow-Kc crops (olive) behave correctly.
-    kc_range = params.kc_mid - params.kc_ini
-    kc_thresh_mid_v = params.kc_ini + PLAUSIBILITY_MID_FRAC * kc_range
-    kc_thresh_dev_v = params.kc_ini + PLAUSIBILITY_DEV_FRAC * kc_range
-    sat_implied = np.where(
-        kc_sat >= kc_thresh_mid_v, STAGE_MID_SEASON,
-        np.where(kc_sat > kc_thresh_dev_v, STAGE_DEVELOPMENT,
-                 STAGE_PRE_EMERGENCE)
-    )
-    # stages_arr already computed above
-    stage_lead = sat_implied - stages_arr
-    plausibility = np.where(stage_lead <= 0, 1.0,
-                            np.where(stage_lead == 1, 0.5, 0.0))
-
-    # Mirror scalar stress safeguard for consistency with compute_kc_dynamic.
-    stress_kc_floor_v = params.kc_ini + MIDSEASON_STRESS_KC_MARGIN * kc_range
-    stress_mask = (
-        (stages_arr == STAGE_MID_SEASON)
-        & (kc_sat < stress_kc_floor_v)
-    )
-    plausibility = np.where(
-        stress_mask,
-        MIDSEASON_STRESS_PLAUSIBILITY,
-        plausibility,
-    )
-
-    w = w_base * quality * plausibility
-    # Zero out weight where: NDVI is absent AND no NDRE proxy was used,
-    # age is unknown (inf), or no valid satellite Kc could be derived.
-    # The NDRE-proxy rows already have non-zero w_base, so they are not zeroed here.
-    selected_age_vals = np.where(ndre_selected_mask, ndre_age_vals, age_vals)
-    w[np.isinf(selected_age_vals) | np.isnan(kc_sat)] = 0.0
-    # For rows where both NDVI and NDRE-proxy are absent, w_base is already 0,
-    # but be explicit: zero weight where ndvi is NaN and ndre proxy wasn't applied.
-    if ndre_vals is not None:
-        no_satellite = np.isnan(ndvi_vals) & (
-            ~mid_mask_base | np.isnan(ndre_vals)
-        )
-    else:
-        no_satellite = np.isnan(ndvi_vals)
-    w[no_satellite] = 0.0
-
-    kc_dynamic = np.where(w == 0, kc_gdd_vals, (1.0 - w)
-                          * kc_gdd_vals + w * kc_sat)
-    return pd.Series(kc_dynamic, index=gdd_series.index)
+        for gdd, ndvi, ndvi_age, ndre, ndre_age, ndvi_quality, ndre_quality in rows
+    ], index=gdd_series.index)
 
 # CLI
 
@@ -1322,7 +1489,7 @@ def main():
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     parser = argparse.ArgumentParser(
-        description="Phenology engine: GDD, growth stages, dynamic Kc and thresholds"
+        description="Phenology engine: GDD, growth stages, dynamic Kc and stage-aware tension triggers"
     )
     parser.add_argument("--list-crops", action="store_true",
                         help="Print all crop parameters")

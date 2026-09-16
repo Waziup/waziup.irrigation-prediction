@@ -157,7 +157,15 @@ def _proxy_asset_url(asset: dict) -> str:
     return f"{get_base_url()}{_stac_path(asset.get('href', ''))}"
 
 
-def _sample_with_rasterio(url: str, lat: float, lon: float) -> Optional[float]:
+def _point_statistics(value: float) -> dict:
+    return {"value": float(value)}
+
+
+def _sample_with_rasterio(
+    url: str,
+    lat: float,
+    lon: float,
+) -> Optional[dict]:
     import rasterio
     from rasterio.warp import transform
 
@@ -178,14 +186,25 @@ def _sample_with_rasterio(url: str, lat: float, lon: float) -> Optional[float]:
             return None
         value = dataset.read(
             1, window=((row, row + 1), (column, column + 1)), masked=True)[0, 0]
-        return None if np.ma.is_masked(value) else float(value)
+        if np.ma.is_masked(value):
+            return None
+        # Rasterio exposes stored pixel values; band metadata maps these to
+        # physical index values. Check nodata before applying that conversion.
+        scale, offset = float(dataset.scales[0]), float(dataset.offsets[0])
+        if not np.isfinite(scale) or not np.isfinite(offset):
+            return None
+        return _point_statistics(float(value) * scale + offset)
 
 
-def _sample_asset(asset: dict, lat: float, lon: float) -> Optional[float]:
-    """Read one COG pixel through authenticated HTTP range requests."""
-    url = _proxy_asset_url(asset)
+def _sample_asset(
+    asset: dict,
+    lat: float,
+    lon: float,
+) -> Optional[dict]:
+    """Read the prepared vegetation index at the plot reference point."""
     try:
-        value = _sample_with_rasterio(url, lat, lon)
+        url = _proxy_asset_url(asset)
+        statistics = _sample_with_rasterio(url, lat, lon)
     except ImportError as exc:
         # Missing raster support must degrade to GDD, never to an unsafe native
         # library fallback that can terminate the worker process.
@@ -194,9 +213,12 @@ def _sample_asset(asset: dict, lat: float, lon: float) -> Optional[float]:
     except (RuntimeError, ValueError, OSError) as exc:
         log.warning("EO asset sampling failed: %s", exc)
         return None
+    if statistics is None:
+        return None
+    value = statistics.get("value")
     if value is None or not np.isfinite(value) or not -1.0 <= value <= 1.0:
         return None
-    return float(value)
+    return statistics
 
 
 def _index_dates(items: Iterable[dict], index_name: str) -> list[pd.Timestamp]:
@@ -231,15 +253,34 @@ def empirical_freshness_quality(age_hours: float, dates: Iterable[pd.Timestamp])
     return float(np.mean(gaps >= float(age_hours))) if len(gaps) else 0.0
 
 
-def _latest_sample(items: list[dict], index_name: str, lat: float, lon: float) -> Optional[dict]:
+def _observation_quality(
+    age_hours: float,
+    dates: Iterable[pd.Timestamp],
+) -> float:
+    """Score point observations using empirical acquisition cadence."""
+    return empirical_freshness_quality(age_hours, dates)
+
+
+def _statistics_columns(index_name: str, sample: Optional[dict]) -> dict:
+    prefix = f"sat_{index_name.lower()}"
+    sample = sample or {}
+    return {prefix: sample.get("value", np.nan)}
+
+
+def _latest_sample(
+    items: list[dict],
+    index_name: str,
+    lat: float,
+    lon: float,
+) -> Optional[dict]:
     # Try acquisitions in order because a union item bbox can overstate one asset's coverage.
     for item in items:
         asset = _asset(item, index_name)
         if not asset:
             continue
-        value = _sample_asset(asset, lat, lon)
-        if value is not None:
-            return {"timestamp": item["_timestamp"], "value": value}
+        statistics = _sample_asset(asset, lat, lon)
+        if statistics is not None:
+            return {"timestamp": item["_timestamp"], **statistics}
     return None
 
 
@@ -248,8 +289,12 @@ def fetch_satellite_snapshot(
     lon: float,
     as_of: Optional[object] = None,
     lookback_days: Optional[int] = None,
+    include_ndre: bool = True,
 ) -> pd.DataFrame:
-    """Return the newest point-valid NDVI and NDRE with cadence-based quality."""
+    """Return the newest prepared index at the plot reference point.
+
+    Set ``include_ndre=False`` to avoid the additional red-edge raster read.
+    """
     as_of_timestamp = _utc_timestamp(as_of) or pd.Timestamp.now(tz="UTC")
     land = _land_observation(lat, lon, as_of_timestamp)
     try:
@@ -271,7 +316,10 @@ def fetch_satellite_snapshot(
         sample = _latest_sample(items, "NDVI", lat, lon)
         if sample and (not land or sample["timestamp"] > land["timestamp"]):
             ndvi = {**sample, "sat_ndvi": sample["value"], "source": "eo_stac"}
-    ndre = _latest_sample(items, "NDRE", lat, lon)
+    ndre = (
+        _latest_sample(items, "NDRE", lat, lon)
+        if include_ndre else None
+    )
     if ndvi is None and ndre is None:
         return pd.DataFrame(columns=SATELLITE_COLUMNS)
 
@@ -290,8 +338,8 @@ def fetch_satellite_snapshot(
         "satellite_data_age": min(ndvi_age, ndre_age),
         "sat_ndvi_age": ndvi_age,
         "sat_ndre_age": ndre_age,
-        "sat_ndvi_quality": empirical_freshness_quality(ndvi_age, quality_ndvi_dates),
-        "sat_ndre_quality": empirical_freshness_quality(ndre_age, ndre_dates),
+        "sat_ndvi_quality": _observation_quality(ndvi_age, quality_ndvi_dates),
+        "sat_ndre_quality": _observation_quality(ndre_age, ndre_dates),
         "sat_ndvi_cadence_hours": _cadence_hours(quality_ndvi_dates),
         "sat_ndre_cadence_hours": _cadence_hours(ndre_dates),
     }
@@ -317,8 +365,13 @@ def fetch_satellite_history(
     as_of: Optional[object] = None,
     lookback_days: Optional[int] = None,
     limit: int = 100,
+    include_ndre: bool = True,
 ) -> pd.DataFrame:
-    """Return catalog acquisition history plus the current sampled values."""
+    """Return an actual point-index time series, not catalog placeholders.
+
+    Both indices are sampled independently. Callers needing NDVI alone can
+    explicitly disable the red-edge raster read.
+    """
     as_of_timestamp = _utc_timestamp(as_of) or pd.Timestamp.now(tz="UTC")
     try:
         _, items = _fetch_stac_items(lat, lon, as_of_timestamp)
@@ -328,26 +381,63 @@ def fetch_satellite_history(
     if lookback_days is not None:
         cutoff = as_of_timestamp - pd.Timedelta(days=max(0, int(lookback_days)))
         items = [item for item in items if item["_timestamp"] >= cutoff]
-    rows = [{
-        "timestamp": item["_timestamp"], "source": "eo_stac",
-        "has_ndvi": bool(_asset(item, "NDVI")), "has_ndre": bool(_asset(item, "NDRE")),
-        **{column: np.nan for column in SATELLITE_COLUMNS},
-    } for item in items[:max(0, int(limit))]]
-    # Add `/land` without re-sampling every COG. Runtime state already carries
-    # the point sample; validation only needs acquisition times and real values.
+    rows = []
+    for item in items[:max(0, int(limit))]:
+        ndvi_asset = _asset(item, "NDVI")
+        ndre_asset = _asset(item, "NDRE") if include_ndre else None
+        ndvi_sample = (
+            _sample_asset(ndvi_asset, lat, lon)
+            if ndvi_asset else None
+        )
+        ndre_sample = (
+            _sample_asset(ndre_asset, lat, lon)
+            if ndre_asset else None
+        )
+        age_hours = max(
+            0.0, (as_of_timestamp - item["_timestamp"]).total_seconds() / 3600.0)
+        row = {
+            "timestamp": item["_timestamp"],
+            "source": "eo_stac",
+            "has_ndvi": ndvi_sample is not None,
+            "has_ndre": ndre_sample is not None,
+            **{column: np.nan for column in SATELLITE_COLUMNS},
+            **_statistics_columns("ndvi", ndvi_sample),
+            **_statistics_columns("ndre", ndre_sample),
+            "satellite_data_age": age_hours,
+            "sat_ndvi_age": age_hours if ndvi_sample else np.inf,
+            "sat_ndre_age": age_hours if ndre_sample else np.inf,
+        }
+        rows.append(row)
+
+    valid_ndvi_dates = [
+        row["timestamp"] for row in rows if row.get("has_ndvi")]
+    valid_ndre_dates = [
+        row["timestamp"] for row in rows if row.get("has_ndre")]
+    for row in rows:
+        if row.get("has_ndvi"):
+            row["sat_ndvi_quality"] = _observation_quality(
+                row["sat_ndvi_age"], valid_ndvi_dates)
+            row["sat_ndvi_cadence_hours"] = _cadence_hours(valid_ndvi_dates)
+        if row.get("has_ndre"):
+            row["sat_ndre_quality"] = _observation_quality(
+                row["sat_ndre_age"], valid_ndre_dates)
+            row["sat_ndre_cadence_hours"] = _cadence_hours(valid_ndre_dates)
+
     land = _land_observation(lat, lon, as_of_timestamp)
     if land is not None and cutoff is not None and land["timestamp"] < cutoff:
         land = None
     if land is not None:
-        ndvi_dates = _index_dates(items, "NDVI") + [land["timestamp"]]
+        ndvi_dates = valid_ndvi_dates + [land["timestamp"]]
         ndvi_age = (as_of_timestamp - land["timestamp"]).total_seconds() / 3600.0
+        land_sample = _point_statistics(land["sat_ndvi"])
         rows.append({
             "timestamp": land["timestamp"], "source": "agro_climate",
             "has_ndvi": True, "has_ndre": False,
             **{column: np.nan for column in SATELLITE_COLUMNS},
-            "sat_ndvi": land["sat_ndvi"], "sat_ndvi_age": ndvi_age,
+            **_statistics_columns("ndvi", land_sample),
+            "sat_ndvi_age": ndvi_age,
             "satellite_data_age": ndvi_age,
-            "sat_ndvi_quality": empirical_freshness_quality(ndvi_age, ndvi_dates),
+            "sat_ndvi_quality": _observation_quality(ndvi_age, ndvi_dates),
             "sat_ndvi_cadence_hours": _cadence_hours(ndvi_dates),
         })
     columns = ["timestamp", "source", "has_ndvi", "has_ndre"] + SATELLITE_COLUMNS
@@ -355,3 +445,41 @@ def fetch_satellite_history(
         return pd.DataFrame(columns=columns)
     frame = pd.DataFrame(rows).drop_duplicates(subset=["timestamp", "source"])
     return frame.sort_values("timestamp").reset_index(drop=True)[columns]
+
+
+def diagnose_eo_catalog(lat: float, lon: float, as_of=None) -> dict:
+    """Describe EO/STAC availability without exposing credentials or asset URLs."""
+    diagnostic = {
+        "provider": "SpaceIoTBox EO/STAC",
+        "endpoint": "/v1/eo/stac",
+        "coordinates": {"latitude": float(lat), "longitude": float(lon)},
+        "status": "not_requested",
+        "collection": None,
+        "scene_count": 0,
+        "ndvi_scene_count": 0,
+        "ndre_scene_count": 0,
+        "latest_scene": None,
+    }
+    try:
+        collection_id, items = _fetch_stac_items(lat, lon, as_of)
+        ndvi_items = [item for item in items if _asset(item, "NDVI")]
+        ndre_items = [item for item in items if _asset(item, "NDRE")]
+        diagnostic.update({
+            "status": "ok" if collection_id and items else (
+                "no_scenes" if collection_id else "no_collection"),
+            "collection": collection_id,
+            "scene_count": len(items),
+            "ndvi_scene_count": len(ndvi_items),
+            "ndre_scene_count": len(ndre_items),
+            "latest_scene": (
+                items[0]["_timestamp"].isoformat() if items else None),
+        })
+    except Exception as exc:
+        response = getattr(exc, "response", None)
+        diagnostic.update({
+            "status": "error",
+            "http_status": getattr(response, "status_code", None),
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        })
+    return diagnostic

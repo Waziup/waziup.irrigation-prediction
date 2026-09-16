@@ -10,6 +10,7 @@ import pandas as pd
 
 from crop_model import compute_gdd_from_weather, get_stress_threshold_series
 from farm_config import FarmConfig
+from phenology_engine import compute_kc_gdd
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class IrrigationRecommendation:
     Output of the decision engine for a single evaluation point.
 
     urgency levels:
-        'critical'  current tension already exceeds threshold
+        'critical'  current tension reaches or exceeds threshold
         'advise'    breach forecast within advise_horizon_hours → act now
         'watch'     breach forecast but not imminent → monitor
         'none'      no breach in forecast window
@@ -58,10 +59,10 @@ class IrrigationRecommendation:
     current_tension: float                         # cbar
     stress_threshold: float                        # cbar
     forecast_summary: Dict[str, float]
+    forecast_thresholds: Dict[str, float] = field(default_factory=dict)
     breach_horizons: List[str] = field(default_factory=list)  # chronological
-    # set by caller from ETc data
-    recommended_volume_mm: Optional[float] = None
     error_message: Optional[str] = None
+    status_message: Optional[str] = None
 
 
 def build_timestamp_forecast(
@@ -106,23 +107,56 @@ def build_timestamp_forecast(
     return result
 
 
-def _error_recommendation(
+def error_recommendation(
     current_tension: float,
     stress_threshold: float,
     tension_forecast: Dict[str, float],
     message: str,
 ) -> IrrigationRecommendation:
-    """Create a fail-safe recommendation used for invalid decision inputs."""
+    """Create a public fail-safe recommendation for unavailable evidence."""
+    try:
+        current = float(current_tension)
+    except (TypeError, ValueError):
+        current = float("nan")
+    try:
+        threshold = float(stress_threshold)
+    except (TypeError, ValueError):
+        threshold = float("nan")
     return IrrigationRecommendation(
         should_irrigate=False,
         urgency="error",
         first_breach_horizon=None,
         first_breach_timestamp=None,
-        current_tension=float(current_tension),
-        stress_threshold=float(stress_threshold),
+        current_tension=current,
+        stress_threshold=threshold,
         forecast_summary=dict(tension_forecast),
         breach_horizons=[],
         error_message=message,
+    )
+
+
+# Retain the private name for callers outside this repository that imported it.
+_error_recommendation = error_recommendation
+
+
+def inactive_season_recommendation(
+    current_tension: float,
+    stress_threshold: float,
+    tension_forecast: Dict[str, float],
+    message: str,
+) -> IrrigationRecommendation:
+    """Return an explicit no-irrigation decision outside the crop season."""
+    return IrrigationRecommendation(
+        should_irrigate=False,
+        urgency="none",
+        first_breach_horizon=None,
+        first_breach_timestamp=None,
+        current_tension=float(current_tension),
+        stress_threshold=float(stress_threshold),
+        forecast_summary=dict(tension_forecast),
+        forecast_thresholds={},
+        breach_horizons=[],
+        status_message=message,
     )
 
 
@@ -133,6 +167,7 @@ def evaluate_forecast(
     current_timestamp: Optional[datetime] = None,
     advise_horizon_hours: float = 24.0,
     watch_horizon_hours: float = 72.0,
+    stress_thresholds: Optional[Dict[str, float]] = None,
 ) -> IrrigationRecommendation:
     """
     Decide whether to irrigate based on the current tension and a forecast.
@@ -145,7 +180,9 @@ def evaluate_forecast(
         current_tension:       Current observed soil tension (cbar).
         tension_forecast:      Dict of {horizon_label: predicted_tension_cbar}.
                                Keys must be parseable, e.g. '24h', '48h'.
-        stress_threshold:      From CropState.stress_threshold_cbar.
+        stress_threshold:      Threshold applying to the current observation.
+        stress_thresholds:     Optional threshold for every forecast horizon.
+                               Required for a dynamic forecast decision.
         current_timestamp:     Used to compute first_breach_timestamp.
         advise_horizon_hours:  Breach within this window → 'advise' + irrigate.
         watch_horizon_hours:   Breach within this window → 'watch'.
@@ -189,6 +226,7 @@ def evaluate_forecast(
     invalid_labels: List[str] = []
     invalid_values: List[str] = []
     valid_forecast: Dict[str, float] = {}
+    valid_thresholds: Dict[str, float] = {}
 
     for label, value in tension_forecast.items():
         try:
@@ -210,6 +248,38 @@ def evaluate_forecast(
         horizon_hours[label] = parsed_hours
         valid_forecast[label] = numeric_value
 
+    if stress_thresholds is not None:
+        if not isinstance(stress_thresholds, dict):
+            return _error_recommendation(
+                current_tension, stress_threshold, tension_forecast,
+                "stress_thresholds must be a dict keyed by forecast horizon")
+        missing_thresholds = sorted(
+            str(label) for label in valid_forecast if label not in stress_thresholds)
+        invalid_thresholds = []
+        for label in valid_forecast:
+            if label not in stress_thresholds:
+                continue
+            if stress_thresholds[label] is None:
+                continue
+            try:
+                value = float(stress_thresholds[label])
+            except (TypeError, ValueError):
+                invalid_thresholds.append(str(label))
+                continue
+            if not np.isfinite(value) or value <= 0:
+                invalid_thresholds.append(str(label))
+            else:
+                valid_thresholds[label] = value
+        if missing_thresholds or invalid_thresholds:
+            return _error_recommendation(
+                current_tension, stress_threshold, tension_forecast,
+                "forecast thresholds are incomplete or invalid: "
+                f"missing={missing_thresholds}, invalid={sorted(invalid_thresholds)}")
+    else:
+        valid_thresholds = {
+            label: stress_threshold for label in valid_forecast
+        }
+
     if invalid_labels or invalid_values:
         problems = []
         if invalid_labels:
@@ -225,7 +295,11 @@ def evaluate_forecast(
         )
 
     for label in sorted(valid_forecast.keys(), key=lambda k: horizon_hours[k]):
-        if valid_forecast[label] > stress_threshold:
+        if label not in valid_thresholds:
+            # A null threshold explicitly marks an inactive crop-season
+            # horizon (harvest or physiological maturity).
+            continue
+        if valid_forecast[label] >= valid_thresholds[label]:
             breach_horizons.append(label)
             if first_breach_horizon is None:
                 first_breach_horizon = label
@@ -234,7 +308,7 @@ def evaluate_forecast(
                         hours=horizon_hours[label]
                     )
 
-    currently_breached = current_tension > stress_threshold
+    currently_breached = current_tension >= stress_threshold
     if currently_breached:
         # Prepend 'now' so breach_horizons is chronologically complete.
         breach_horizons.insert(0, "now")
@@ -265,6 +339,10 @@ def evaluate_forecast(
         current_tension=current_tension,
         stress_threshold=stress_threshold,
         forecast_summary=dict(valid_forecast),
+        forecast_thresholds={
+            label: valid_thresholds.get(label)
+            for label in valid_forecast
+        },
         breach_horizons=breach_horizons,
     )
 
@@ -279,7 +357,7 @@ def evaluate_forecast_series(
     Vectorised breach detection across a DataFrame of tension forecasts.
 
     For each horizon column in predicted_tensions, adds:
-        <horizon>_breached  bool   — predicted tension > threshold
+        <horizon>_breached  bool   — predicted tension >= threshold
         <horizon>_margin    float  — predicted - threshold (negative = safe)
 
     stress_thresholds is forward-filled onto predicted_tensions.index so
@@ -289,7 +367,7 @@ def evaluate_forecast_series(
         predicted_tensions.index, method="ffill")
     results = {}
     for col in predicted_tensions.columns:
-        results[f"{col}_breached"] = predicted_tensions[col] > thresholds
+        results[f"{col}_breached"] = predicted_tensions[col] >= thresholds
         results[f"{col}_margin"] = predicted_tensions[col] - thresholds
     return pd.DataFrame(results, index=predicted_tensions.index)
 
@@ -321,7 +399,20 @@ def build_threshold_series_for_eval(
 
     daily = df_test["Temperature"].resample("1D")
     gdd_series = compute_gdd_from_weather(daily.max(), daily.min(), farm)
-    daily_thresholds = get_stress_threshold_series(gdd_series, farm)
+    etc_daily = None
+    if str(getattr(farm, "threshold_mode", "static")) == "dynamic":
+        if "Et0_evapotranspiration" not in df_test:
+            log.warning(
+                "  [%s] dynamic evaluation needs Et0_evapotranspiration",
+                farm.farm_id)
+            return None
+        daily_et0 = pd.to_numeric(
+            df_test["Et0_evapotranspiration"], errors="coerce").resample(
+                "1D").sum(min_count=1)
+        etc_daily = daily_et0.reindex(gdd_series.index) * gdd_series.apply(
+            lambda value: compute_kc_gdd(value, farm.crop_type))
+    daily_thresholds = get_stress_threshold_series(
+        gdd_series, farm, etc_daily)
     return daily_thresholds.reindex(df_test.index, method="ffill")
 
 
