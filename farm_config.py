@@ -49,22 +49,45 @@ class FarmConfig:
     latitude: float
     longitude: float
     timezone: str
-
     sensor_kind: str
+
+    enable_experimental_ndre_kc: bool = False
     irrigation_type: str = ""
     irrigation_mode: str = ""
+    application_efficiency: float = 0.85
+    effective_rainfall_fraction: float = 0.80
     # Device identifiers may originate in the compatibility JSON layer, but
     # YAML values override them when explicitly configured.
     moisture_sensor_ids: List[str] = field(default_factory=list)
     temperature_sensor_ids: List[str] = field(default_factory=list)
     flow_sensor_ids: List[str] = field(default_factory=list)
     flow_confirmation_sensor_ids: List[str] = field(default_factory=list)
+    flow_confirmation_mode: str = "event"
 
     crop_type: str = ""
     planting_date: str = ""
     harvest_date: Optional[str] = None
 
     soil_texture_class: Optional[int] = None   # USDA 0-11
+    static_threshold_cbar: Optional[float] = None
+    threshold_mode: str = "static"
+
+    # Dynamic tension threshold inputs. VWC values are fractions (m3/m3).
+    field_capacity_vwc: Optional[float] = None
+    wilting_point_vwc: Optional[float] = None
+    root_depth_m: Optional[float] = None
+    sensor_depth_m: Optional[float] = None
+    depletion_fraction: Optional[float] = None
+    threshold_hysteresis_cbar: float = 0.0
+    stage_depletion_fractions: Dict = field(default_factory=dict)
+    stage_thresholds_cbar: Dict = field(default_factory=dict)
+
+    field_capacity_lower: Optional[float] = None
+    permanent_wilting_point: Optional[float] = None
+    saturation: float = 0.0
+    soil_calibration: Dict = field(default_factory=dict)
+    soil_water_retention_curve: List = field(default_factory=list)
+    plot_area_m2: Optional[float] = None
 
     initial_gdd: float = 0.0
 
@@ -100,6 +123,10 @@ class FarmConfig:
                 f"Farm '{self.farm_id}': unsupported irrigation_mode "
                 f"'{self.irrigation_mode}'"
             )
+        if self.flow_confirmation_mode not in {"event", "cumulative"}:
+            raise ValueError(
+                f"Farm '{self.farm_id}': flow_confirmation_mode must be "
+                "'event' or 'cumulative'")
         if not math.isfinite(self.latitude) or not -90 <= self.latitude <= 90:
             raise ValueError(
                 f"Farm '{self.farm_id}': latitude must be between -90 and 90")
@@ -122,10 +149,18 @@ class FarmConfig:
             raise ValueError(
                 f"Farm '{self.farm_id}': predict_period_hours must be positive"
             )
-        if self.retraining_interval_days <= 0 or self.irrigation_confirmation_seconds <= 0 or self.error_retry_seconds <= 0:
+        if (self.retraining_interval_days <= 0
+                or self.irrigation_confirmation_seconds <= 0
+                or self.error_retry_seconds <= 0):
             raise ValueError(
-                f"Farm '{self.farm_id}': retraining, confirmation, and retry intervals must be positive"
+                f"Farm '{self.farm_id}': retraining and retry intervals must be positive"
             )
+        for name, value in (
+                ("application_efficiency", self.application_efficiency),
+                ("effective_rainfall_fraction", self.effective_rainfall_fraction)):
+            if not math.isfinite(float(value)) or not 0 < float(value) <= 1:
+                raise ValueError(
+                    f"Farm '{self.farm_id}': {name} must be greater than 0 and no greater than 1")
         if not self.crop_type:
             raise ValueError(
                 f"Farm '{self.farm_id}': 'crop_type' is required in farms.yaml. "
@@ -141,47 +176,140 @@ class FarmConfig:
 
         import pandas as pd
         try:
-            pd.Timestamp(self.planting_date)
+            planting_timestamp = pd.Timestamp(self.planting_date)
         except Exception as exc:
             raise ValueError(
                 f"Farm '{self.farm_id}': planting_date '{self.planting_date}' "
                 f"is not a valid date. Use ISO format: YYYY-MM-DD "
                 f"(e.g. '2024-04-15')."
             ) from exc
+        if self.harvest_date:
+            try:
+                harvest_timestamp = pd.Timestamp(self.harvest_date)
+            except Exception as exc:
+                raise ValueError(
+                    f"Farm '{self.farm_id}': harvest_date "
+                    f"'{self.harvest_date}' is not a valid date") from exc
+            if harvest_timestamp < planting_timestamp:
+                raise ValueError(
+                    f"Farm '{self.farm_id}': harvest_date cannot be before "
+                    "planting_date")
+        if not math.isfinite(float(self.initial_gdd)) or float(
+                self.initial_gdd) < 0:
+            raise ValueError(
+                f"Farm '{self.farm_id}': initial_gdd must be a non-negative "
+                "finite value")
 
         from crops import CROP_PARAMS
         if self.crop_type not in CROP_PARAMS:
-            known = [k for k in CROP_PARAMS if k != "generic"]
+            known = list(CROP_PARAMS)
             raise ValueError(
                 f"Farm '{self.farm_id}': crop_type '{self.crop_type}' is not "
                 f"in the crop database. Known crops: {known}. "
                 f"Add the crop to crops.py or correct the farms.yaml entry."
             )
-        if self.crop_type == "generic":
-            raise ValueError(
-                f"Farm '{self.farm_id}': crop_type 'generic' is not a valid "
-                f"production crop. Set the actual crop being grown. "
-                f"Known crops: {[k for k in CROP_PARAMS if k != 'generic']}."
-            )
 
+        if self.sensor_kind in ("tension", "both"):
+            if self.static_threshold_cbar is None or not math.isfinite(
+                    float(self.static_threshold_cbar)) or float(self.static_threshold_cbar) <= 0:
+                raise ValueError(
+                    f"Farm '{self.farm_id}': a positive field-calibrated "
+                    "static_threshold_cbar is required for tension sensors")
+        if self.threshold_mode not in {"static", "dynamic"}:
+            raise ValueError(
+                f"Farm '{self.farm_id}': threshold_mode must be 'static' or 'dynamic'")
+        if self.threshold_mode == "dynamic":
+            hydraulic = (
+                self.field_capacity_vwc, self.wilting_point_vwc,
+                self.root_depth_m, self.sensor_depth_m,
+            )
+            has_hydraulic = all(value is not None for value in hydraulic) and bool(
+                self.soil_water_retention_curve)
+            required_stage_keys = {
+                "pre_emergence", "development", "mid_season",
+                "late_season", "post_maturity",
+            }
+            has_stage_curve = required_stage_keys.issubset(
+                self.stage_thresholds_cbar)
+            has_boundaries = bool(self.soil_water_retention_curve) and all(
+                v is not None for v in (self.field_capacity_lower, self.permanent_wilting_point))
+            if has_boundaries and not has_hydraulic:
+                from soil_calibration import validate_soil_calibration
+                validate_soil_calibration(self.soil_water_retention_curve,
+                    self.field_capacity_lower, self.permanent_wilting_point,
+                    self.saturation, self.soil_calibration)
+            if not has_hydraulic and not has_stage_curve and not has_boundaries:
+                raise ValueError(
+                    f"Farm '{self.farm_id}': dynamic mode requires hydraulic "
+                    "VWC/root/sensor/retention-curve inputs or all five "
+                    "stage_thresholds_cbar values")
+            if has_hydraulic:
+                theta_fc, theta_wp, root_depth, sensor_depth = map(
+                    float, hydraulic)
+                if not (0 < theta_wp < theta_fc < 1):
+                    raise ValueError(
+                        f"Farm '{self.farm_id}': require 0 < wilting_point_vwc "
+                        "< field_capacity_vwc < 1")
+                if root_depth <= 0 or sensor_depth <= 0 or sensor_depth > root_depth:
+                    raise ValueError(
+                        f"Farm '{self.farm_id}': sensor/root depths must be "
+                        "positive and sensor depth cannot exceed root depth")
+        if self.depletion_fraction is not None and not (
+                0 < float(self.depletion_fraction) < 1):
+            raise ValueError(
+                f"Farm '{self.farm_id}': depletion_fraction must be between 0 and 1")
+        required_stage_keys = {
+            "pre_emergence", "development", "mid_season",
+            "late_season", "post_maturity",
+        }
+        if self.stage_depletion_fractions:
+            if set(self.stage_depletion_fractions) != required_stage_keys:
+                raise ValueError(
+                    f"Farm '{self.farm_id}': stage_depletion_fractions must "
+                    "contain exactly all five crop stages")
+            if any(
+                not math.isfinite(float(value)) or not 0 < float(value) < 1
+                for value in self.stage_depletion_fractions.values()
+            ):
+                raise ValueError(
+                    f"Farm '{self.farm_id}': every stage depletion fraction "
+                    "must be between 0 and 1")
+        if self.stage_thresholds_cbar:
+            if set(self.stage_thresholds_cbar) != required_stage_keys:
+                raise ValueError(
+                    f"Farm '{self.farm_id}': stage_thresholds_cbar must "
+                    "contain exactly all five crop stages")
+            if any(
+                not math.isfinite(float(value)) or float(value) <= 0
+                for value in self.stage_thresholds_cbar.values()
+            ):
+                raise ValueError(
+                    f"Farm '{self.farm_id}': every stage threshold must be "
+                    "a positive cbar value")
+        if not math.isfinite(float(self.threshold_hysteresis_cbar)) or float(
+                self.threshold_hysteresis_cbar) < 0:
+            raise ValueError(
+                f"Farm '{self.farm_id}': threshold_hysteresis_cbar cannot be negative")
         if self.soil_texture_class is not None:
             if not (0 <= self.soil_texture_class <= 11):
                 raise ValueError(
                     f"Farm '{self.farm_id}': soil_texture_class must be 0-11 "
                     f"(USDA texture classes), got {self.soil_texture_class}."
                 )
-        elif self.sensor_kind in ("tension", "both"):
-            raise ValueError(
-                f"Farm '{self.farm_id}': soil_texture_class is required for "
-                f"tension sensors. Set the USDA texture class in farms.yaml "
-                f"so irrigation thresholds do not fall back to the wrong "
-                f"Loam default."
-            )
-        else:
-            log.warning(
-                "Farm '%s': soil_texture_class not set — using default trigger base only for non-tension sensors.",
-                self.farm_id,
-            )
+        if self.irrigation_mode in {"automatic", "approval_required"}:
+            missing = []
+            if not self.flow_sensor_ids:
+                missing.append("actuator")
+            try:
+                area = float(self.plot_area_m2)
+            except (TypeError, ValueError):
+                area = math.nan
+            if not math.isfinite(area) or area <= 0:
+                missing.append("positive_plot_area_m2")
+            if missing:
+                raise ValueError(
+                    f"Farm '{self.farm_id}': calculated irrigation configuration "
+                    f"is incomplete: {missing}")
 
     def apply_to_plot(self, plot) -> None:
         """Apply authoritative farm fields to a legacy Plot runtime object."""
@@ -194,13 +322,37 @@ class FarmConfig:
             "longitude": self.longitude,
             "lattitude": self.latitude,
         }
+        plot.enable_experimental_ndre_kc = self.enable_experimental_ndre_kc
         plot.timezone = self.timezone
         plot.sensor_kind = self.sensor_kind
         plot.irrigation_type = self.irrigation_type or "unknown"
         plot.irrigation_mode = self.irrigation_mode or ""
+        plot.application_efficiency = float(self.application_efficiency)
+        plot.effective_rainfall_fraction = float(
+            self.effective_rainfall_fraction)
         plot.crop_type = self.crop_type
         plot.planting_date = self.planting_date
+        plot.harvest_date = self.harvest_date
+        plot.initial_gdd = float(self.initial_gdd)
         plot.soil_texture_class = self.soil_texture_class
+        plot.threshold_static = self.static_threshold_cbar
+        plot.threshold = self.static_threshold_cbar
+        plot.threshold_mode = self.threshold_mode
+        for name in (
+            "soil_water_retention_curve", "plot_area_m2",
+            "field_capacity_vwc", "wilting_point_vwc", "root_depth_m",
+            "sensor_depth_m", "depletion_fraction",
+            "threshold_hysteresis_cbar", "stage_depletion_fractions",
+            "stage_thresholds_cbar",
+        ):
+            setattr(plot, name, getattr(self, name))
+        if self.field_capacity_lower is not None:
+            plot.field_capacity_lower = self.field_capacity_lower
+        if self.permanent_wilting_point is not None:
+            plot.permanent_wilting_point = self.permanent_wilting_point
+        if self.field_capacity_lower is not None or self.permanent_wilting_point is not None:
+            plot.saturation = self.saturation
+            plot.soil_calibration = dict(self.soil_calibration)
         plot.forecast_interval_minutes = self.forecast_interval_minutes
         plot.forecast_horizon_days = self.forecast_horizon_days
         plot.predict_period_hours = self.predict_period_hours
@@ -214,6 +366,7 @@ class FarmConfig:
         plot.device_and_sensor_ids_flow = list(self.flow_sensor_ids)
         plot.device_and_sensor_ids_flow_confirmation = list(
             self.flow_confirmation_sensor_ids)
+        plot.flow_confirmation_mode = self.flow_confirmation_mode
 
 
 def load_farm_config(
@@ -274,6 +427,9 @@ def load_all_farms(
     configs: Dict[str, FarmConfig] = {}
     invalid_entries = []
     for fid, entry in all_farms.items():
+        if isinstance(entry, dict) and entry.get("enabled", True) is False:
+            log.info("Farm '%s' is disabled; skipping validation and runtime loading", fid)
+            continue
         try:
             configs[fid] = _parse_entry(fid, entry)
         except (KeyError, ValueError) as e:
@@ -358,8 +514,8 @@ def _parse_entry(farm_id: str, entry: dict) -> FarmConfig:
         key for key in _REQUIRED_PHENO if key not in entry or not entry[key]
     ]
     if entry.get("sensor_kind") in {"tension", "both"} and entry.get(
-            "soil_texture_class") is None:
-        missing_agronomic.append("soil_texture_class")
+            "static_threshold_cbar") is None:
+        missing_agronomic.append("static_threshold_cbar")
     if missing_agronomic:
         raise ValueError(
             f"Farm '{farm_id}' is missing agronomic fields required by the "
@@ -374,21 +530,51 @@ def _parse_entry(farm_id: str, entry: dict) -> FarmConfig:
         latitude=float(entry["latitude"]),
         longitude=float(entry["longitude"]),
         timezone=entry["timezone"],
+        enable_experimental_ndre_kc=bool(
+            entry.get("enable_experimental_ndre_kc", False)),
         sensor_kind=entry["sensor_kind"],
         # normalise None/absent → ""
         irrigation_type=entry.get("irrigation_type") or "",
         irrigation_mode=entry.get("irrigation_mode") or "",
+        application_efficiency=float(entry.get("application_efficiency", 0.85)),
+        effective_rainfall_fraction=float(entry.get(
+            "effective_rainfall_fraction", 0.80)),
         moisture_sensor_ids=list(entry.get("moisture_sensor_ids", [])),
         temperature_sensor_ids=list(entry.get("temperature_sensor_ids", [])),
         flow_sensor_ids=list(entry.get("flow_sensor_ids", [])),
         flow_confirmation_sensor_ids=list(entry.get(
             "flow_confirmation_sensor_ids", [])),
+        flow_confirmation_mode=str(entry.get(
+            "flow_confirmation_mode", "event")).strip().lower(),
         crop_type=entry["crop_type"],
         # coerce int/date YAML values to str
         planting_date=str(entry["planting_date"]),
         harvest_date=str(entry["harvest_date"]) if entry.get(
             "harvest_date") else None,
         soil_texture_class=entry.get("soil_texture_class", None),
+        static_threshold_cbar=entry.get("static_threshold_cbar"),
+        threshold_mode=str(entry.get(
+            "threshold_mode",
+            "dynamic" if entry.get("use_dynamic_threshold", False) else "static",
+        )).strip().lower(),
+        field_capacity_lower=entry.get("field_capacity_lower"),
+        permanent_wilting_point=entry.get("permanent_wilting_point"),
+        saturation=float(entry.get("saturation", 0)),
+        soil_calibration=dict(entry.get("soil_calibration", {}) or {}),
+        field_capacity_vwc=entry.get("field_capacity_vwc"),
+        wilting_point_vwc=entry.get("wilting_point_vwc"),
+        root_depth_m=entry.get("root_depth_m"),
+        sensor_depth_m=entry.get("sensor_depth_m"),
+        depletion_fraction=entry.get("depletion_fraction"),
+        threshold_hysteresis_cbar=float(entry.get(
+            "threshold_hysteresis_cbar", 0.0)),
+        stage_depletion_fractions=dict(entry.get(
+            "stage_depletion_fractions", {}) or {}),
+        stage_thresholds_cbar=dict(entry.get(
+            "stage_thresholds_cbar", {}) or {}),
+        soil_water_retention_curve=list(
+            entry.get("soil_water_retention_curve", []) or []),
+        plot_area_m2=entry.get("plot_area_m2"),
         initial_gdd=float(entry.get("initial_gdd", 0.0)),
         advise_horizon_hours=float(entry.get("advise_horizon_hours", 24.0)),
         watch_horizon_hours=float(entry.get("watch_horizon_hours", 72.0)),
@@ -398,7 +584,7 @@ def _parse_entry(farm_id: str, entry: dict) -> FarmConfig:
         predict_period_hours=float(entry.get("predict_period_hours", 3.0)),
         retraining_interval_days=float(
             entry.get("retraining_interval_days", 1.0)),
-        irrigation_confirmation_seconds=int(
-            entry.get("irrigation_confirmation_seconds", 10800)),
+        irrigation_confirmation_seconds=int(entry.get(
+            "irrigation_confirmation_seconds", 10800)),
         error_retry_seconds=int(entry.get("error_retry_seconds", 1800)),
     )

@@ -10,7 +10,8 @@ def _operation_for_plot(operations, plot_id):
 
 def build_farm_dashboard(*, farm, plot_records, runtime_plots, recommendations,
                          alerts, operations, generated_at=None):
-    generated_at = generated_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    generated_at = generated_at or datetime.now(
+        timezone.utc).replace(microsecond=0).isoformat()
     alert_by_plot = {item["plot_id"]: item for item in alerts}
     cards = []
     equipment_configured = 0
@@ -27,11 +28,13 @@ def build_farm_dashboard(*, farm, plot_records, runtime_plots, recommendations,
         action = recommendation.get("action") or {}
         timing = recommendation.get("timing") or {}
         freshness = recommendation.get("freshness") or {}
-        flow_ids = getattr(runtime, "device_and_sensor_ids_flow", []) if runtime else []
+        flow_ids = getattr(
+            runtime, "device_and_sensor_ids_flow", []) if runtime else []
         configured = bool(flow_ids)
         equipment_configured += int(configured)
         if operation and operation.get("status") == "active":
-            equipment_state = "active"; equipment_active += 1
+            equipment_state = "active"
+            equipment_active += 1
         elif not configured:
             equipment_state = "not_configured"
         elif action.get("mode") == "advisory_only":
@@ -65,11 +68,14 @@ def build_farm_dashboard(*, farm, plot_records, runtime_plots, recommendations,
 
     urgency_counts = {name: sum(1 for alert in alerts if alert.get("urgency") == name)
                       for name in ("watch", "advise", "critical")}
-    included = [item for item in operations if item.get("status") not in {"declined", "failed"}]
-    planned_water = round(sum(float(item.get("amount_m3") or 0) for item in included), 3)
+    included = [item for item in operations if item.get("status") not in {
+        "declined", "failed"}]
+    planned_water = round(sum(float(item.get("amount_m3") or 0)
+                          for item in included), 3)
     return {
         "schema_version": "1.0", "generated_at": generated_at,
         "farm": {"farm_id": farm.get("farm_id"), "name": farm.get("name"),
+                 "gateway_id": farm.get("gateway_id"),
                  "size": farm.get("size"), "area_unit": farm.get("area_unit"),
                  "timezone": farm.get("timezone")},
         "summary": {"total_plots": len(cards), "plots_needing_attention": len(alerts),

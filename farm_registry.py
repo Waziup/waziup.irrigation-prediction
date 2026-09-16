@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -52,6 +54,8 @@ class FarmRegistry:
         self.config_dir = Path(config_dir)
         self._lock = threading.RLock()
         self.data = None
+        self._committed_data = None
+        self._defer_publish = False
 
     def load_or_migrate(self) -> dict:
         with self._lock:
@@ -59,6 +63,7 @@ class FarmRegistry:
                 data = _read_json(self.path)
                 self._validate(data)
                 self.data = data
+                self._committed_data = deepcopy(data)
                 return deepcopy(data)
             self.data = self._migrate_legacy()
             self._save_unlocked()
@@ -183,14 +188,44 @@ class FarmRegistry:
             raise ValueError("Current farm must own the current plot")
 
     def _save_unlocked(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.data["updated_at"] = datetime.now(timezone.utc).isoformat()
-        temp_path = self.path.with_suffix(self.path.suffix + ".tmp")
-        with temp_path.open("w", encoding="utf-8") as handle:
-            json.dump(self.data, handle, indent=2)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_path, self.path)
+        if self._defer_publish:
+            return
+        # Mutators run under the registry lock. Until replacement succeeds,
+        # the last published snapshot remains authoritative for memory too.
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.data["updated_at"] = datetime.now(timezone.utc).isoformat()
+            temp_path = self.path.with_suffix(self.path.suffix + ".tmp")
+            with temp_path.open("w", encoding="utf-8") as handle:
+                json.dump(self.data, handle, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, self.path)
+        except BaseException:
+            self.data = deepcopy(self._committed_data)
+            raise
+        self._committed_data = deepcopy(self.data)
+
+    @contextmanager
+    def transaction(self):
+        """Stage related mutations under one lock and publish one snapshot."""
+        with self._lock:
+            if self._defer_publish:
+                raise RuntimeError('Nested registry transactions are unsupported')
+            if self.data is None:
+                self.load_or_migrate()
+            before = deepcopy(self.data)
+            self._defer_publish = True
+            try:
+                yield self
+                self._validate(self.data)
+                self._defer_publish = False
+                self._save_unlocked()
+            except BaseException:
+                self.data = before
+                raise
+            finally:
+                self._defer_publish = False
 
     def save(self) -> None:
         with self._lock:
@@ -224,7 +259,7 @@ class FarmRegistry:
             self.data["current_farm_id"] = plot["farm_id"]
             self._save_unlocked()
 
-    def create_farm(self, name, latitude, longitude, size, area_unit, timezone_name, owner="") -> dict:
+    def create_farm(self, name, latitude, longitude, size, area_unit, timezone_name, owner="", gateway_id=None) -> dict:
         name = str(name or "").strip()
         if not name:
             raise ValueError("Farm name is required")
@@ -235,8 +270,8 @@ class FarmRegistry:
         size = float(size)
         if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
             raise ValueError("Farm coordinates are out of range")
-        if size < 0:
-            raise ValueError("Farm size cannot be negative")
+        if not math.isfinite(size) or size < 0:
+            raise ValueError("Farm size must be finite and nonnegative")
 
         with self._lock:
             if self.data is None:
@@ -245,6 +280,7 @@ class FarmRegistry:
             farm = {
                 "farm_id": farm_id,
                 "name": name,
+                "gateway_id": gateway_id,
                 "owner": str(owner or "").strip(),
                 "latitude": latitude,
                 "longitude": longitude,
@@ -258,7 +294,7 @@ class FarmRegistry:
             return deepcopy(farm)
 
     def update_farm(self, farm_id: str, **fields) -> dict:
-        allowed = {"name", "owner", "latitude", "longitude", "size", "area_unit", "timezone"}
+        allowed = {"name", "owner", "latitude", "longitude", "size", "area_unit", "timezone", "gateway_id"}
         unknown = set(fields) - allowed
         if unknown:
             raise ValueError(f"Unsupported farm fields: {sorted(unknown)}")
@@ -279,8 +315,8 @@ class FarmRegistry:
                 raise ValueError("Farm latitude is out of range")
             if "longitude" in fields and not -180 <= fields["longitude"] <= 180:
                 raise ValueError("Farm longitude is out of range")
-            if "size" in fields and fields["size"] < 0:
-                raise ValueError("Farm size cannot be negative")
+            if "size" in fields and (not math.isfinite(fields["size"]) or fields["size"] < 0):
+                raise ValueError("Farm size must be finite and nonnegative")
             farm.update(fields)
             self._save_unlocked()
             return deepcopy(farm)
