@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from contextlib import contextmanager
+from datetime import date, datetime, time, timedelta, timezone
 import json
+import math
+import os
 from pathlib import Path
 import sqlite3
 import uuid
+from zoneinfo import ZoneInfo
 
 
 MODES = {"automatic", "approval_required", "manual", "advisory_only"}
@@ -17,7 +21,7 @@ ACTIVE_ALERT_URGENCIES = {"watch", "advise", "critical"}
 TRANSITIONS = {
     "planned": {"pending_approval", "approved", "active", "declined", "failed"},
     "pending_approval": {"approved", "declined"},
-    "approved": {"active", "declined", "failed"},
+    "approved": {"pending_approval", "active", "declined", "failed"},
     "active": {"completed", "verified", "failed"},
     "completed": {"verified", "failed"},
     "declined": set(), "failed": set(), "verified": set(),
@@ -25,7 +29,9 @@ TRANSITIONS = {
 
 
 def _now():
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    # Preserve sub-second ordering so a command completed immediately after a
+    # calculation is not accidentally timestamped before that calculation.
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _json(value):
@@ -38,13 +44,17 @@ class OperationsStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
+    @contextmanager
     def _connect(self):
         connection = sqlite3.connect(self.path, timeout=10, isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout=10000")
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA foreign_keys=ON")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA busy_timeout=10000")
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA foreign_keys=ON")
+            yield connection
+        finally:
+            connection.close()
 
     def _initialize(self):
         with self._connect() as db:
@@ -118,8 +128,10 @@ class OperationsStore:
             raise ValueError(f"Unsupported irrigation mode: {mode}")
         if status not in STATUSES:
             raise ValueError(f"Unsupported operation status: {status}")
-        if amount_m3 is not None and float(amount_m3) <= 0:
-            raise ValueError("Irrigation amount must be greater than zero")
+        if amount_m3 is not None:
+            amount_m3 = float(amount_m3)
+            if not math.isfinite(amount_m3) or amount_m3 <= 0:
+                raise ValueError("Irrigation amount must be finite and greater than zero")
         operation_id = f"op-{uuid.uuid4().hex[:16]}"
         timestamp = _now()
         with self._connect() as db:
@@ -189,7 +201,7 @@ class OperationsStore:
             return self._operation(db.execute(query, values).fetchone())
 
     def list_operations(self, *, farm_id=None, plot_id=None, status=None,
-                        search=None, limit=100, today=None):
+                        search=None, limit=100, today=None, timezone_name="UTC"):
         clauses, values = [], []
         if farm_id:
             clauses.append("farm_id=?"); values.append(farm_id)
@@ -203,13 +215,35 @@ class OperationsStore:
             clauses.append("(plot_name LIKE ? OR source LIKE ? OR status LIKE ?)")
             term = f"%{search}%"; values.extend([term, term, term])
         if today:
-            clauses.append("date(COALESCE(planned_start,created_at))=date(?)"); values.append(today)
+            day = date.fromisoformat(str(today))
+            zone = ZoneInfo(timezone_name)
+            start = datetime.combine(day, time.min, tzinfo=zone).astimezone(timezone.utc)
+            end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=zone).astimezone(timezone.utc)
+            # Half-open local-day bounds also handle 23/25-hour DST days.
+            # SQLite normalizes stored offsets; comparing date strings would
+            # instead select the UTC day regardless of the farm's timezone.
+            clauses.extend([
+                "julianday(COALESCE(planned_start,created_at)) >= julianday(?)",
+                "julianday(COALESCE(planned_start,created_at)) < julianday(?)",
+            ])
+            values.extend([start.isoformat(), end.isoformat()])
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         values.append(max(1, min(int(limit), 500)))
         with self._connect() as db:
             rows = db.execute("SELECT * FROM operations" + where +
                               " ORDER BY COALESCE(planned_start,created_at) DESC LIMIT ?", values).fetchall()
         return [self._operation(row) for row in rows]
+
+    def due_schedules(self, now, *, after_rowid=0, limit=100):
+        """Page executable schedules without dashboard limits or future starvation."""
+        with self._connect() as db:
+            rows = db.execute("""SELECT rowid AS dispatch_cursor, * FROM operations
+                WHERE rowid > ? AND source='schedule'
+                AND status IN ('planned','approved')
+                AND (julianday(planned_start) IS NULL OR julianday(planned_start) <= julianday(?))
+                ORDER BY rowid LIMIT ?""",
+                (after_rowid, str(now), max(1, min(int(limit), 500)))).fetchall()
+        return [(row['dispatch_cursor'], self._operation(row)) for row in rows]
 
     def events(self, operation_id):
         with self._connect() as db:
@@ -220,6 +254,101 @@ class OperationsStore:
             item = dict(row); item["detail"] = json.loads(item.pop("detail_json") or "{}")
             result.append(item)
         return result
+
+    def has_pending_flow_verification(self, plot_id):
+        """Return whether an accepted command still awaits meter evidence."""
+        with self._connect() as db:
+            row = db.execute("""
+                SELECT 1
+                FROM operations AS o
+                JOIN operation_events AS e
+                  ON e.operation_id = o.operation_id
+                WHERE o.plot_id = ?
+                  AND o.status = 'completed'
+                  AND e.to_status = 'completed'
+                  AND json_type(e.detail_json, '$.flow_verification') IS NOT NULL
+                LIMIT 1
+            """, (str(plot_id),)).fetchone()
+        return row is not None
+
+    def applied_irrigation_since(self, plot_id, since, until=None):
+        """Return recorded applied volume after a calculation checkpoint.
+
+        An operation contributes once: at command completion when no meter is
+        required, or at the later verification event when a meter is used.
+        Failed, declined, merely planned, approved, or active operations are
+        excluded. A completed operation with flow-verification context is not
+        credited until it reaches ``verified``; ordinary completed operations
+        retain compatibility for installations without a confirmation meter.
+        Verified operations use measured delivered volume when it is present.
+        """
+        if since is None:
+            return {"volume_m3": 0.0, "operation_count": 0,
+                    "since": None, "until": None}
+
+        def normalized_timestamp(value):
+            if isinstance(value, datetime):
+                parsed = value
+            else:
+                parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc).isoformat()
+
+        start = normalized_timestamp(since)
+        end = normalized_timestamp(until or datetime.now(timezone.utc))
+        if end < start:
+            raise ValueError("until must not be earlier than since")
+
+        with self._connect() as db:
+            row = db.execute("""
+                SELECT COALESCE(SUM(
+                           CASE WHEN o.status = 'verified'
+                             THEN COALESCE(applied.delivered_m3, o.amount_m3)
+                             ELSE o.amount_m3
+                           END), 0.0) AS volume_m3,
+                       COUNT(*) AS operation_count
+                FROM operations AS o
+                JOIN (
+                    SELECT operation_id,
+                           COALESCE(
+                             MIN(CASE WHEN to_status = 'verified'
+                                      THEN timestamp END),
+                             MIN(CASE WHEN to_status = 'completed'
+                                      THEN timestamp END)
+                           ) AS applied_at,
+                           MAX(CASE WHEN to_status = 'verified'
+                               THEN CAST(json_extract(
+                                 detail_json, '$.delivered_m3') AS REAL)
+                               END) AS delivered_m3
+                    FROM operation_events
+                    WHERE to_status IN ('completed', 'verified')
+                    GROUP BY operation_id
+                ) AS applied ON applied.operation_id = o.operation_id
+                WHERE o.plot_id = ?
+                  AND o.status IN ('completed', 'verified')
+                  AND (
+                    o.status = 'verified'
+                    OR NOT EXISTS (
+                      SELECT 1 FROM operation_events AS verification_pending
+                      WHERE verification_pending.operation_id = o.operation_id
+                        AND verification_pending.to_status = 'completed'
+                        AND json_type(
+                          verification_pending.detail_json,
+                          '$.flow_verification') IS NOT NULL
+                    )
+                  )
+                  AND o.amount_m3 IS NOT NULL
+                  AND o.amount_m3 > 0
+                  AND applied.applied_at > ?
+                  AND applied.applied_at <= ?
+            """, (str(plot_id), start, end)).fetchone()
+        return {
+            "volume_m3": float(row["volume_m3"] or 0.0),
+            "operation_count": int(row["operation_count"] or 0),
+            "since": start,
+            "until": end,
+        }
 
     def record_alert(self, *, idempotency_key, plot_id, urgency, payload,
                      farm_id=None, operation_id=None):
@@ -262,5 +391,6 @@ _default_store = None
 def get_operations_store():
     global _default_store
     if _default_store is None:
-        _default_store = OperationsStore()
+        _default_store = OperationsStore(
+            os.getenv("IRRIGATION_OPERATIONS_DB", "data/operations.sqlite3"))
     return _default_store

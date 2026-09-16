@@ -12,6 +12,7 @@ Resource_wait_time_seconds = 1800
 DEFAULT_SENSOR_SAMPLING_INTERVAL_MINUTES = 60
 DEFAULT_FORECAST_HORIZON_DAYS = 5.0
 DEFAULT_PREDICTION_INTERVAL_HOURS = 3.0
+DEFAULT_IRRIGATION_CONFIRMATION_SECONDS = 10800
 
 
 @dataclass(frozen=True)
@@ -22,14 +23,13 @@ class TimingConfig:
     prediction_interval_hours: float = DEFAULT_PREDICTION_INTERVAL_HOURS
     forecast_horizon_days: float = DEFAULT_FORECAST_HORIZON_DAYS
     retraining_interval_days: float = 1.0
-    irrigation_confirmation_seconds: int = 10800
+    irrigation_confirmation_seconds: int = DEFAULT_IRRIGATION_CONFIRMATION_SECONDS
     error_retry_seconds: int = 1800
 
 
 def get_timing_config(plot=None) -> TimingConfig:
     """Resolve timing from plot configuration with production-safe defaults."""
-    # This is the single runtime timing adapter used by models, workers, and
-    # irrigation confirmation.
+    # This is the single runtime timing adapter used by models and workers.
     values = TimingConfig(
         sensor_sampling_interval_minutes=int(getattr(
             plot, "forecast_interval_minutes",
@@ -41,7 +41,8 @@ def get_timing_config(plot=None) -> TimingConfig:
         retraining_interval_days=float(getattr(
             plot, "retrain_interval_days", 1.0)),
         irrigation_confirmation_seconds=int(getattr(
-            plot, "irrigation_confirmation_seconds", 10800)),
+            plot, "irrigation_confirmation_seconds",
+            DEFAULT_IRRIGATION_CONFIRMATION_SECONDS)),
         error_retry_seconds=int(getattr(
             plot, "error_retry_seconds", Resource_wait_time_seconds)),
     )
