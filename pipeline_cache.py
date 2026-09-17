@@ -1,5 +1,7 @@
 """Persistent cache for the latest unified pipeline output per plot."""
 
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from pathlib import Path
 import hashlib
