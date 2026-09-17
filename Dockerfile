@@ -17,6 +17,7 @@ RUN apt-get update \
     build-essential \
     pkg-config \
     libhdf5-dev \
+    libexpat1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN \
@@ -42,10 +43,12 @@ RUN \
         timezonefinder \
         python-dotenv \
         python-dateutil \
+        pyyaml \
         joblib==1.3 \
         xmlrunner \
         psutil \
-        gevent
+        gevent \
+        rasterio==1.3.11
         
 # keras tuner check usage, also xmlrunner for unittests, does not need to be included in the image
 

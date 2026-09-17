@@ -1,5 +1,12 @@
 # .dockerignore
 .git
+.venv
+venv
+.pytest_cache
+**/__pycache__
+*.py[cod]
+.env
+.env.*
 *.log
 *.pkl
 *.h5
@@ -9,9 +16,14 @@
 *.tar
 *.tar.gz
 *.gz
-.sock
+*.sock
+*.sqlite3
+data/cache
+config/farm_registry.json
+*.xlsx
 .gif
 config/*
+!config/farms.yaml
 /catboost_info
 /.vscode
 /hyperband_dir

@@ -87,6 +87,12 @@ ipython_config.py
 #   intended to run in multiple environments; otherwise, check them in:
 .python-version
 venv
+.venv/
+
+# Local environment files (commit a redacted .env.example instead)
+.env
+.env.*
+!.env.example
 
 # pipenv
 #   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
@@ -169,12 +175,22 @@ hyperband_dir/
 #data/*
 /data/irrigations*.json
 /data/debug/*
+/data/alerts/
+/data/*.sqlite3
+/data/cache/.cache_hmac_key
+/data/cache/*.sig
+/config/farm_registry.json
 
 # notes
 notes.txt
 
 # unit tests results
 test-reports/
+test-results/
+playwright-report/
+
+# Local Unix sockets
+*.sock
 
 # include models and subfolders
 !models/.gitkeep

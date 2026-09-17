@@ -1,5 +1,3 @@
-version: "3"
-
 services:
   wazi-app:
     image: waziup/irrigation-prediction:latest
@@ -13,7 +11,17 @@ services:
       - ./:/var/lib/waziapp/ # The unix socket has to have this name and be in ./ : proxy.sock
     privileged: false
     environment:
-      - TEST_VAR=1
+      # Keep production routing independent from the developer API_URL in .env.
+      API_URL: ${WAZIGATE_API_URL:-http://wazigate:8080/}
+      Proxy_URL: /var/lib/waziapp/proxy.sock
+      WAZIGATE_USERNAME: ${WAZIGATE_USERNAME:-}
+      WAZIGATE_PASSWORD: ${WAZIGATE_PASSWORD:-}
+      LOAD_DATA_FROM_CSV: ${LOAD_DATA_FROM_CSV:-False}
+      SKIP_DATA_PREPROCESSING: ${SKIP_DATA_PREPROCESSING:-False}
+      SKIP_TRAINING: ${SKIP_TRAINING:-False}
+      PERFORM_TRAINING: ${PERFORM_TRAINING:-True}
+      SPACEIOTBOX_API_KEY: ${SPACEIOTBOX_API_KEY:-}
+      SPACEIOTBOX_BASE_URL: ${SPACEIOTBOX_BASE_URL:-https://www.smartafrihub.com/spaceiotbox/api}
     healthcheck:
       test: curl --fail --unix-socket /var/lib/waziapp/proxy.sock http://localhost/ || exit 1
       interval: 30s
@@ -21,7 +29,7 @@ services:
       start_period: 30s
     restart: always
     extra_hosts:
-      - "wazigate:172.17.0.1"
+      - "wazigate:host-gateway"
 #-------------------------#
 
 networks:
