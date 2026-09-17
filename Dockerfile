@@ -1,4 +1,4 @@
-FROM python:3.9-slim-bullseye
+FROM python:3.9-slim-bookworm
 
 #later alpine to save even more filesize of container, but is it worth it? (Alpine uses musl instead of glibc)
 
