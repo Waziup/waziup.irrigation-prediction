@@ -1,14 +1,31 @@
-"""Mutable runtime state shared across the create_model package AND across threads.
+"""Mutable runtime state shared across the create_model package and workers.
 
-Cross-thread contract: training_thread.py and prediction_thread.py read and WRITE
-these flags (most importantly Currently_active, the mutex that prevents concurrent
-training/prediction). All access - internal and external - must go through THIS
-module (create_model.state.X) so every reader sees every writer's update. Do not
-copy these values via `from .state import X` (that freezes the value at import time).
+Runtime flags live here so all package modules and workers observe the same values.
+Model serialization is owned by ``model_operation``; callers must not manipulate
+``Currently_active`` directly.
 """
+
+from contextlib import contextmanager
+import threading
 
 # Prevents concurrent training/prediction of multiple plots (see contract above)
 Currently_active = False
+# Shared lock: only one training or prediction operation may use the ML stack.
+_model_lock = threading.Lock()
+
+
+@contextmanager
+def model_operation():
+    """Serialize expensive model work and always release its runtime flag."""
+    global Currently_active
+    _model_lock.acquire()
+    Currently_active = True
+    try:
+        yield
+    finally:
+        # Always unblock later cycles, including after model failures.
+        Currently_active = False
+        _model_lock.release()
 
 ## DEBUG -> is overwritten by .env
 # to skip data preprocessing and training, load data from file

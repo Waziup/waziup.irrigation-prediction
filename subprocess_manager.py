@@ -9,6 +9,12 @@ Runs operations in isolated subprocesses that can be killed to free RAM
 import subprocess
 import psutil
 import logging
+import selectors
+import time
+import os
+import codecs
+import io
+import signal
 from pathlib import Path
 #from testifu import run_tuning_pycaret_debug
 
@@ -50,7 +56,8 @@ class SubprocessManager:
         logger = logging.getLogger(__name__)
 
         script_path = Path(tmp_dir) / f"tune_pycaret_{plot_name}_{datetime.now().timestamp()}.py"
-        result_clean = str(result_path).replace(".pkl", "")
+        result_clean = str(result_path).removesuffix(".pkl")
+        previous_result = self._classical_artifact_signature(result_clean)
 
         script_content = f'''
 import os
@@ -75,10 +82,10 @@ from pycaret.internal.pipeline import Pipeline
 
 from create_model import tune_one_model
 
-print("[SUBPROCESS] Started tuning: {plot_name}")
+print('[SUBPROCESS] Started tuning:', {plot_name!r})
 
 try:
-    tmp_dir = r"{tmp_dir}"
+    tmp_dir = {str(tmp_dir)!r}
 
     # Load data
     data = pd.read_csv(tmp_dir + "/data.csv")
@@ -103,7 +110,7 @@ try:
     )
 
     # Load model
-    model_path = r"{best_model_path}".replace(".pkl", "")
+    model_path = {str(best_model_path)!r}.removesuffix(".pkl")
     print(f"[SUBPROCESS] Loading model from {{model_path}}")
 
     best_model = load_model(model_path)
@@ -118,7 +125,7 @@ try:
     tuned_model = tune_one_model(exp, best_model)
 
     # Save result
-    result_path = r"{result_clean}"
+    result_path = {result_clean!r}
     print(f"[SUBPROCESS] Saving model to {{result_path}}")
 
     save_model(tuned_model, result_path)
@@ -158,8 +165,8 @@ except Exception as e:
             print("----- SUBPROCESS STDERR -----")
             print(stderr)
 
-            if process.returncode == 0:
-                if Path(result_clean + ".pkl").exists() or Path(result_clean).exists():
+            if process.returncode == 0 and not getattr(process, '_irrigation_timed_out', False):
+                if self._classical_result_is_new(result_clean, previous_result):
                     return result_clean
                 else:
                     logger.error("Model file missing after subprocess")
@@ -191,7 +198,8 @@ except Exception as e:
         logger = logging.getLogger(__name__)
 
         script_path = Path(tmp_dir) / f"ensemble_pycaret_{plot_name}_{datetime.now().timestamp()}.py"
-        result_clean = str(result_path).replace(".pkl", "")
+        result_clean = str(result_path).removesuffix(".pkl")
+        previous_result = self._classical_artifact_signature(result_clean)
 
         # pass model paths as json, read them later in subprocess
         model_paths_json = json.dumps(model_paths)
@@ -220,16 +228,16 @@ from pycaret.regression import load_model, save_model, setup
 
 from create_model import create_and_compare_ensemble
 
-print("[SUBPROCESS] Started ENSEMBLE: {plot_name}")
+print('[SUBPROCESS] Started ENSEMBLE:', {plot_name!r})
 
 try:
-    tmp_dir = r"{tmp_dir}"
+    tmp_dir = {str(tmp_dir)!r}
 
     # Load data
     data = pd.read_csv(tmp_dir + "/data.csv")
     data = data.reset_index(drop=True)
 
-    model_paths = json.loads('{model_paths_json}')
+    model_paths = json.loads({model_paths_json!r})
 
     # Load config
     with open(tmp_dir + "/config.pkl", "rb") as f:
@@ -252,7 +260,7 @@ try:
     # Load all models
     loaded_models = []
     for path in model_paths:
-        clean_path = path.replace(".pkl", "")
+        clean_path = path.removesuffix(".pkl")
         print(f"[SUBPROCESS] Loading model: {{clean_path}}")
         m = load_model(clean_path)
         loaded_models.append(m)
@@ -261,13 +269,13 @@ try:
 
     # Run ensemble logic
     best_model = create_and_compare_ensemble(
-        "{plot_name}",
+        {plot_name!r},
         exp,
         loaded_models
     )
 
     # Save result
-    result_path = r"{result_clean}"
+    result_path = {result_clean!r}
     print(f"[SUBPROCESS] Saving ensemble model to {{result_path}}")
 
     save_model(best_model, result_path)
@@ -307,8 +315,8 @@ except Exception as e:
             print("----- SUBPROCESS STDERR -----")
             print(stderr)
 
-            if process.returncode == 0:
-                if Path(result_clean + ".pkl").exists() or Path(result_clean).exists():
+            if process.returncode == 0 and not getattr(process, '_irrigation_timed_out', False):
+                if self._classical_result_is_new(result_clean, previous_result):
                     return result_clean
                 else:
                     logger.error("Ensemble model file missing after subprocess")
@@ -339,7 +347,8 @@ except Exception as e:
         logger = logging.getLogger(__name__)
 
         script_path = Path(tmp_dir) / f"ensemble_pycaret_{plot_name}_{datetime.now().timestamp()}.py"
-        result_clean = str(result_path).replace(".pkl", "")
+        result_clean = str(result_path).removesuffix(".pkl")
+        previous_result = self._classical_artifact_signature(result_clean)
 
         # pass model paths as json, read them later in subprocess
         model_paths_json = json.dumps(model_paths)
@@ -377,16 +386,16 @@ from pycaret.internal.pipeline import Pipeline
 
 from create_model import create_and_compare_ensemble, tune_models, save_models
 
-print("[SUBPROCESS] Started TUNING and ENSEMBLE in one subprocess for Plot: {plot_name}")
+print('[SUBPROCESS] Started TUNING and ENSEMBLE in one subprocess for Plot:', {plot_name!r})
 
 try:
-    tmp_dir = r"{tmp_dir}"
+    tmp_dir = {str(tmp_dir)!r}
 
     # Load data
     data = pd.read_csv(tmp_dir + "/data.csv")
     data = data.reset_index(drop=True)
 
-    model_paths = json.loads('{model_paths_json}')
+    model_paths = json.loads({model_paths_json!r})
 
     # Load config
     with open(tmp_dir + "/config.pkl", "rb") as f:
@@ -409,7 +418,7 @@ try:
     # Load all models
     loaded_models = []
     for path in model_paths:
-        clean_path = path.replace(".pkl", "")
+        clean_path = path.removesuffix(".pkl")
         print(f"[SUBPROCESS] Loading model: {{clean_path}}")
         m = load_model(clean_path)
         if isinstance(m, Pipeline):
@@ -429,17 +438,17 @@ try:
             m = m.steps[-1][1]
 
     # Save best tuned pycaret model
-    model_names = save_models("{plot_name}", exp, tuned_best_models, f'models/{plot_name}/tuned_models/pycaret/best_soil_tension_prediction_')
+    model_names = save_models({plot_name!r}, exp, tuned_best_models, {('models/' + plot_name + '/tuned_models/pycaret/best_soil_tension_prediction_')!r})
 
     # Run ensemble logic
     ensemble_best_model = create_and_compare_ensemble(
-        "{plot_name}",
+        {plot_name!r},
         exp,
         tuned_best_models
     )
 
     # Save result
-    result_path = r"{result_clean}"
+    result_path = {result_clean!r}
     print(f"[SUBPROCESS] Saving ensemble model to {{result_path}}")
 
     save_model(ensemble_best_model, result_path)
@@ -479,8 +488,8 @@ except Exception as e:
             print("----- SUBPROCESS STDERR -----")
             print(stderr)
 
-            if process.returncode == 0:
-                if Path(result_clean + ".pkl").exists() or Path(result_clean).exists():
+            if process.returncode == 0 and not getattr(process, '_irrigation_timed_out', False):
+                if self._classical_result_is_new(result_clean, previous_result):
                     return result_clean
                 else:
                     logger.error("Ensemble model file missing after subprocess")
@@ -494,12 +503,51 @@ except Exception as e:
                 script_path.unlink()
 
 
+    @staticmethod
+    def _classical_artifact_signature(prefix):
+        """Inspect the exact PyCaret output file without deleting prior models."""
+        path = Path(str(prefix) + '.pkl')
+        try:
+            if path.is_symlink() or not path.is_file():
+                return None
+            info = path.stat()
+            if info.st_size == 0:
+                return None
+            return (info.st_dev, info.st_ino, info.st_size,
+                    info.st_mtime_ns, info.st_ctime_ns)
+        except OSError:
+            return None
+
+    @classmethod
+    def _classical_result_is_new(cls, prefix, previous):
+        current = cls._classical_artifact_signature(prefix)
+        return current is not None and current != previous
+
+    @staticmethod
+    def _read_nn_result(status_path, count=1):
+        """Accept a completed result only when all reported files exist."""
+        try:
+            paths = Path(status_path).read_text().strip().split('|')
+            if len(paths) != count or any(not path.strip() for path in paths):
+                raise ValueError('Malformed NN subprocess result')
+            paths = [path.strip() for path in paths]
+            if any(not Path(path).is_file() or Path(path).stat().st_size == 0 for path in paths):
+                raise ValueError('NN subprocess result references missing or empty artifacts')
+            return tuple(paths) if count > 1 else paths[0]
+        except (OSError, ValueError) as exc:
+            logger.warning('Invalid NN subprocess result %s: %s', status_path, exc)
+            return None
+
     def run_tune_single_model_subprocess(self, tmp_dir, model_config, plot_name):
         import subprocess, sys, json
         from pathlib import Path
         from datetime import datetime
 
         script_path = Path(tmp_dir) / f"nn_tune_single_{datetime.now().timestamp()}.py"
+        status_path = Path(tmp_dir) / 'result_single.txt'
+        # Calls within a handoff directory are sequential. Discard any previous
+        # candidate's status before starting this child, then consume its status.
+        status_path.unlink(missing_ok=True)
         model_config_json = json.dumps(model_config)
 
         script_content = f'''
@@ -519,14 +567,14 @@ from keras_tuner.engine.hyperparameters import HyperParameters
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-tmp_dir = r"{tmp_dir}"
+tmp_dir = {str(tmp_dir)!r}
 
 X_train = np.load(tmp_dir + "/X_train.npy")
 y_train = np.load(tmp_dir + "/y_train.npy")
 X_val   = np.load(tmp_dir + "/X_val.npy")
 y_val   = np.load(tmp_dir + "/y_val.npy")
 
-cfg = json.loads('{model_config_json}')
+cfg = json.loads({model_config_json!r})
 
 # Build model
 hp = HyperParameters()
@@ -543,7 +591,7 @@ if cfg.get("weights_path") and os.path.exists(cfg["weights_path"]):
 tuned_model, tuned_hp = tune_model_nn(X_train, y_train, X_val, y_val, model)
 
 # Save
-paths = save_models_nn("{plot_name}", tuned_model, tmp_dir + "/", [tuned_hp])
+paths = save_models_nn({plot_name!r}, tuned_model, tmp_dir + "/", [tuned_hp])
 
 model_path = paths[0]
 
@@ -581,17 +629,14 @@ gc.collect()
             print(stdout)
             print(stderr)
 
-            if process.returncode != 0:
+            if process.returncode != 0 or getattr(process, '_irrigation_timed_out', False):
                 print(stderr)
                 return None
+            return self._read_nn_result(status_path, count=2)
         finally:
             if script_path.exists():
                 script_path.unlink()
-
-        # read result
-        with open(Path(tmp_dir) / "result_single.txt") as f:
-            model_path, hp_path = f.read().strip().split("|")
-            return model_path, hp_path
+            status_path.unlink(missing_ok=True)
         
     def run_ensemble_nn_subprocess(self, tmp_dir, model_paths, hp_paths, plot_name):
         import subprocess, sys, json
@@ -599,6 +644,8 @@ gc.collect()
         from datetime import datetime
 
         script_path = Path(tmp_dir) / f"nn_ensemble_{datetime.now().timestamp()}.py"
+        status_path = Path(tmp_dir) / 'ensemble_result.txt'
+        status_path.unlink(missing_ok=True)
         model_paths_json = json.dumps(model_paths)
         hp_paths_json = json.dumps(hp_paths)
 
@@ -614,15 +661,15 @@ from create_model import compare_nn_ensembles, load_models_nn, save_models_nn
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-tmp_dir = r"{tmp_dir}"
+tmp_dir = {str(tmp_dir)!r}
 
 X_train = np.load(tmp_dir + "/X_train.npy")
 y_train = np.load(tmp_dir + "/y_train.npy")
 X_val   = np.load(tmp_dir + "/X_val.npy")
 y_val   = np.load(tmp_dir + "/y_val.npy")
 
-model_paths = json.loads('{model_paths_json}')
-hp_paths = json.loads('{hp_paths_json}')
+model_paths = json.loads({model_paths_json!r})
+hp_paths = json.loads({hp_paths_json!r})
 
 models = []
 hps = []
@@ -659,7 +706,7 @@ best_model = results["best_predictor"]
 
 # Save best
 # best_model.save(tmp_dir + "/ensemble.keras")
-save_path = save_models_nn("{plot_name}", best_model, tmp_dir + "/", None)
+save_path = save_models_nn({plot_name!r}, best_model, tmp_dir + "/", None)
 
 with open(tmp_dir + "/ensemble_result.txt", "w") as f:
     f.write(save_path[0])
@@ -688,15 +735,14 @@ gc.collect()
             print(stdout)
             print(stderr)
 
-            if process.returncode != 0:
+            if process.returncode != 0 or getattr(process, '_irrigation_timed_out', False):
                 print(stderr)
                 return None
+            return self._read_nn_result(status_path)
         finally:
             if script_path.exists():
                 script_path.unlink()
-
-        with open(Path(tmp_dir) / "ensemble_result.txt") as f:
-            return f.read().strip()
+            status_path.unlink(missing_ok=True)
     
 
     def run_tuning_and_ensemble_nn_subprocess(
@@ -716,12 +762,14 @@ gc.collect()
         logger = logging.getLogger(__name__)
 
         script_path = Path(tmp_dir) / f"nn_subprocess_{plot_name}_{datetime.now().timestamp()}.py"
+        status_path = Path(tmp_dir) / 'result_path.txt'
+        status_path.unlink(missing_ok=True)
         result_clean = str(result_path).replace(".keras", "")
 
         model_configs_json = json.dumps(model_configs)
 
         script_content = f'''
-print("[SUBPROCESS NN] Started tuning and ensemble with Neural Networks for: {plot_name}", flush=True)
+print('[SUBPROCESS NN] Started tuning and ensemble with Neural Networks for:', {plot_name!r}, flush=True)
 import os
 import sys
 
@@ -743,17 +791,17 @@ import gc
 from create_model import tune_model_nn, compare_nn_ensembles, Model_functions, save_models_nn
 from keras_tuner.engine.hyperparameters import HyperParameters
 
-print("[SUBPROCESS NN] Started for: {plot_name}")
+print('[SUBPROCESS NN] Started for:', {plot_name!r})
 
 try:
-    tmp_dir = r"{tmp_dir}"
+    tmp_dir = {str(tmp_dir)!r}
 
     X_train = np.load(tmp_dir + "/X_train.npy")
     y_train = np.load(tmp_dir + "/y_train.npy")
     X_val   = np.load(tmp_dir + "/X_val.npy")
     y_val   = np.load(tmp_dir + "/y_val.npy")
 
-    model_configs = json.loads('{model_configs_json}')
+    model_configs = json.loads({model_configs_json!r})
 
     print("[SUBPROCESS NN] Rebuilding models")
 
@@ -792,7 +840,7 @@ try:
     tf.keras.backend.clear_session()
     gc.collect()
 
-    save_models_nn("{plot_name}", tuned_models, "models/{plot_name}/tuned_models/nn/soil_tension_prediction_", tuned_hps)
+    save_models_nn({plot_name!r}, tuned_models, {('models/' + plot_name + '/tuned_models/nn/soil_tension_prediction_')!r}, tuned_hps)
 
     print("[SUBPROCESS NN] Running ensemble")
 
@@ -809,8 +857,7 @@ try:
     best_model = results["best_predictor"]
 
     # Save best model to tmp dir -> DEBUG: skipping ensemble for now to speed up, just return best tuned model
-    best_model_paths = save_models_nn("{plot_name}", best_model, "{tmp_dir}" + "/", None)
-    #tuned_models[0].save("{result_clean}" + ".keras")
+    best_model_paths = save_models_nn({plot_name!r}, best_model, tmp_dir + "/", None)
 
     with open(tmp_dir + "/result_path.txt", "w") as f:
         f.write(best_model_paths[0])
@@ -848,13 +895,14 @@ except Exception as e:
             print(stdout)
             print(stderr)
 
-            if process.returncode == 0:
-                return result_path
+            if process.returncode == 0 and not getattr(process, '_irrigation_timed_out', False):
+                return self._read_nn_result(status_path)
             return None
 
         finally:
             if script_path.exists():
                 script_path.unlink()
+            status_path.unlink(missing_ok=True)
 
     def _monitor_process(self, plot_name, check_interval=5):
         """
@@ -911,11 +959,16 @@ except Exception as e:
                     logger.warning(f"Could not delete {f}: {e}")
 
     def _run_process(self, process, plot_name):
+        # A parent can exit zero while workers keep its pipes open. Preserve
+        # deadline failure separately from the OS exit code for result callers.
+        process._irrigation_timed_out = False
+        self._remember_process_group(process)
         try:
             stdout, stderr = process.communicate(timeout=self.timeout_seconds)
             process.wait()
 
         except subprocess.TimeoutExpired:
+            process._irrigation_timed_out = True
             logger.warning(f"{plot_name}: timeout → killing process tree")
             self._kill_process_tree(process)
             stdout, stderr = process.communicate()
@@ -936,23 +989,87 @@ except Exception as e:
         return stdout, stderr
     
     def _run_process_stream(self, process, plot_name):
+        """Stream both pipes while enforcing the manager's real timeout."""
+        process._irrigation_timed_out = False
+        self._remember_process_group(process)
         stdout_lines = []
         stderr_lines = []
+        selector = selectors.DefaultSelector()
+        deadline = time.monotonic() + self.timeout_seconds
+        decoders = {}
+        try:
+            for pipe, label in ((process.stdout, 'STDOUT'), (process.stderr, 'STDERR')):
+                if pipe:
+                    os.set_blocking(pipe.fileno(), False)
+                    decoder = codecs.getincrementaldecoder(getattr(pipe, 'encoding', None) or 'utf-8')(errors='replace')
+                    if getattr(process, 'text_mode', False):
+                        decoder = io.IncrementalNewlineDecoder(decoder, translate=True)
+                    decoders[label] = decoder
+                    selector.register(pipe, selectors.EVENT_READ, label)
+            # EOF on both pipes does not imply that the child has exited.
+            while selector.get_map() or process.poll() is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    process._irrigation_timed_out = True
+                    logger.warning(
+                        "%s: streaming subprocess timeout after %ss; killing process tree",
+                        plot_name,
+                        self.timeout_seconds,
+                    )
+                    self._kill_process_tree(process)
+                    break
 
-        for line in process.stdout:
-            print(f"[{plot_name} STDOUT] {line}", end="")
-            stdout_lines.append(line)
+                for key, _ in selector.select(timeout=min(0.05, remaining)):
+                    # Read available bytes, never wait for a newline. Incremental
+                    # decoding preserves characters split across pipe reads.
+                    try:
+                        chunk = os.read(key.fd, 65536)
+                    except BlockingIOError:
+                        continue
+                    line = decoders[key.data].decode(chunk, final=not chunk)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        decoders.pop(key.data)
+                    if line:
+                        print(f"[{plot_name} {key.data}] {line}", end="")
+                        (stdout_lines if key.data == 'STDOUT' else stderr_lines).append(line)
+        finally:
+            selector.close()
+            if process.poll() is None:
+                self._kill_process_tree(process)
+            process.wait()
+            for pipe in (process.stdout, process.stderr):
+                if pipe:
+                    pipe.close()
 
-        for line in process.stderr:
-            print(f"[{plot_name} STDERR] {line}", end="")
-            stderr_lines.append(line)
-
-        process.wait()
+        for label, decoder in decoders.items():
+            tail = decoder.decode(b'', final=True)
+            (stdout_lines if label == 'STDOUT' else stderr_lines).append(tail)
 
         return "".join(stdout_lines), "".join(stderr_lines)
 
+    def _remember_process_group(self, process):
+        """Remember an isolated child's group before poll() can reap its leader."""
+        if os.name != 'posix':
+            return
+        try:
+            group = os.getpgid(process.pid)
+            if group == process.pid and group != os.getpgrp():
+                process._irrigation_process_group = group
+        except ProcessLookupError:
+            pass
+
     def _kill_process_tree(self, process):
-        """Kill process and all its children"""
+        """Kill owned workers, including those whose group leader has exited."""
+        group = getattr(process, '_irrigation_process_group', None)
+        if os.name == 'posix' and group == process.pid and group != os.getpgrp():
+            try:
+                os.killpg(group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError as exc:
+                logger.warning('Failed to kill subprocess group %s: %s', group, exc)
+        # Also handle callers that do not launch an isolated process group.
         try:
             parent = psutil.Process(process.pid)
             children = parent.children(recursive=True)

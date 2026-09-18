@@ -1,0 +1,979 @@
+/* Final layout layer for the single responsive dashboard. */
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.app-sidebar { display: none; }
+.tab-container { display: none; }
+
+.local-icon,
+.weather-icon {
+  font-family: system-ui, -apple-system, "Segoe UI Emoji", sans-serif;
+  line-height: 1;
+}
+
+.main-content {
+  width: min(100%, 1440px);
+  margin-inline: auto;
+  padding: 20px clamp(14px, 2.5vw, 32px) 108px;
+}
+
+.page { padding: 0; min-width: 0; }
+.topbar-title-wrap { justify-content: flex-start; gap: 18px; }
+.topbar-title { flex: 0 0 auto; }
+.topbar-farm-name { display: inline-flex; min-width: 0; color: #52606d; font-size: .88rem; }
+.summary-grid, .farm-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.dashboard-row { grid-template-columns: minmax(0, 1.45fr) minmax(250px, .8fr) minmax(270px, .9fr); }
+.dashboard-row > * { min-width: 0; }
+.irrigation-advice { grid-column: auto; }
+.weather-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.weather-card { min-width: 0; overflow-wrap: anywhere; }
+.weather-icon { font-size: 1.45rem; }
+.pump-row { flex-wrap: wrap; }
+.schedule-btn { min-width: 0; max-width: 100%; justify-content: center; white-space: normal; text-align: center; }
+.pump-card.advisory-only { opacity: .82; }
+
+.farm-identity-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+  padding: clamp(18px, 2.4vw, 28px);
+  border: 1px solid #bfd1ea;
+  border-radius: 14px;
+  background: #eaf2ff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+
+.context-label,
+.action-eyebrow {
+  display: block;
+  margin-bottom: 5px;
+  color: #607087;
+  font-size: .67rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.farm-identity-card h1 {
+  margin: 0;
+  color: #152034;
+  font-size: clamp(1.45rem, 3vw, 2rem);
+}
+
+.farm-identity-card p {
+  margin: 5px 0 0;
+  color: #56667d;
+  font-size: .88rem;
+}
+
+.farm-health-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #dcefd9;
+  color: #255c2b;
+  font-size: .75rem;
+  font-weight: 750;
+}
+
+.plot-title-copy { min-width: 0; }
+.plot-context { display: flex; flex-wrap: wrap; gap: 0; margin-top: 5px; color: #617087; font-size: .76rem; }
+.plot-context span { display: inline-flex; align-items: center; }
+.plot-context span + span::before { content: "•"; margin: 0 9px; color: #8ba08c; }
+
+#page-plot.page.active {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+#page-plot .plot-detail-heading,
+#page-plot .plot-subnav,
+#page-plot .summary-grid,
+#page-plot .plot-operational-card { grid-column: 1 / -1; }
+#page-plot .plot-detail-heading { order: 0; }
+#page-plot .plot-subnav { order: 0; }
+#page-plot .dashboard-row { display: contents; }
+#page-plot .plot-operational-card { order: 1; margin-bottom: 0; }
+#page-plot .summary-grid { order: 2; margin-bottom: 0; }
+#page-plot .weather-forecast { grid-column: 1 / -1; order: 3; margin-bottom: 0; }
+
+.plot-operational-card {
+  padding: clamp(18px, 2.5vw, 26px);
+  border-color: #b9cee9;
+  background: #e7f0ff;
+}
+
+.plot-operational-card .advice-header { margin-bottom: 16px; }
+.plot-action-title {
+  margin: 0 0 14px;
+  color: #235f2c;
+  font-size: clamp(1.65rem, 4vw, 2.35rem);
+  line-height: 1.05;
+}
+
+.plot-operational-card .advice-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding-top: 14px;
+  border-top: 1px solid rgba(72, 103, 144, .2);
+}
+
+.plot-operational-card .advice-item {
+  display: grid;
+  gap: 4px;
+}
+
+.plot-operational-card .advice-item small {
+  color: #65748a;
+  font-size: .68rem;
+  font-weight: 500;
+}
+
+.plot-operational-card .irrigation-recommendation {
+  max-width: 900px;
+  background: rgba(255, 255, 255, .66);
+}
+
+.plot-subnav {
+  display: flex;
+  align-items: flex-end;
+  gap: 26px;
+  min-height: 46px;
+  margin-bottom: 2px;
+  padding: 0 4px;
+  border-bottom: 1px solid #cfd7e2;
+}
+
+.plot-subnav button {
+  min-height: 45px;
+  padding: 8px 2px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: #566276;
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.plot-subnav button.active {
+  border-bottom-color: #276733;
+  color: #1f5a2c;
+}
+
+#page-phenology .plot-subnav {
+  margin-bottom: 16px;
+}
+
+.plot-open-hint {
+  color: #2f6f2d;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.plot-detail-heading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 2px 0 16px;
+}
+
+.plot-detail-heading h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 1.25rem;
+}
+
+.plot-detail-heading p {
+  margin: 3px 0 0;
+  color: #64748b;
+  font-size: .84rem;
+}
+
+.back-to-farm {
+  min-height: 42px;
+  padding: 9px 13px;
+  flex: 0 0 auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  color: #315f2f;
+  font: inherit;
+  font-size: .84rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.back-to-farm:hover,
+.back-to-farm:focus-visible {
+  border-color: #6da264;
+  outline: 2px solid #d9ead5;
+}
+
+.forecast-chart-frame {
+  position: relative;
+  width: 100%;
+  height: clamp(300px, 38vw, 480px);
+  min-height: 0;
+}
+
+.forecast-chart-frame .chart-area {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+}
+
+.phenology-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+@media (max-width: 1050px) {
+  .dashboard-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .irrigation-advice { grid-column: 1 / -1; }
+}
+
+@media (max-width: 720px) {
+  .tab-container { display: none; }
+  .topbar { align-items: flex-start; }
+  .topbar-title-wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .topbar-title, .topbar-farm-name { max-width: calc(100vw - 82px); }
+  .main-content { padding: 14px 10px 104px; }
+  .farm-summary-grid, .summary-grid, .phenology-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-row, .farm-operations-grid { grid-template-columns: minmax(0, 1fr); }
+  .irrigation-advice, .farm-plots-panel { grid-column: auto; }
+  .weather-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .pump-card .status-row { display: grid; grid-template-columns: 1fr; }
+  .pump-status-section, .schedule-btn { width: 100%; }
+  .forecast-chart-frame { height: 280px; }
+  .page-switcher .nav-item { min-width: 0; padding: 10px 8px; font-size: .78rem; }
+  .plot-detail-heading { align-items: flex-start; gap: 10px; }
+  .back-to-farm span { display: none; }
+  .back-to-farm { width: 42px; padding: 8px; font-size: 1.1rem; }
+  .farm-identity-card { align-items: flex-start; flex-direction: column; gap: 14px; }
+  #page-plot.page.active { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  #page-plot .plot-detail-heading,
+  #page-plot .plot-subnav,
+  #page-plot .summary-grid,
+  #page-plot .plot-operational-card { grid-column: auto; }
+  .plot-operational-card .advice-grid { grid-template-columns: 1fr; }
+  .plot-operational-card .advice-item { grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; }
+  .plot-operational-card .advice-item small { grid-column: 1 / -1; }
+  .plot-subnav { gap: 20px; overflow-x: auto; }
+  .plot-subnav button { white-space: nowrap; }
+  .page-switcher { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 900px) {
+  .app-sidebar {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 204px;
+    padding: 20px 12px;
+    z-index: 100;
+    border-right: 1px solid #d8dee8;
+    background: #f7f9fc;
+  }
+
+  .sidebar-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 10px 26px;
+    color: #174e25;
+    font-size: 1rem;
+  }
+
+  .sidebar-logo > span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: #276733;
+    font-size: 1rem;
+  }
+
+  .sidebar-links { display: grid; gap: 7px; }
+  .sidebar-links .nav-item {
+    width: 100%;
+    min-height: 44px;
+    border-radius: 8px;
+    color: #455268;
+  }
+  .sidebar-links .nav-item.active {
+    background: #e7f2e4;
+    color: #174f2a;
+    box-shadow: inset 3px 0 #2f7133;
+  }
+
+  .topbar { margin-left: 204px; }
+  .main-content {
+    width: auto;
+    max-width: 1440px;
+    margin-left: 204px;
+    margin-right: auto;
+  }
+  .page-switcher { display: none; }
+
+  .farm-operations-grid {
+    grid-template-columns: minmax(0, 1.65fr) minmax(300px, .75fr);
+    grid-template-areas: "plots alerts" "plots plan";
+  }
+  .farm-plots-panel { grid-area: plots; }
+  .farm-operations-grid > .card:nth-child(2) { grid-area: alerts; }
+  .farm-operations-grid > .card:nth-child(3) { grid-area: plan; }
+}
+
+/* Farm weather belongs to the farm overview; tension belongs to a plot. */
+.farm-summary-card small {
+  display: block;
+  color: #64748b;
+  font-size: .72rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.weather-summary-card strong {
+  font-size: 1.05rem;
+}
+
+.farm-operations-grid {
+  display: block;
+}
+
+.farm-plots-panel {
+  grid-area: auto;
+}
+
+.dashboard-weather-forecast {
+  margin-top: 14px;
+  padding: clamp(16px, 2.2vw, 22px);
+}
+
+.weather-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.weather-heading p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: .78rem;
+}
+
+.weather-source-note {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #eef4eb;
+  color: #376a3a;
+  font-size: .68rem;
+  font-weight: 750;
+}
+
+.dashboard-weather-forecast .weather-grid {
+  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+  gap: 10px;
+}
+
+.dashboard-weather-forecast .weather-card {
+  min-height: 150px;
+  align-content: center;
+  padding: 14px 10px;
+  border-color: #e1e6eb;
+  background: #f8fafb;
+}
+
+.dashboard-weather-forecast .weather-icon {
+  margin-bottom: 4px;
+  font-size: 1.8rem;
+}
+
+#page-plot .tension-chart-card {
+  grid-column: 1 / -1;
+  order: 3;
+  margin: 0;
+}
+
+#page-plot .plot-detail-heading {
+  margin: 0;
+  padding: 17px 18px;
+  border: 1px solid #dfe5dc;
+  border-radius: 14px;
+  background: #fff;
+}
+
+#page-plot .plot-detail-heading h2 {
+  font-size: clamp(1.25rem, 2vw, 1.55rem);
+  letter-spacing: -.015em;
+}
+
+#page-plot .plot-subnav {
+  margin: 0 2px;
+}
+
+#page-plot .plot-operational-card {
+  padding: clamp(18px, 2.5vw, 25px);
+  border: 1px solid #d9e3d5;
+  border-top: 5px solid #35733a;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(32, 57, 33, .07);
+}
+
+#page-plot .plot-operational-card .advice-title {
+  font-size: 1rem;
+}
+
+#page-plot .plot-action-title {
+  margin-bottom: 18px;
+  font-size: clamp(1.55rem, 3vw, 2rem);
+  letter-spacing: -.025em;
+}
+
+#page-plot .plot-operational-card .advice-grid {
+  gap: 10px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+#page-plot .plot-operational-card .advice-item {
+  min-height: 86px;
+  align-content: center;
+  padding: 13px 14px;
+  border: 1px solid #e2e7e0;
+  border-radius: 10px;
+  background: #f7f9f6;
+}
+
+#page-plot .plot-operational-card .advice-item span {
+  color: #5e6b60;
+  font-size: .77rem;
+}
+
+#page-plot .plot-operational-card .advice-item strong {
+  color: #18251b;
+  font-size: 1rem;
+}
+
+#page-plot .plot-operational-card .irrigation-recommendation {
+  max-width: none;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-color: #d7e2d4;
+  background: #f3f7f1;
+  font-size: .78rem;
+}
+
+#page-plot .summary-grid {
+  gap: 10px;
+}
+
+#page-plot .summary-card {
+  min-height: 104px;
+  padding: 15px;
+  border: 1px solid #e0e5df;
+  box-shadow: 0 1px 3px rgba(27, 43, 28, .05);
+}
+
+#page-plot .summary-title {
+  color: #5a665c;
+  font-size: .7rem;
+  letter-spacing: .045em;
+}
+
+#page-plot .summary-value {
+  color: #17221a;
+  font-size: clamp(1.3rem, 2.4vw, 1.65rem);
+}
+
+.tension-chart-card {
+  padding: clamp(17px, 2.5vw, 24px);
+  border: 1px solid #dfe5dc;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(32, 57, 33, .06);
+}
+
+.tension-chart-card .chart-title-section {
+  width: 100%;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tension-chart-card h3 {
+  margin: 0;
+  color: #18221a;
+  font-size: 1.05rem;
+}
+
+.tension-chart-card .chart-title-section p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: .76rem;
+}
+
+.chart-footnotes {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
+  color: #64748b;
+  font-size: .72rem;
+}
+
+@media (max-width: 720px) {
+  .weather-heading {
+    align-items: flex-start;
+  }
+
+  .dashboard-weather-forecast .weather-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #page-plot .plot-detail-heading {
+    padding: 14px;
+  }
+
+  #page-plot .plot-operational-card .advice-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #page-plot .plot-operational-card .advice-item {
+    display: grid;
+    grid-template-columns: 1fr;
+    min-height: 96px;
+  }
+
+  .chart-footnotes {
+    display: grid;
+    gap: 4px;
+  }
+}
+
+@media (max-width: 340px) {
+  .dashboard-weather-forecast .weather-grid,
+  #page-plot .plot-operational-card .advice-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Plot overview flow: action → current conditions → tension trend. */
+#page-plot.page.active {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(12px, 2vw, 18px);
+}
+
+#page-plot > * {
+  min-width: 0;
+  grid-column: auto;
+  order: initial;
+}
+
+#page-plot .plot-detail-heading,
+#page-plot .plot-subnav,
+#page-plot .plot-operational-card,
+#page-plot .plot-section-heading,
+#page-plot .summary-grid,
+#page-plot .tension-chart-card {
+  grid-column: 1;
+  order: initial;
+  margin-bottom: 0;
+}
+
+.plot-section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 2px 4px 0;
+}
+
+.plot-section-heading h3 {
+  margin: 0;
+  color: #1c281e;
+  font-size: 1rem;
+}
+
+.plot-section-heading p {
+  margin: 0;
+  color: #69756b;
+  font-size: .76rem;
+}
+
+#page-plot .plot-operational-card .advice-grid,
+#page-plot .summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+#page-plot .forecast-chart-frame {
+  height: clamp(280px, 39vw, 470px);
+}
+
+@media (max-width: 1050px) {
+  #page-plot .plot-operational-card .advice-grid,
+  #page-plot .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  #page-plot.page.active {
+    gap: 12px;
+  }
+
+  #page-plot .plot-detail-heading {
+    align-items: flex-start;
+  }
+
+  .plot-section-heading {
+    display: grid;
+    gap: 2px;
+  }
+
+  .tension-chart-card .chart-title-section {
+    display: grid;
+    gap: 10px;
+  }
+
+  .tension-chart-card .threshold-badge {
+    justify-self: start;
+  }
+
+  #page-plot .forecast-chart-frame {
+    height: 310px;
+  }
+}
+
+@media (max-width: 350px) {
+  #page-plot .plot-operational-card .advice-grid,
+  #page-plot .summary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Rebuilt plot overview. Unique classes isolate it from the legacy dashboard CSS. */
+#page-plot.page.active {
+  display: block;
+}
+
+.plot-overview-shell {
+  width: 100%;
+  max-width: 1220px;
+  margin: 0 auto;
+  display: grid;
+  gap: clamp(14px, 1.8vw, 20px);
+}
+
+.plot-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 6px 2px 2px;
+}
+
+.plot-page-header .plot-title-copy {
+  min-width: 0;
+  order: 1;
+}
+
+.plot-page-header .back-to-farm {
+  order: 2;
+  margin-left: auto;
+}
+
+.plot-page-header h1 {
+  margin: 0;
+  color: #172033;
+  font-size: clamp(1.45rem, 2.4vw, 1.9rem);
+  line-height: 1.12;
+  letter-spacing: -.025em;
+}
+
+.plot-overview-shell .plot-subnav {
+  margin: 0;
+}
+
+.plot-decision-card {
+  padding: clamp(20px, 3vw, 30px);
+  border: 1px solid #bfd0e8;
+  border-radius: 15px;
+  background: #edf4ff;
+  box-shadow: 0 2px 7px rgba(31, 53, 82, .06);
+}
+
+.plot-decision-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 9px;
+}
+
+.plot-decision-heading > span {
+  color: #5f718a;
+  font-size: .7rem;
+  font-weight: 800;
+  letter-spacing: .075em;
+  text-transform: uppercase;
+}
+
+.plot-decision-copy {
+  max-width: 900px;
+  margin-bottom: 20px;
+}
+
+.plot-decision-copy h2 {
+  margin: 0;
+  color: #24612d;
+  font-size: clamp(1.4rem, 2.3vw, 1.8rem);
+  line-height: 1.08;
+  letter-spacing: -.035em;
+}
+
+.plot-decision-copy p {
+  margin: 9px 0 0;
+  color: #4f6178;
+  font-size: clamp(.82rem, 1.2vw, .92rem);
+  line-height: 1.55;
+}
+
+.plot-water-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.plot-water-item {
+  min-width: 0;
+  min-height: 94px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 14px 15px;
+  border: 1px solid rgba(171, 190, 213, .72);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .74);
+}
+
+.plot-water-item span,
+.plot-reading-card span {
+  color: #607086;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .015em;
+}
+
+.plot-water-item strong {
+  color: #1d2a3c;
+  font-size: 1.05rem;
+}
+
+.plot-water-amount {
+  min-height: 108px;
+  padding: 17px 18px;
+}
+
+.plot-water-amount strong {
+  color: #245f2b;
+  font-size: clamp(1.05rem, 1.8vw, 1.35rem);
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 760px) {
+  .plot-water-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.plot-water-item small,
+.plot-reading-card small {
+  color: #728096;
+  font-size: .68rem;
+  line-height: 1.35;
+}
+
+.plot-readings-section {
+  display: grid;
+  gap: 11px;
+}
+
+.plot-content-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 3px;
+}
+
+.plot-content-heading h2 {
+  margin: 0;
+  color: #1b2637;
+  font-size: 1.05rem;
+  letter-spacing: -.01em;
+}
+
+.plot-content-heading p {
+  margin: 3px 0 0;
+  color: #68778b;
+  font-size: .76rem;
+  line-height: 1.4;
+}
+
+.plot-readings-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.plot-reading-card {
+  min-width: 0;
+  min-height: 112px;
+  display: grid;
+  align-content: space-between;
+  gap: 7px;
+  padding: 16px;
+  border: 1px solid #dde3ea;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(23, 36, 52, .045);
+}
+
+.plot-reading-card strong {
+  color: #182332;
+  font-size: clamp(1.15rem, 1.8vw, 1.4rem);
+  line-height: 1.25;
+  overflow-wrap: normal;
+}
+
+.plot-trend-card {
+  min-width: 0;
+  padding: clamp(18px, 2.7vw, 26px);
+  border: 1px solid #dde3ea;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(23, 36, 52, .05);
+}
+
+.plot-trend-card .trend-heading {
+  align-items: flex-start;
+  margin-bottom: 10px;
+  padding: 0;
+}
+
+.plot-trend-card .trend-heading h2 {
+  color: #0f172a;
+  font-size: 1.14rem;
+  font-weight: 700;
+}
+
+.chart-info {
+  display: inline-block;
+  margin-left: 5px;
+  color: #64748b;
+  font-size: .9em;
+  font-weight: 500;
+}
+
+.plot-trend-card .forecast-chart-frame {
+  height: clamp(410px, 46vw, 560px);
+}
+
+.plot-trend-card .chart-footnotes {
+  margin-top: 9px;
+}
+
+@media (max-width: 1050px) {
+  .plot-readings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .plot-overview-shell {
+    gap: 14px;
+  }
+
+  .plot-page-header {
+    align-items: center;
+    gap: 14px;
+    padding: 2px 0;
+  }
+
+  .plot-page-header .back-to-farm {
+    width: 42px;
+    min-height: 42px;
+    padding: 8px;
+  }
+
+  .plot-page-header .back-to-farm span {
+    display: none;
+  }
+
+  .plot-decision-card {
+    padding: 18px;
+  }
+
+  .plot-decision-copy {
+    margin-bottom: 16px;
+  }
+
+  .plot-water-item {
+    min-height: 100px;
+    padding: 13px;
+  }
+
+  .plot-reading-card {
+    min-height: 108px;
+    padding: 14px;
+  }
+
+  .plot-trend-card {
+    padding: 17px;
+  }
+
+  .plot-trend-card .trend-heading {
+    display: grid;
+    gap: 10px;
+  }
+
+  .plot-trend-card .threshold-badge {
+    justify-self: start;
+  }
+
+  .plot-trend-card .forecast-chart-frame {
+    height: 390px;
+  }
+}
+
+@media (max-width: 360px) {
+  .plot-readings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Intentionally removed UI copy must stay hidden even when a component rule
+   assigns its own display mode. */
+[hidden] {
+  display: none !important;
+}

@@ -55,14 +55,17 @@ from .nn_architectures import adapt_X_for_model, prepare_lstm_data
 
 # evaluate performance of prediction against test part of data
 def evaluate_target_variable(series1, series2, model_name):
-    # drop missing
-    values1 = series1.dropna()
-    values2 = series2.dropna()
-
-    # calc max length
-    min_length = min(len(values1), len(values2))
-    values1 = values1[:min_length]
-    values2 = values2[:min_length]
+    # Callers must supply the same ordered observations. Never truncate or
+    # independently drop missing rows: that compares unrelated measurements.
+    if (not series1.index.equals(series2.index)
+            or not series1.index.is_unique or not series2.index.is_unique):
+        raise ValueError("Evaluation requires matching unique observation indexes")
+    paired = series1.notna() & series2.notna()
+    values1 = pd.to_numeric(series1.loc[paired], errors='raise').astype(float)
+    values2 = pd.to_numeric(series2.loc[paired], errors='raise').astype(float)
+    if (len(values1) < 2 or not np.isfinite(values1.to_numpy()).all()
+            or not np.isfinite(values2.to_numpy()).all()):
+        raise ValueError("Evaluation requires at least two finite observation pairs")
 
     # test print
     #print(values1)
@@ -77,21 +80,20 @@ def evaluate_target_variable(series1, series2, model_name):
     mpe = np.mean(diff[non_zero_mask] / values1.values[non_zero_mask]) * 100 if np.any(non_zero_mask) else np.nan
 
 
-    # calculate R2 score (on the same aligned, truncated values as the other metrics)
-    mean_values1 = np.mean(values1.values)
-    ss_total = np.sum((values1.values - mean_values1) ** 2)
-    ss_residual = np.sum((values1.values - values2.values) ** 2)
-    r2_score = 1 - (ss_residual / ss_total)
+    # Use the same finite constant-target policy as get_r2_manual and ensemble
+    # scoring: perfect constant predictions score 1, imperfect ones score 0.
+    r2 = r2_score(values1.to_numpy(), values2.to_numpy(), force_finite=True)
 
     # print metrics
     print(f"MAE: {mae:.2f}")
     print(f"RMSE: {rmse:.2f}")
     print(f"MPE: {mpe:.2f} %")
-    print(f"R2 {r2_score:.2f}",'\n')
+    print(f"R2 {r2:.2f}",'\n')
     #print("df1 len:",len(values1),"df2 len:",len(values2),'\n')
 
     metrics = { model_name : ['mae', 'rmse', 'mpe', 'r2'],
-                'results'  : [f'{mae:.2f}', f'{rmse:.2f}', f'{mpe:.2f}', f'{r2_score:.2f}']
+                # Only presentation is rounded; selection needs full precision.
+                'results'  : [mae, rmse, mpe, r2]
               }
     results = pd.DataFrame(metrics)
     results['results'] = results['results'].astype(float)
@@ -99,10 +101,27 @@ def evaluate_target_variable(series1, series2, model_name):
     return results
 
 
+def _failed_candidate_result(name):
+    # Keep one result slot per original candidate, even when inference fails.
+    return pd.DataFrame({name: ['mae', 'rmse', 'mpe', 'r2'],
+                         'results': [np.nan] * 4})
+
+
+def _rankable_candidates(results, models):
+    if len(results) != len(models):
+        raise ValueError("Candidate scores must match the original candidate list")
+    return [(float(result['results'].iloc[3]), index)
+            for index, result in enumerate(results)
+            if np.isfinite(result['results'].iloc[3])]
+
+
 # Sort neural network models in new dataframe according to performance on testset 
 def evaluate_results_and_choose_best(results_for_one_df, best_for_one_df, pycaret_format=True):
     # sort according to R2 score -> hence [3]
-    max_r2_value = max((df['results'][3].max(), idx) for idx, df in enumerate(results_for_one_df))
+    eligible = _rankable_candidates(results_for_one_df, best_for_one_df)
+    if not eligible:
+        raise ValueError("No successfully evaluated candidates")
+    max_r2_value = max(eligible)
     
     max_value = max_r2_value[0]
     max_index = max_r2_value[1]
@@ -125,10 +144,7 @@ def evaluate_results_and_choose_top_n(results_for_one_df, best_for_one_df, top_n
     top_n: how many top models to return (default 3)
     """
     # collect (R2, index) pairs
-    r2_with_index = []
-    for idx, df in enumerate(results_for_one_df):
-        r2_value = df["results"][3].max()
-        r2_with_index.append((r2_value, idx))
+    r2_with_index = _rankable_candidates(results_for_one_df, best_for_one_df)
 
     # sort by R2 descending
     r2_with_index.sort(key=lambda x: x[0], reverse=True)
@@ -228,6 +244,7 @@ def evaluate_against_validation(
 
         except Exception as e:
 
+            results_for_model.append(_failed_candidate_result(model_name))
             print(
                 f"[VALIDATION] Error in "
                 f"{model_name}: {e}"
@@ -265,6 +282,7 @@ def evaluate_against_validation_nn(
             )
 
         except Exception as e:
+            results_for_model.append(_failed_candidate_result(model.model_name))
             print(f"[VALIDATION] Error in {model.model_name}: {e}")
 
     return results_for_model
@@ -293,10 +311,16 @@ def evaluate_against_testset(currentPlot, test, exp, best):
         print("Current model: " + model_name)
 
         # Create predictions
-        predictions.append(exp.predict_model(best[i], data=test_features))
+        try:
+            prediction = exp.predict_model(best[i], data=test_features)
+            result = evaluate_target_variable(ground_truth, prediction['prediction_label'], model_name)
+        except Exception as exc:
+            print(f'[TEST] Error in {model_name}: {exc}')
+            result = _failed_candidate_result(model_name)
+        results_for_model.append(result)
 
-        # evaluate predictions against testset 
-        results_for_model.append(evaluate_target_variable(ground_truth, predictions[i]['prediction_label'], model_name))
+    if not _rankable_candidates(results_for_model, best):
+        raise ValueError('No successfully evaluated held-out candidates')
     
     if currentPlot.ensemble == True:
         # For ensemble/stacking return top 3 models
@@ -310,7 +334,6 @@ def evaluate_against_testset(currentPlot, test, exp, best):
 
 # Perform a evaluation of the models against the testset(X_test), slit before 
 def evaluate_against_testset_nn(currentPlot, nn_models, X_test_scaled, y_test):
-    predictions = []
     results_for_model = []
 
     if not isinstance(nn_models, list):
@@ -328,14 +351,20 @@ def evaluate_against_testset_nn(currentPlot, nn_models, X_test_scaled, y_test):
             if nn_models[i].model_name == "lstm_model":
                 # Prepare data for LSTM input explicitly
                 X_test_lstm = prepare_lstm_data(X_test_scaled)
-                predictions.append(nn_models[i].predict(X_test_lstm))
+                prediction = nn_models[i].predict(X_test_lstm)
             else:
-                predictions.append(nn_models[i].predict(adapt_X_for_model(nn_models[i], X_test_scaled)))
+                prediction = nn_models[i].predict(adapt_X_for_model(nn_models[i], X_test_scaled))
+            result = evaluate_target_variable(
+                y_test.reset_index(drop=True), pd.Series(prediction.flatten()), nn_models[i].model_name)
         except Exception as e:
             print(f"There was an error in predict() for the model {nn_models[i].model_name}.\n Error: {e}")
+            result = _failed_candidate_result(nn_models[i].model_name)
 
         # evaluate predictions against testset 
-        results_for_model.append(evaluate_target_variable(y_test.reset_index(drop=True), pd.Series(predictions[i].flatten()), ""))
+        results_for_model.append(result)
+
+    if not _rankable_candidates(results_for_model, nn_models):
+        raise ValueError('No successfully evaluated held-out candidates')
     
     if currentPlot.ensemble == True:
         # For ensemble/stacking return top 3 models
@@ -361,13 +390,21 @@ def eval_approach_mix(results_pycaret, results_nn, weights=None, top_k=3):
 
     Normalization is winsorized at the 5th/95th percentile per metric, so one broken
     candidate (e.g. an R2 of -9999) cannot stretch the scale and wash out the real
-    differences between the healthy models. Models with NaN metrics score worst.
+    differences between the healthy models. Candidates must have finite enabled
+    metrics; zero-weight metrics do not affect eligibility or scores.
 
     Returns (best_model_index_within_winning_group, use_pycaret). Ties go to pycaret.
     """
 
     if weights is None:
         weights = {"mae": 1/3, "mpe": 1/3, "r2": 1/3}
+    try:
+        weights = {name: float(weights[name]) for name in ('mae', 'mpe', 'r2')}
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError('Metric weights must specify finite nonnegative mae, mpe and r2 values') from exc
+    if (not all(np.isfinite(value) and value >= 0 for value in weights.values())
+            or not any(value > 0 for value in weights.values())):
+        raise ValueError('Metric weights must be finite and nonnegative, with at least one positive weight')
 
     # Merge all results temporarily for normalization
     all_results = results_pycaret + results_nn
@@ -375,9 +412,15 @@ def eval_approach_mix(results_pycaret, results_nn, weights=None, top_k=3):
         raise ValueError("eval_approach_mix: both result lists are empty")
 
     # Extract metrics into arrays; negate lower-is-better ones so higher is always better
-    maes = -np.array([r["results"][0] for r in all_results], dtype=float)          # MAE
-    mpes = -np.abs(np.array([r["results"][2] for r in all_results], dtype=float))  # abs(MPE)
-    r2s  = np.array([r["results"][3] for r in all_results], dtype=float)           # R2
+    active_metrics = {}
+    for name, index in (('mae', 0), ('mpe', 2), ('r2', 3)):
+        if weights[name] == 0:
+            continue  # A disabled metric must not affect eligibility or scores.
+        values = np.array([r['results'][index] for r in all_results], dtype=float)
+        active_metrics[name] = values if name == 'r2' else (-np.abs(values) if name == 'mpe' else -values)
+    eligible = np.logical_and.reduce([np.isfinite(values) for values in active_metrics.values()])
+    if not eligible.any():
+        raise ValueError("No successfully evaluated candidates")
 
     # Clip each metric to its 5th..95th percentile before scaling: a single broken
     # model must lose, but must not distort how all the others compare to each other
@@ -395,17 +438,12 @@ def eval_approach_mix(results_pycaret, results_nn, weights=None, top_k=3):
             return np.full_like(x, 0.5, dtype=float)
         return (x - mn) / (mx - mn)
 
-    s_mae = minmax(winsorize(maes))
-    s_mpe = minmax(winsorize(mpes))
-    s_r2  = minmax(winsorize(r2s))
-
-    # Combined weighted scores; a model with NaN metrics gets the worst score
-    combined_scores = (
-        weights["mae"] * s_mae +
-        weights["mpe"] * s_mpe +
-        weights["r2"] * s_r2
-    )
-    combined_scores = np.nan_to_num(combined_scores, nan=0.0)
+    # Normalize only eligible candidates and enabled metrics. In particular,
+    # multiplying a NaN metric by zero would still contaminate the score.
+    combined_scores = np.zeros(len(all_results), dtype=float)
+    for name, values in active_metrics.items():
+        combined_scores[eligible] += weights[name] * minmax(winsorize(values[eligible]))
+    combined_scores[~eligible] = -np.inf
 
     # Split back to pycaret and nn ranges
     n_pycaret = len(results_pycaret)
@@ -415,6 +453,7 @@ def eval_approach_mix(results_pycaret, results_nn, weights=None, top_k=3):
 
     # Group strength: mean of the top_k scores (an empty side loses outright)
     def group_strength(scores):
+        scores = scores[np.isfinite(scores)]
         if len(scores) == 0:
             return -np.inf
         k = min(top_k, len(scores))

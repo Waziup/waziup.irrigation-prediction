@@ -260,7 +260,9 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
             'gps': ['51.023591, 13.744087'],
             'slope': '5',
             'thres': '30',
-            'amount': '100',
+            'plot_area_m2': '1000',
+            'application_efficiency': '0.85',
+            'effective_rainfall_fraction': '0.8',
             'lookahead': '24',
             'start': '2025-03-11T00:00:00.000Z',
             'period': '7',
@@ -297,7 +299,8 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
         self.assertEqual(config['Gps_info']['longitude'], '13.744087')
         self.assertAlmostEqual(float(config['Slope']), 5.0)
         self.assertAlmostEqual(float(config['Threshold']), 30.0)
-        self.assertAlmostEqual(float(config['Irrigation_amount']), 100.0)
+        self.assertAlmostEqual(float(config['Application_efficiency']), 0.85)
+        self.assertAlmostEqual(float(config['Effective_rainfall_fraction']), 0.8)
         self.assertAlmostEqual(float(config['Look_ahead_time']), 24.0)
         self.assertEqual(config['Start_date'], '2025-03-11T00:00:00.000Z')
         self.assertEqual(int(config['Period']), 7)
@@ -382,7 +385,6 @@ class TestIrrigationPredictionAPI(unittest.TestCase):
         # Manual irrigation
         irrig_resp = self.session.get(
             f"{wazigate_app_url}/irrigateManually",
-            params={'amount': 50},
             headers=self.headers
         )
         self.assertEqual(irrig_resp.status_code, 200)
@@ -460,4 +462,3 @@ if __name__ == "__main__":
         buffer=False,
         catchbreak=False
     )
-

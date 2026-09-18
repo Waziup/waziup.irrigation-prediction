@@ -1,0 +1,121 @@
+[
+  {
+    "sensor_key": "1:moisture:657360e268f319085542e336/657360f468f319085542e337",
+    "plot_id": 1,
+    "plot_name": "Plot",
+    "zone_name": "Plot",
+    "latitude": 51.023591,
+    "longitude": 13.744087,
+    "device_sensor_id": "657360e268f319085542e336/657360f468f319085542e337",
+    "role": "moisture",
+    "sensor_kind": "tension",
+    "status": {
+      "last_seen": "2026-05-18T16:32:21Z",
+      "online": false,
+      "battery": null,
+      "readings": []
+    }
+  },
+  {
+    "sensor_key": "1:temperature:657360e268f319085542e336/657360f468f319085542e33b",
+    "plot_id": 1,
+    "plot_name": "Plot",
+    "zone_name": "Plot",
+    "latitude": 51.023591,
+    "longitude": 13.744087,
+    "device_sensor_id": "657360e268f319085542e336/657360f468f319085542e33b",
+    "role": "temperature",
+    "sensor_kind": "tension",
+    "status": {
+      "last_seen": "2026-05-18T16:32:21Z",
+      "online": false,
+      "battery": null,
+      "readings": []
+    }
+  },
+  {
+    "sensor_key": "2:moisture:657360e268f319085542e336/657360f468f319085542e337",
+    "plot_id": 2,
+    "plot_name": "Plot123",
+    "zone_name": "Plot123",
+    "latitude": 51.023591,
+    "longitude": 13.744087,
+    "device_sensor_id": "657360e268f319085542e336/657360f468f319085542e337",
+    "role": "moisture",
+    "sensor_kind": "tension",
+    "status": {
+      "last_seen": "2026-05-18T16:32:21Z",
+      "online": false,
+      "battery": null,
+      "readings": []
+    }
+  },
+  {
+    "sensor_key": "2:temperature:657360e268f319085542e336/657360f468f319085542e33b",
+    "plot_id": 2,
+    "plot_name": "Plot123",
+    "zone_name": "Plot123",
+    "latitude": 51.023591,
+    "longitude": 13.744087,
+    "device_sensor_id": "657360e268f319085542e336/657360f468f319085542e33b",
+    "role": "temperature",
+    "sensor_kind": "tension",
+    "status": {
+      "last_seen": "2026-05-18T16:32:21Z",
+      "online": false,
+      "battery": null,
+      "readings": []
+    }
+  },
+  {
+    "sensor_key": "2:flow:687f87b968f3190764873763/687f87fc68f3190764873764",
+    "plot_id": 2,
+    "plot_name": "Plot123",
+    "zone_name": "Plot123",
+    "latitude": 51.023591,
+    "longitude": 13.744087,
+    "device_sensor_id": "687f87b968f3190764873763/687f87fc68f3190764873764",
+    "role": "flow",
+    "sensor_kind": "tension",
+    "status": {
+      "last_seen": "2026-05-18T16:32:21Z",
+      "online": false,
+      "battery": null,
+      "readings": []
+    }
+  },
+  {
+    "sensor_key": "3:moisture:657360e268f319085542e336/657360f468f319085542e337",
+    "plot_id": 3,
+    "plot_name": "Plot",
+    "zone_name": "Plot",
+    "latitude": 51.023591,
+    "longitude": 13.744087,
+    "device_sensor_id": "657360e268f319085542e336/657360f468f319085542e337",
+    "role": "moisture",
+    "sensor_kind": "tension",
+    "status": {
+      "last_seen": "2026-05-18T16:32:21Z",
+      "online": false,
+      "battery": null,
+      "readings": []
+    }
+  },
+  {
+    "sensor_key": "3:temperature:657360e268f319085542e336/657360f468f319085542e33b",
+    "plot_id": 3,
+    "plot_name": "Plot",
+    "zone_name": "Plot",
+    "latitude": 51.023591,
+    "longitude": 13.744087,
+    "device_sensor_id": "657360e268f319085542e336/657360f468f319085542e33b",
+    "role": "temperature",
+    "sensor_kind": "tension",
+    "status": {
+      "last_seen": "2026-05-18T16:32:21Z",
+      "online": false,
+      "battery": null,
+      "readings": []
+    }
+  }
+]

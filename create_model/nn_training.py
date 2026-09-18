@@ -55,6 +55,22 @@ from .nn_ensemble import EnsemblePredictor
 from .runtime import HardCleanupCallback, MemoryLimitCallback, MemoryLimitReachedError, TimeLimitCallback, free_memory
 
 
+def _require_finite_model_data(values, label):
+    """Fail before scaler/model use; missing measurements are not zeroes."""
+    try:
+        numeric = np.asarray(values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must contain finite numeric values") from exc
+    if numeric.size == 0 or not np.isfinite(numeric).all():
+        if hasattr(values, "columns"):
+            bad = [str(col) for col in values.columns
+                   if not np.isfinite(np.asarray(values[col], dtype=float)).all()]
+            detail = f" (columns: {', '.join(bad)})" if bad else ""
+        else:
+            detail = ""
+        raise ValueError(f"{label} must contain finite numeric values{detail}")
+
+
 def prepare_data_for_cnn2(
     plot,
     train_df,
@@ -93,6 +109,26 @@ def prepare_data_for_cnn2(
 
     X_test = test_df.drop(columns=[target_variable])
     y_test = test_df[target_variable]
+
+    # Weather adapters can leave numeric-looking values with object
+    # dtype (notably empty direction fields). Normalize the feature matrices
+    # before the finite-value gate; genuine missing values still fail below
+    # instead of being silently replaced.
+    X_train = X_train.apply(pd.to_numeric, errors="coerce")
+    X_val = X_val.apply(pd.to_numeric, errors="coerce")
+    X_test = X_test.apply(pd.to_numeric, errors="coerce")
+    y_train = pd.to_numeric(y_train, errors="coerce")
+    y_val = pd.to_numeric(y_val, errors="coerce")
+    y_test = pd.to_numeric(y_test, errors="coerce")
+
+    # Validate every split before fitting, so a bad validation/test measurement
+    # cannot replace a previously usable scaler or reach the model as NaN.
+    for name, inputs, target in (
+            ('Training', X_train, y_train),
+            ('Validation', X_val, y_val),
+            ('Test', X_test, y_test)):
+        _require_finite_model_data(inputs, f'{name} inputs')
+        _require_finite_model_data(target, f'{name} target')
 
     # ---------------------------------------
     # SCALING
@@ -357,6 +393,8 @@ def save_models_nn(plot_name, nn_models, path_to_save, nn_hps = None):
                 # Save the trained models for future use
                 p = base_name + ".keras"
                 nn_models[i].save(p)
+                with open(base_name + '_model_meta.json', 'w') as metadata_file:
+                    json.dump({'model_name': model_name}, metadata_file)
                 model_paths.append(p)
                 print(f"[OK] Saved Keras model: {p}")
             except Exception as e:
@@ -401,6 +439,66 @@ def save_models_nn(plot_name, nn_models, path_to_save, nn_hps = None):
     return model_paths
 
 
+def _restore_model_name(model, path):
+    base_name = os.path.splitext(path)[0]
+    metadata_path = base_name + '_model_meta.json'
+    if os.path.exists(metadata_path):
+        with open(metadata_path) as metadata_file:
+            name = json.load(metadata_file).get('model_name')
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError('Saved model metadata requires a nonempty model_name')
+        model.model_name = name
+        return
+    # Legacy filenames do not delimit underscores in model and plot names.
+    # Recognize known architecture names; otherwise retain the serialized name
+    # rather than pretending the first underscore-delimited word is the name.
+    stem = os.path.basename(base_name)
+    prefix, separator, remainder = stem.partition('_')
+    if separator and prefix.isdigit():
+        for name in ('nn_model', 'cnn_model', 'rnn_model', 'gru_model', 'lstm_model'):
+            if remainder.startswith(name + '_'):
+                model.model_name = name
+                return
+    model.model_name = safe_model_name(model)
+
+
+def _load_model_hps(path):
+    hp_path = os.path.splitext(path)[0] + '_hps.json'
+    if os.path.exists(hp_path):
+        try:
+            with open(hp_path) as hp_file:
+                return json.load(hp_file)
+        except Exception as exc:
+            print(f'Failed to load hyperparameters for {path}: {exc}')
+    return None
+
+
+def _validate_loaded_nn(model):
+    """Validate supported prediction objects, not just successful deserialization.
+
+    This is not a pickle security boundary; joblib artifacts must be trusted.
+    """
+    if isinstance(model, tensorflow.keras.Model):
+        if not model.built:
+            raise ValueError('Loaded Keras model must be built')
+        return
+    if not isinstance(model, EnsemblePredictor):
+        raise ValueError('Loaded object is not a supported NN model or ensemble')
+    if model.method not in ('average', 'bagging', 'stacking'):
+        raise ValueError('Loaded ensemble has an unsupported method')
+    if not isinstance(model.base_models, (list, tuple)) or not model.base_models:
+        raise ValueError('Loaded ensemble requires base models')
+    groups = model.base_models if model.method == 'stacking' else [model.base_models]
+    for group in groups:
+        if not isinstance(group, (list, tuple)) or not group:
+            raise ValueError('Loaded ensemble requires nonempty model groups')
+        for member in group:
+            if not isinstance(member, tensorflow.keras.Model) or not member.built:
+                raise ValueError('Loaded ensemble members must be built Keras models')
+    if model.method == 'stacking' and not callable(getattr(model.meta_model, 'predict', None)):
+        raise ValueError('Loaded stacking ensemble requires a predictive meta-model')
+
+
 # Load NN models
 def load_models_nn(input_path):
     models = []
@@ -414,11 +512,10 @@ def load_models_nn(input_path):
             if file.endswith(".h5") or file.endswith(".keras"):
                 path = os.path.join(input_path, file)
                 model = keras_models.load_model(path)
+                _validate_loaded_nn(model)
 
                 # Parse name: index_modelname_plot.h5
-                parts = file.replace(".h5", "").replace(".keras", "").split("_", 2)
-                if len(parts) >= 2:
-                    model.model_name = parts[1]
+                _restore_model_name(model, path)
 
                 models.append(model)
                 print(f"Loaded NN model: {file}")
@@ -442,7 +539,9 @@ def load_models_nn(input_path):
                 path = os.path.join(input_path, file)
                 try:
                     ensemble_model = joblib.load(path)
+                    _validate_loaded_nn(ensemble_model)
                     models.append(ensemble_model)
+                    best_hps.append(None)
                     print(f"Loaded ensemble model: {file}")
                 except Exception as e:
                     print(f"Failed to load ensemble model {file}: {e}")
@@ -450,20 +549,22 @@ def load_models_nn(input_path):
         # Keras model
         if input_path.endswith(".h5") or input_path.endswith(".keras"):
                 model = keras_models.load_model(input_path)
+                _validate_loaded_nn(model)
 
                 # Parse name: index_modelname_plot.h5
-                parts = input_path.replace(".h5", "").replace(".keras", "").split("_", 2)
-                if len(parts) >= 2:
-                    model.model_name = parts[1]
+                _restore_model_name(model, input_path)
 
                 models.append(model)
+                best_hps.append(_load_model_hps(input_path))
                 print(f"Loaded NN model: {input_path}")
                 # Hyperparameters are not needed when loading single models
         # Ensemble model
         elif input_path.endswith(".joblib"):
             try:
                 ensemble_model = joblib.load(input_path)
+                _validate_loaded_nn(ensemble_model)
                 models.append(ensemble_model)
+                best_hps.append(None)
                 print(f"Loaded ensemble model from: {input_path}")
             except Exception as e:
                 print(f"Failed to load ensemble model from: {input_path}: {e}")
@@ -605,6 +706,8 @@ def prepare_future_values(scaler, new_data, X_train_c):
     # scale testset
     Z = new_data_aligned
 
+    _require_finite_model_data(Z, 'Forecast inputs')
+
     Z_scaled = scaler.transform(Z)
 
     # numerical_columns = Z.select_dtypes(include=np.number).columns
@@ -642,11 +745,23 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
             best_model_nn.shape
         )
 
+        try:
+            tuner_max_epochs = max(
+                2, int(os.getenv("NN_TUNER_MAX_EPOCHS", "50"))
+            )
+            tuner_max_seconds = max(
+                60, int(os.getenv("NN_TUNER_MAX_SECONDS", "3600"))
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "NN_TUNER_MAX_EPOCHS and NN_TUNER_MAX_SECONDS must be integers"
+            ) from exc
+
         # Initialize the Hyperband tuner
         tuner = Hyperband(
             builder,
             objective='val_mae',
-            max_epochs=50,             # Tune epochs between 10 and 100 # TODO: was 100 DEBUG
+            max_epochs=tuner_max_epochs,
             factor=3,                   # Reduces the number of epochs for each successive run, Defaults to 3, 4 would be fast, 2 is with wider scope DEBUG
             hyperband_iterations=1,     # Limits the number full hyperband runs
             directory='hyperband_dir',
@@ -655,8 +770,7 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
         )
 
         # Set the max time in seconds DEBUG
-        max_time_seconds = 3600 #3600 DEBUG
-        time_limit_callback = TimeLimitCallback(max_time_seconds)
+        time_limit_callback = TimeLimitCallback(tuner_max_seconds)
         # Early stopping to avoid overfitting
         early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
@@ -700,8 +814,9 @@ def tune_model_nn(X_train_scaled, y_train, X_val_scaled, y_val, best_model_nn):
         return final_model, best_hps
     
     except Exception as e:
-        print(f"There was an error tuning the NN model. {e}")
-        return best_model_nn
+        raise RuntimeError(
+            f"There was an error tuning the NN model: {e}"
+        ) from e
 
 
 def save_weights(model, temp_dir=None):
@@ -765,39 +880,32 @@ def init_nn_subprocess_tuning_and_ensemble(plot_name, X_train, y_train, X_val, y
     """
     model_configs = []
     
-    temp_dir = Path("./tmp") / f"nn_{plot_name}_{datetime.now().timestamp()}"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-
-    # Extract config to file
-    for m in models:
-        model_configs.append({
-            "model_name": m.model_name,
-            "shape": m.shape,
-            "weights_path": save_weights(m, temp_dir),
-            "hp_values": m.hp.values if hasattr(m, "hp") and m.hp is not None else None
-        })
-        
-    # Save model configs (NOT models)
-    with open(temp_dir / "model_configs.json", "w") as f:
-        json.dump(model_configs, f)
-    
-    # Save data
-    np.save(temp_dir / "X_train.npy", X_train)
-    np.save(temp_dir / "y_train.npy", y_train)
-    np.save(temp_dir / "X_val.npy", X_val)
-    np.save(temp_dir / "y_val.npy", y_val)
-
-    # Run tuning and ensemble creation in subprocess
-    result_path = run_tuning_and_ensemble_nn_with_subprocess(temp_dir, model_configs, plot_name)
-
-    # return the best model (first in list)
-    model = load_models_nn(result_path)[0][0]
-
-    # Delete tmp folder and all containing files
+    import tempfile
+    temp_root = Path('./tmp').resolve()
+    temp_root.mkdir(parents=True, exist_ok=True)
+    # This call owns exactly one uniquely created directory, never a plot-derived
+    # path or a pre-existing directory. Clean it on all exits, including interrupts.
+    temp_dir = Path(tempfile.mkdtemp(prefix='nn_', dir=temp_root))
     try:
-        shutil.rmtree(temp_dir)
-        print(f"Deleted temp dir after successful tuning and ensemble creation: {temp_dir}")
-    except Exception as e:
-        print(f"Warning: Failed to delete temp dir {temp_dir}: {e}")
-
-    return model  
+        for m in models:
+            model_configs.append({
+                'model_name': m.model_name,
+                'shape': m.shape,
+                'weights_path': save_weights(m, temp_dir),
+                'hp_values': m.hp.values if hasattr(m, 'hp') and m.hp is not None else None
+            })
+        with open(temp_dir / 'model_configs.json', 'w') as f:
+            json.dump(model_configs, f)
+        np.save(temp_dir / 'X_train.npy', X_train)
+        np.save(temp_dir / 'y_train.npy', y_train)
+        np.save(temp_dir / 'X_val.npy', X_val)
+        np.save(temp_dir / 'y_val.npy', y_val)
+        result_path = run_tuning_and_ensemble_nn_with_subprocess(temp_dir, model_configs, plot_name)
+        return load_models_nn(result_path)[0][0]
+    finally:
+        try:
+            shutil.rmtree(temp_dir)
+            print(f'Deleted NN handoff temp dir: {temp_dir}')
+        except Exception as exc:
+            # Report cleanup failure without replacing the original training error.
+            print(f'Warning: Failed to delete temp dir {temp_dir}: {exc}')

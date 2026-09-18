@@ -1,392 +1,776 @@
+/* Ported mock UI styles — simplified and adapted for the app */
 :root {
-  --primary-color: #394e69;
-  --secondary-color: #f35e19;
-  --danger-color: #e74c3c;
-  --text-color: #333;
-  --light-gray: #f8f9fa;
-  --border-color: #e0e0e0;
-  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  --border-radius: 8px;
+    --green-900: #1a2f1a;
+    --green-800: #2d5a27;
+    --green-700: #3a7d34;
+    --green-600: #4a9e42;
+    --green-100: #e8f5e6;
+    --green-50: #f5faf4;
+    --amber-600: #e6a800;
+    --amber-100: #fff8e1;
+    --red-600: #c62828;
+    --red-100: #fde8e8;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+    --white: #ffffff;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+    --radius-sm: 8px;
+    --radius: 12px;
 }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #f0f3ed; color: var(--gray-800); -webkit-font-smoothing:antialiased; min-height:100vh; }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/* Sidebar (not all apps use it but keep for consistency) */
+.sidebar { width:240px; background:var(--white); border-right:1px solid var(--gray-200); display:flex; flex-direction:column; position:fixed; top:0; left:0; bottom:0; z-index:100; box-shadow:var(--shadow-sm); }
+.sidebar-brand { padding:20px 20px 16px; border-bottom:1px solid var(--gray-100); }
+.sidebar-brand h1 { font-size:1.25rem; font-weight:800; color:var(--green-800); display:flex; align-items:center; gap:10px; }
+.sidebar-nav { flex:1; padding:12px 10px; display:flex; flex-direction:column; gap:2px; }
+.nav-item { display:flex; align-items:center; gap:12px; padding:11px 14px; border-radius:var(--radius-sm); cursor:pointer; font-weight:500; font-size:0.875rem; color:var(--gray-600); transition:all 0.2s; background:none; border:none; text-align:left; }
+.nav-item:hover { background:var(--gray-50); color:var(--gray-800); }
+.nav-item.active { background:var(--green-50); color:var(--green-800); font-weight:600; }
+.nav-badge { margin-left:auto; background:var(--red-600); color:white; font-size:0.65rem; font-weight:700; padding:2px 8px; border-radius:10px; min-width:20px; text-align:center; }
 
-body {
-  font-family: "Inter", sans-serif;
-  background-color: var(--light-gray);
-  color: var(--text-color);
-  line-height: 1.6;
-}
+/* Main area */
+.main-area { margin-left:240px; }
+.topbar { background:white; border-bottom:1px solid var(--gray-200); padding:12px 20px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:50; }
+.farm-selector { display:flex; align-items:center; gap:8px; background:var(--gray-50); border:1px solid var(--gray-200); border-radius:var(--radius-sm); padding:7px 14px; font-size:0.9rem; font-weight:600; color:var(--gray-700); }
+.page-content { padding:20px 24px; }
 
-/* Tab container styles */
-.tab-container {
-  background-color: white;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+.card { background:var(--white); border-radius:var(--radius); box-shadow:var(--shadow); border:1px solid var(--gray-100); padding:20px; margin-bottom:16px; }
+.metric-card { background:white; border-radius:var(--radius); padding:16px 18px; box-shadow:var(--shadow-sm); border:1px solid var(--gray-100); display:flex; flex-direction:column; gap:6px; }
+.metrics-row { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px; }
+.metric-label { font-size:0.7rem; font-weight:600; color:var(--gray-500); text-transform:uppercase; }
+.metric-value { font-size:1.8rem; font-weight:800; color:var(--gray-900); }
 
-.tabs {
-  display: flex;
-  gap: 8px;
-}
-
-.tab {
-  padding: 8px 16px;
-  background-color: #f8f9fa;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  position: relative;
-  transition: all 0.2s;
-}
-
-.tab:hover {
-  background-color: #e9ecef;
-}
-
-.tab.active {
-  background-color: var(--primary-color);
-  color: white;
-  border-color: var(--primary-color);
-}
-
-.close-tab {
-  position: absolute;
-  top: -8px;
-  right: -8px;
-  background-color: #dc3545;
-  color: white;
-  border-radius: 50%;
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.add-tab-button {
-  background-color: #394e69;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  padding: 8px 16px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: background-color 0.2s;
-}
-
-.add-tab-button:hover {
-  background-color: #2d3d54;
-}
-
-/* Loading indicator */
-.loading-indicator {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(255, 255, 255, 0.9);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.loading-content {
-  text-align: center;
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid var(--primary-color);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin: 0 auto 16px;
-}
-
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
-/* Main content */
+/* Home dashboard layout */
 .main-content {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
-  opacity: 0;
-  transition: opacity 0.3s;
+  padding: 20px 24px 28px;
 }
 
-.main-content.loaded {
-  opacity: 1;
+.page {
+  display: none;
 }
 
-/* Header styles */
-.app-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
+.page.active {
+  display: block;
 }
 
-.location-title {
-  font-size: 28px;
-  font-weight: 600;
-  color: var(--text-color);
+.page-switcher {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+  margin-bottom: 0;
 }
 
-.header-controls {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-}
-
-.settings-button {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: #555;
-  display: flex;
+.page-switcher .nav-item {
+  background: var(--white);
+  border: 1px solid #d9e1ea;
+  border-radius: 16px;
+  padding: 12px 14px;
+  font-size: 0.92rem;
+  color: var(--gray-700);
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  transition: background-color 0.2s;
+  gap: 8px;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-.settings-button:hover {
-  background-color: rgba(0, 0, 0, 0.05);
+.page-switcher .nav-item.active {
+  background: #e7f2e4;
+  color: #245d2a;
+  border-color: #aac9a5;
+  box-shadow: inset 0 -3px #2f7133;
 }
 
-.settings-button.highlight {
-  background-color: #ffc107;
-  color: white;
-}
-
-.plot-selector select {
-  padding: 8px 16px;
-  border-radius: var(--border-radius);
-  border: 1px solid var(--border-color);
-  background-color: white;
-  font-family: "Inter", sans-serif;
-  cursor: pointer;
-  min-width: 150px;
-}
-
-/* Action buttons */
-.action-buttons {
-  margin-bottom: 24px;
-}
-
-.train-button {
-  background-color: #6c757d;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  padding: 12px 24px;
-  cursor: pointer;
-  font-family: "Inter", sans-serif;
-  font-weight: 500;
-  transition: background-color 0.2s;
-}
-
-.train-button:hover {
-  background-color: #5a6268;
-}
-
-.train-button.highlight {
-  background-color: var(--secondary-color);
-  color: white;
-}
-
-.train-button:disabled {
-  background-color: #6c757d;
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Modern Training Button - Match Add Plot button size */
-.modern-train-btn {
-  position: relative;
-  background: var(--secondary-color);
-  border: none;
-  border-radius: 8px;
-  padding: 8px 16px;
-  color: white;
-  font-size: 14px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 8px rgba(243, 94, 25, 0.2);
-  overflow: hidden;
-  height: 36px; /* Match add-tab-button height */
-}
-
-.modern-train-btn:hover:not(:disabled) {
-  background: #d9501a;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(243, 94, 25, 0.3);
-  cursor: pointer;
-}
-
-.modern-train-btn:active:not(:disabled) {
-  background: #c14717;
-  transform: translateY(0);
-}
-
-.modern-train-btn:disabled {
-  background: #9ca3af;
-  color: #ffffff;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: 0 2px 4px rgba(156, 163, 175, 0.2);
-  opacity: 0.7;
-}
-
-.modern-train-btn .material-symbols-outlined {
+.page-switcher .nav-item .material-symbols-outlined {
   font-size: 18px;
 }
 
-.modern-train-btn .btn-text {
-  font-size: 14px;
-  white-space: nowrap;
+.page-switcher .nav-item .emoji-icon {
+  font-size: 16px;
+  line-height: 1;
 }
 
-/* Make sure both buttons have consistent sizing */
-.add-tab-button,
-.modern-train-btn {
-  height: 36px;
-  font-size: 14px;
-  padding: 8px 16px;
-  border-radius: 8px;
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
 }
 
-/* Action buttons container alignment */
-.action-buttons {
+.summary-card {
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--gray-100);
+  padding: 16px 18px;
+  min-height: 96px;
   display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.summary-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--gray-600);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.summary-value {
+  font-size: 1.7rem;
+  font-weight: 800;
+  color: var(--gray-900);
+}
+
+.summary-subtext {
+  font-size: 0.8rem;
+  color: var(--gray-600);
+}
+
+.dashboard-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.irrigation-advice {
+  grid-column: span 2;
+}
+
+.advice-header {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
+  margin-bottom: 12px;
+}
+
+.advice-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  color: var(--gray-900);
+}
+
+.advice-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.advice-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.95rem;
+  color: var(--gray-700);
+}
+
+.alert-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  border: 1px solid transparent;
+}
+
+.alert-pill.ok {
+  background: #e7f5ed;
+  color: #1e6a3a;
+  border-color: #b8e3c9;
+}
+
+.alert-pill.watch {
+  background: #fff2d9;
+  color: #9b5d00;
+  border-color: #f5d39a;
+}
+
+.alert-pill.critical {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.weather-forecast {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 
-.header-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.weather-title {
+  font-weight: 800;
+  color: var(--gray-900);
 }
 
-/* Metrics cards */
+.weather-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.weather-card {
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+  display: grid;
+  gap: 4px;
+}
+
+.weather-card .material-symbols-outlined {
+  font-size: 20px;
+  color: var(--gray-600);
+}
+
+.weather-amount {
+  font-weight: 700;
+  color: var(--gray-900);
+  font-size: 0.9rem;
+}
+
+.weather-label {
+  font-size: 0.75rem;
+  color: var(--gray-500);
+}
+
+.weather-empty {
+  font-size: 0.85rem;
+  color: var(--gray-500);
+}
+
+.growth-stage {
+  margin-top: 10px;
+}
+
+.growth-title {
+  font-weight: 800;
+  margin-bottom: 12px;
+  color: var(--gray-900);
+}
+
+.growth-timeline {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.growth-node {
+  text-align: center;
+  padding: 10px 6px;
+  border-radius: 999px;
+  background: var(--gray-100);
+  color: var(--gray-600);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.growth-node.active {
+  background: #e7f5ed;
+  color: #1e6a3a;
+  border: 1px solid #b8e3c9;
+}
+
+.phenology-hero h2 {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--gray-900);
+}
+
+.phenology-subtitle {
+  margin-top: 6px;
+  font-size: 0.9rem;
+  color: var(--gray-600);
+}
+
+.phenology-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.phenology-meta {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.phenology-meta .meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.phenology-meta .meta-item span {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--gray-500);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.phenology-meta .meta-item strong {
+  font-size: 0.95rem;
+  color: var(--gray-900);
+}
+
+.phenology-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.phenology-metric {
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--gray-100);
+  padding: 16px 18px;
+  min-height: 110px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.phenology-metric .metric-value {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--gray-900);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.phenology-timeline {
+  margin-bottom: 18px;
+}
+
+.phenology-table .table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.phenology-table .table-header h3 {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--gray-900);
+}
+
+.phenology-table .table-subtitle {
+  font-size: 0.85rem;
+  color: var(--gray-600);
+}
+
+.phenology-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.phenology-table table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px;
+}
+
+.phenology-table th,
+.phenology-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.phenology-table th {
+  font-weight: 700;
+  color: var(--gray-700);
+  background: rgba(226, 232, 240, 0.4);
+}
+
 .metrics-container {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  margin-bottom: 24px;
-}
-
-.metric-card {
-  background-color: white;
-  border-radius: var(--border-radius);
-  padding: 24px;
-  box-shadow: var(--card-shadow);
-  border: 1px solid var(--border-color);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
 }
 
 .metric-card.compact {
-  background: white;
-  border-radius: 8px;
-  padding: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e5e7eb;
-  min-height: 90px;
-  display: flex;
-  flex-direction: column;
-}
-
-.metric-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-  color: #666;
+  background: var(--white);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--gray-100);
+  min-height: 110px;
 }
 
 .metric-card.compact .metric-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   margin-bottom: 8px;
 }
 
-.metric-card.compact .metric-header .material-symbols-outlined {
-  font-size: 16px;
-}
-
-.metric-title {
-  font-size: 18px;
-  font-weight: 500;
-}
-
 .metric-card.compact .metric-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #000000;
-  line-height: 1.2;
-}
-
-.metric-value {
-  font-size: 60px;
+  font-size: 0.95rem;
   font-weight: 700;
-  display: flex;
-  align-items: baseline;
-  margin-bottom: 16px;
-  margin-top: auto;
+  color: var(--gray-900);
 }
 
 .metric-card.compact .metric-value {
   display: flex;
   align-items: baseline;
-  gap: 3px;
+  gap: 4px;
   margin-top: auto;
-  margin-bottom: 0;
 }
 
 .metric-card.compact .metric-value span:first-child {
-  font-size: 28px;
-  font-weight: 700;
-  color: #000000;
+  font-size: 1.9rem;
+  font-weight: 800;
+  color: var(--gray-900);
 }
 
 .metric-unit {
-  font-size: 28px;
-  margin-left: 8px;
-  color: #777;
-  font-weight: 400;
+  font-size: 0.9rem;
+  color: var(--gray-500);
+  font-weight: 600;
 }
 
-.metric-card.compact .metric-unit {
-  font-size: 16px;
-  color: #666666;
+.metric-subtext {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--gray-600);
+  line-height: 1.35;
+}
+
+.chart-card {
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  border: 1px solid var(--gray-100);
+  padding: 20px;
+  margin-bottom: 18px;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.chart-title-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.threshold-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.threshold-badge.dynamic {
+  background: #e7f5ed;
+  color: #1e6a3a;
+  border-color: #b8e3c9;
+}
+
+.threshold-badge.static {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
+.chart-title-section h3 {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--gray-900);
+}
+
+.chart-area {
+  min-height: 280px;
+  width: 100%;
+}
+
+.topbar .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.topbar .btn .material-symbols-outlined {
+  font-size: 18px;
+}
+
+/* Icon-only buttons for compact topbar */
+.topbar-actions .icon-only { padding:6px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; }
+.topbar-actions .icon-only .emoji-icon { font-size:18px; line-height:1; }
+.topbar-actions .icon-only .material-symbols-outlined { font-size:20px; line-height:1; }
+.topbar-actions #train_btn { display:none; }
+
+.topbar .btn-primary {
+  background: var(--green-800);
+  color: white;
+  border-color: transparent;
+}
+
+.topbar .btn-primary:hover {
+  background: var(--green-700);
+}
+
+.topbar .btn-outline {
+  background: white;
+}
+
+.topbar .nav-badge {
+  margin-left: 2px;
+}
+
+.tab-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--gray-200);
+  background: var(--white);
+  padding: 10px 16px;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tab, .add-tab-button {
+  padding: 9px 16px;
+  cursor: pointer;
+  border: 1px solid var(--gray-200);
+  border-radius: 10px;
+  background: var(--gray-50);
+  transition: all 0.2s ease;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--gray-700);
+}
+
+.tab:hover, .add-tab-button:hover {
+  background: var(--gray-100);
+  border-color: var(--gray-300);
+}
+
+.tab.active {
+  background: var(--green-50);
+  border-color: var(--green-100);
+  color: var(--green-800);
+}
+
+.add-tab-button {
+  background: var(--green-100);
+  color: var(--green-800);
+  border-color: var(--green-100);
+}
+
+.close-tab {
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  font-size: 14px;
+  color: #888;
+  cursor: pointer;
+  transition: color 0.3s;
+}
+
+.close-tab:hover {
+  color: #ff0000;
+}
+
+.loading-indicator {
+  display: flex;
+  position: fixed;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  z-index: 1000;
+}
+
+.loading-content {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  max-width: 320px;
+}
+
+.loading-indicator p {
+  font-size: 0.95rem;
+  color: var(--gray-700);
+  line-height: 1.5;
+}
+
+/* Responsive */
+@media (max-width:1024px) {
+  .sidebar { display:none; }
+  .main-area { margin-left:0; }
+  .metrics-row { grid-template-columns:repeat(2,1fr); }
+  .summary-grid,
+  .dashboard-row,
+  .phenology-metrics {
+    grid-template-columns:repeat(2,1fr);
+  }
+  .growth-timeline {
+    grid-template-columns:repeat(3,1fr);
+  }
+}
+
+@media (max-width:640px) {
+  .summary-grid,
+  .dashboard-row,
+  .phenology-metrics {
+    grid-template-columns:1fr;
+  }
+  .growth-timeline {
+    grid-template-columns:repeat(2,1fr);
+  }
+}
+
+/* Small helpers */
+.btn { padding:8px 12px; border-radius:8px; border:1px solid var(--gray-200); background:var(--white); cursor:pointer; }
+.btn-primary { background:var(--green-800); color:white; }
+.btn-outline { background:white; color:var(--gray-700); }
+
+/* Loading indicator */
+.loading-indicator { position:fixed; top:0; left:0; right:0; bottom:0; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.85); z-index:9999; }
+.loading-indicator .spinner { width:40px; height:40px; border-radius:50%; border:4px solid #eee; border-top-color:var(--green-800); animation:spin 1s linear infinite; }
+
+@keyframes spin { to { transform:rotate(360deg); } }
+
+
+.metric-subtext {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #5f6b78;
+}
+
+.metric-card.compact .metric-subtext {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #5f6b78;
+}
+
+.form-hint {
+  margin: 4px 0 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.form-section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.registry-summary {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid rgba(17, 24, 39, 0.1);
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #0f172a;
+  overflow-x: auto;
+}
+
+.registry-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.registry-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+}
+
+.registry-table th,
+.registry-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+  text-align: left;
+  vertical-align: top;
+  font-size: 13px;
+}
+
+.registry-table th {
+  font-weight: 700;
+  color: #1e293b;
+  background: rgba(226, 232, 240, 0.5);
+}
+
+.alert-notification {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  background: #fff4e6;
+  color: #8a4b00;
+  border: 1px solid #ffd6a3;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.alert-notification.visible {
+  display: flex;
+}
+
+.alert-notification[data-level="critical"] {
+  background: #ffe9e9;
+  border-color: #f5a3a3;
+  color: #9c1c1c;
+}
+
+.alert-notification[data-level="advise"] {
+  background: #fff7e6;
+  border-color: #ffd79c;
+  color: #7a4b00;
+}
+
+.alert-notification[data-level="watch"] {
+  background: #eef5ff;
+  border-color: #b9d4ff;
+  color: #234b8a;
 }
 
 /* Pump specific styles */
@@ -550,14 +934,6 @@ body {
   background: #dee2e6;
 }
 
-.schedule-button::after {
-  content: ">";
-  font-size: 12px;
-  font-weight: bold;
-  color: #6c757d;
-  margin-left: auto;
-}
-
 /* Remove the material icon from the button in HTML */
 .schedule-btn .material-symbols-outlined {
   display: none;
@@ -574,6 +950,459 @@ body {
 
 .schedule-btn:disabled::after {
   color: #adb5bd;
+}
+
+/* Final responsive cascade guard. */
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.main-content {
+  width: min(100%, 1440px);
+  margin-inline: auto;
+  padding: 20px clamp(14px, 2.5vw, 32px) 108px;
+}
+
+.page { padding: 0; min-width: 0; }
+.topbar-title-wrap { justify-content: flex-start; gap: 18px; }
+.topbar-title { flex: 0 0 auto; }
+.topbar-farm-name { display: inline-flex; min-width: 0; color: #52606d; font-size: .88rem; }
+.summary-grid, .farm-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.dashboard-row { grid-template-columns: minmax(0, 1.45fr) minmax(250px, .8fr) minmax(270px, .9fr); }
+.dashboard-row > * { min-width: 0; }
+.irrigation-advice { grid-column: auto; }
+.weather-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.weather-card { min-width: 0; overflow-wrap: anywhere; }
+.weather-icon { font-size: 1.45rem; }
+.pump-row { flex-wrap: wrap; }
+.schedule-btn { min-width: 0; max-width: 100%; justify-content: center; white-space: normal; text-align: center; }
+.pump-card.advisory-only { opacity: .82; }
+
+.plot-pump-control {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--gray-200);
+}
+.plot-pump-control[hidden] { display: none; }
+.plot-pump-control > div { display: flex; align-items: center; gap: 8px; }
+.plot-pump-control span { color: var(--gray-700); font-size: .84rem; }
+.plot-pump-actions { margin-left: auto; }
+.plot-pump-actions button {
+  border: 1px solid #1f7a4d;
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: #fff;
+  color: #17643e;
+  font-weight: 700;
+  cursor: pointer;
+}
+.plot-pump-actions button:last-child { border-color: #b42318; color: #b42318; }
+.plot-pump-actions button:disabled { opacity: .45; cursor: not-allowed; }
+
+@media (max-width: 1050px) {
+  .dashboard-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .irrigation-advice { grid-column: 1 / -1; }
+}
+
+@media (max-width: 720px) {
+  .tab-container { display: none; }
+  .topbar { align-items: flex-start; }
+  .topbar-title-wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .topbar-title, .topbar-farm-name { max-width: calc(100vw - 82px); }
+  .main-content { padding: 14px 10px 104px; }
+  .farm-summary-grid, .summary-grid, .phenology-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-row, .farm-operations-grid { grid-template-columns: minmax(0, 1fr); }
+  .irrigation-advice, .farm-plots-panel { grid-column: auto; }
+  .weather-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .pump-card .status-row { display: grid; grid-template-columns: 1fr; }
+  .pump-status-section, .schedule-btn { width: 100%; }
+  .plot-pump-control { align-items: flex-start; flex-wrap: wrap; }
+  .plot-pump-actions { width: 100%; margin-left: 0; }
+  .forecast-chart-frame { height: 280px; }
+  .page-switcher .nav-item { min-width: 0; padding: 10px 8px; font-size: .78rem; }
+}
+
+/* Authoritative responsive app shell. Keep these rules last so older mock-up
+   declarations cannot force desktop columns onto narrow screens. */
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.local-icon,
+.weather-icon {
+  font-family: system-ui, -apple-system, "Segoe UI Emoji", sans-serif;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.topbar {
+  min-height: 62px;
+  padding-inline: clamp(14px, 3vw, 32px);
+}
+
+.topbar-title-wrap {
+  justify-content: flex-start;
+  gap: 18px;
+}
+
+.topbar-title {
+  flex: 0 0 auto;
+  font-size: 1.05rem;
+}
+
+.topbar-farm-name {
+  display: inline-flex;
+  min-width: 0;
+  color: #52606d;
+  font-size: 0.88rem;
+}
+
+.main-content {
+  width: min(100%, 1440px);
+  margin-inline: auto;
+  padding: 20px clamp(14px, 2.5vw, 32px) 108px;
+}
+
+.page {
+  padding: 0;
+  min-width: 0;
+}
+
+.summary-grid,
+.farm-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dashboard-row {
+  grid-template-columns: minmax(0, 1.45fr) minmax(250px, .8fr) minmax(270px, .9fr);
+  align-items: stretch;
+}
+
+.dashboard-row > * {
+  min-width: 0;
+}
+
+.irrigation-advice {
+  grid-column: auto;
+}
+
+.weather-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.weather-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.weather-icon {
+  font-size: 1.45rem;
+}
+
+.pump-row {
+  flex-wrap: wrap;
+}
+
+.amount-input-group {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.schedule-btn {
+  min-width: 0;
+  max-width: 100%;
+  justify-content: center;
+  white-space: normal;
+  text-align: center;
+}
+
+.forecast-chart-frame {
+  position: relative;
+  width: 100%;
+  height: clamp(300px, 38vw, 480px);
+  min-height: 0;
+}
+
+.forecast-chart-frame .chart-area {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+}
+
+.phenology-table {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 1050px) {
+  .dashboard-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .irrigation-advice {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .tab-container {
+    display: none;
+  }
+
+  .topbar {
+    align-items: flex-start;
+  }
+
+  .topbar-title-wrap {
+    display: grid;
+    gap: 2px;
+  }
+
+  .topbar-title,
+  .topbar-farm-name {
+    max-width: calc(100vw - 82px);
+  }
+
+  .main-content {
+    padding: 14px 10px 104px;
+  }
+
+  .farm-summary-grid,
+  .summary-grid,
+  .phenology-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-row,
+  .farm-operations-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .irrigation-advice,
+  .farm-plots-panel {
+    grid-column: auto;
+  }
+
+  .weather-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .pump-row {
+    align-items: stretch;
+  }
+
+  .pump-row > * {
+    max-width: 100%;
+  }
+
+  .pump-card .status-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .pump-status-section,
+  .schedule-btn {
+    width: 100%;
+  }
+
+  .schedule-btn {
+    min-height: 44px;
+  }
+
+  .forecast-chart-frame {
+    height: 280px;
+  }
+
+  .chart-title-section {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .page-switcher .nav-item {
+    min-width: 0;
+    padding: 10px 8px;
+    font-size: .78rem;
+  }
+}
+
+@media (max-width: 390px) {
+  .summary-card,
+  .farm-summary-card,
+  .phenology-metric {
+    padding: 12px;
+  }
+
+  .summary-title,
+  .farm-summary-card span {
+    font-size: .68rem;
+  }
+
+  .summary-value {
+    font-size: 1.25rem;
+  }
+}
+
+/* Pilot farm overview */
+.connectivity-notification {
+  display: none;
+  margin: 0 16px 10px;
+  padding: 10px 14px;
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.connectivity-notification.visible { display: block; }
+
+.farm-overview { margin-bottom: 18px; }
+.dashboard-section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin: 4px 0 12px;
+}
+.dashboard-section-header h2 { margin: 0; font-size: 1.1rem; color: #111827; }
+.dashboard-section-header p { margin: 3px 0 0; font-size: 0.82rem; color: #64748b; }
+.selected-plot-header { margin-top: 20px; }
+
+.farm-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.farm-summary-card {
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 13px;
+  background: #fff;
+  display: grid;
+  gap: 8px;
+}
+.farm-summary-card span { font-size: 0.72rem; color: #64748b; text-transform: uppercase; font-weight: 700; }
+.farm-summary-card strong { color: #111827; font-size: 1.15rem; overflow-wrap: anywhere; }
+.farm-summary-card.attention strong { color: #b45309; }
+
+.farm-operations-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(220px, 1fr));
+  gap: 10px;
+}
+.farm-operations-grid > .card { min-width: 0; padding: 14px; }
+.panel-title { margin-bottom: 10px; color: #111827; font-weight: 800; }
+.farm-plot-list, .dashboard-list { display: grid; gap: 8px; }
+.farm-plot-card {
+  width: 100%;
+  min-height: 68px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid #94a3b8;
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(170px, 1.4fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+.farm-plot-card:hover, .farm-plot-card:focus-visible { background: #f8fafc; outline: 2px solid #86b978; outline-offset: 1px; }
+.farm-plot-card.urgency-critical { border-left-color: #dc2626; }
+.farm-plot-card.urgency-advise { border-left-color: #f97316; }
+.farm-plot-card.urgency-watch { border-left-color: #eab308; }
+.farm-plot-main, .farm-plot-condition { min-width: 0; display: grid; gap: 3px; }
+.farm-plot-main span, .farm-plot-condition span, .dashboard-list-item span { font-size: 0.75rem; color: #64748b; overflow-wrap: anywhere; }
+.farm-plot-meta { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; font-size: 0.7rem; color: #64748b; }
+.status-chip, .data-state { padding: 3px 7px; border-radius: 999px; background: #f1f5f9; text-transform: capitalize; }
+.status-chip.critical { background: #fee2e2; color: #991b1b; }
+.status-chip.advise { background: #ffedd5; color: #9a3412; }
+.status-chip.watch { background: #fef9c3; color: #854d0e; }
+.status-chip.demonstration { background: #fef3c7; color: #854d0e; }
+.status-chip.observation { background: #dbeafe; color: #1e40af; }
+.data-state.stale, .data-state.unavailable { background: #fff7ed; color: #9a3412; }
+.data-state.fresh { background: #dcfce7; color: #166534; }
+
+.dashboard-list-item {
+  min-height: 46px;
+  padding: 9px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.dashboard-list-item > div:first-child { min-width: 0; display: grid; gap: 3px; }
+.dashboard-list-item.alert-critical { border-left: 4px solid #dc2626; }
+.dashboard-list-item.alert-advise { border-left: 4px solid #f97316; }
+.dashboard-list-item.alert-watch { border-left: 4px solid #eab308; }
+.dashboard-empty { padding: 12px; color: #64748b; font-size: 0.82rem; text-align: center; }
+.approval-actions { display: flex; gap: 6px; }
+.approval-actions button {
+  min-height: 40px;
+  padding: 7px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+}
+.approval-actions button:first-child { background: #356c2c; border-color: #356c2c; color: #fff; }
+.weather-detail { font-size: 0.68rem; color: #64748b; }
+
+@media (max-width: 1050px) {
+  .farm-operations-grid { grid-template-columns: 1fr 1fr; }
+  .farm-plots-panel { grid-column: 1 / -1; }
+}
+
+@media (max-width: 680px) {
+  .page { padding-inline: 10px; }
+  .farm-summary-grid, .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .farm-operations-grid, .dashboard-row { grid-template-columns: 1fr; }
+  .farm-plots-panel { grid-column: auto; }
+  .farm-plot-card { grid-template-columns: 1fr; align-items: start; }
+  .farm-plot-meta { justify-content: flex-start; }
+  .weather-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-card { min-height: 94px; }
+  .dashboard-list-item { align-items: flex-start; flex-direction: column; }
+  .approval-actions { width: 100%; }
+  .approval-actions button { flex: 1; min-height: 44px; }
+  .schedule-btn, .amount-btn { min-height: 44px; }
+}
+
+@media (max-width: 380px) {
+  .farm-summary-grid, .summary-grid, .weather-grid { grid-template-columns: 1fr; }
+}
+
+.irrigation-recommendation {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f8faf7;
+  border: 1px solid #d8e5d5;
+  color: #4b5f4c;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 /* Charts */
@@ -728,6 +1557,62 @@ body {
   position: relative;
 }
 
+/* Make generic .tooltip render as a compact help icon (avoid literal 'help' text showing)
+   Uses a small question mark circle as a reliable fallback when icon fonts fail. */
+.tooltip { font-size: 0; cursor: help; display:inline-flex; align-items:center; }
+.tooltip.has-tooltip::before { content: '?'; font-size: 12px; color: var(--gray-600); display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:#f1f5f9; border:1px solid var(--gray-200); margin-left:6px; }
+.tooltip .tooltiptext { font-size: 12px; }
+.tooltip.help-question {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 6px;
+  border: 1px solid var(--gray-300);
+  border-radius: 50%;
+  background: #f1f5f9;
+  color: var(--gray-700);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Pump card header tweaks */
+.pump-card .pump-header { display:flex; align-items:center; gap:8px; justify-content:space-between; }
+.pump-card .pump-title { font-weight:800; font-size:1rem; text-transform:capitalize; }
+.pump-card .pump-help { margin-left:12px; }
+
+/* Amount controls */
+.pump-card .amount-row { display:flex; align-items:center; gap:12px; justify-content:space-between; }
+.pump-card .amount-input-group { display:flex; align-items:center; gap:8px; }
+.pump-card { padding:18px; }
+.pump-card .amount-btn { width:40px; height:40px; border-radius:20px; background:#ffffff; border:1px solid rgba(15,23,42,0.06); display:inline-flex; align-items:center; justify-content:center; font-size:18px; cursor:pointer; box-shadow: 0 1px 2px rgba(16,24,40,0.04); }
+.pump-card .amount-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(16,24,40,0.08); }
+.pump-card .amount-input { width:64px; height:44px; border-radius:22px; text-align:center; font-weight:800; border:1px solid rgba(15,23,42,0.06); font-size:18px; }
+.pump-card .amount-symbol { font-size:20px; line-height:1; }
+
+/* Status indicators inline */
+.pump-card .status-row { display:flex; align-items:center; gap:12px; justify-content:space-between; }
+.pump-card .pump-status-section { display:flex; gap:10px; align-items:center; }
+.pump-card .status-indicator { padding:6px 12px; border-radius:8px; font-weight:800; font-size:0.9rem; min-width:56px; text-align:center; }
+.pump-card .status-indicator.on { color:#0f5132; background: rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.18); }
+.pump-card .status-indicator.off { color:#6b1220; background: rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.12); }
+
+/* Schedule button styling tuned for pump card */
+.pump-card .schedule-btn { background: linear-gradient(180deg,#10b981,#059669); color:white; border:none; padding:10px 14px; border-radius:10px; font-weight:700; box-shadow: 0 6px 18px rgba(16,185,129,0.12); }
+.pump-card .schedule-btn:disabled { background: #e6e6e6; color:#9aa0a6; box-shadow:none; }
+
+/* Small responsive tweak so the pump card stacks cleanly */
+@media (max-width:640px) {
+  .pump-card .amount-input { width:56px; height:40px; }
+  .pump-card { padding:14px; }
+}
+
+/* Hide help by default unless tooltip text is populated (handled by DOM script) */
+.pump-card .pump-help { display:none; }
+.pump-card .pump-help.has-tooltip { display:inline-flex; }
+
 .chart-title-section .tooltiptext {
   visibility: hidden;
   width: 200px;
@@ -801,6 +1686,26 @@ body {
     grid-template-columns: repeat(2, 1fr);
   }
 
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-row {
+    grid-template-columns: 1fr;
+  }
+
+  .irrigation-advice {
+    grid-column: auto;
+  }
+
+  .weather-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .growth-timeline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .metric-card,
   .metric-card.compact {
     padding: 12px;
@@ -845,6 +1750,304 @@ body {
 
   .metric-card.compact .metric-unit {
     font-size: 14px;
+  }
+}
+
+/* Mobile app-shell override for dashboard and phenology views */
+body {
+  background: #e6e6e6;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #dddddd;
+  position: sticky;
+  top: 0;
+  z-index: 60;
+}
+
+.topbar-title-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.topbar-title {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-farm-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+#topAlertsBtn .material-symbols-outlined,
+#settingsQuick .material-symbols-outlined {
+  font-size: 0;
+  line-height: 1;
+  width: 1em;
+  height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#topAlertsBtn .material-symbols-outlined::before {
+  content: "\1F514";
+  font-size: 18px;
+}
+
+#settingsQuick .material-symbols-outlined::before {
+  content: "\2699";
+  font-size: 18px;
+}
+
+#train_btn .material-symbols-outlined {
+  font-size: 0;
+  line-height: 1;
+  width: 1em;
+  height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#train_btn .material-symbols-outlined::before {
+  content: "\1F9E0";
+  font-size: 18px;
+}
+
+.main-content {
+  padding: 0 0 112px;
+}
+
+.page-switcher {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  width: min(calc(100% - 24px), 480px);
+  padding: 0;
+  margin: 0;
+  z-index: 60;
+}
+
+.page {
+  padding: 12px 16px 0;
+}
+
+.page-switcher .nav-item {
+  border-radius: 999px;
+  padding: 9px 18px;
+  box-shadow: var(--shadow-sm);
+}
+
+.summary-grid {
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.summary-card {
+  min-height: 118px;
+  padding: 14px;
+  border-radius: 14px;
+}
+
+.summary-title {
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  color: #4b5563;
+}
+
+.summary-value {
+  font-size: 1.45rem;
+}
+
+.dashboard-row {
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.irrigation-advice {
+  grid-column: 1 / -1;
+}
+
+.card,
+.chart-card {
+  border-radius: 14px;
+}
+
+.chart-card {
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.chart-area {
+  min-height: 250px;
+}
+
+.growth-stage {
+  margin-top: 0;
+}
+
+.growth-timeline {
+  gap: 6px;
+}
+
+.growth-node {
+  padding: 10px 4px;
+  font-size: 0.72rem;
+}
+
+.phenology-hero {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0 0 10px;
+  margin-bottom: 8px;
+}
+
+.phenology-header {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.phenology-hero h2 {
+  font-size: 1.05rem;
+}
+
+.phenology-subtitle {
+  font-size: 0.82rem;
+}
+
+.phenology-meta {
+  gap: 12px;
+}
+
+.phenology-meta .meta-item span {
+  font-size: 0.62rem;
+}
+
+.phenology-meta .meta-item strong {
+  font-size: 0.82rem;
+}
+
+.phenology-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.phenology-metric {
+  min-height: 96px;
+  padding: 12px 14px;
+  border: none;
+  box-shadow: none;
+  background: #ffffff;
+}
+
+.phenology-metric .metric-label {
+  font-size: 0.78rem;
+}
+
+.phenology-metric .metric-value {
+  font-size: 1.12rem;
+}
+
+.phenology-metric .metric-subtext {
+  font-size: 0.72rem;
+}
+
+.phenology-timeline {
+  margin-bottom: 12px;
+}
+
+.phenology-table .table-header {
+  margin-bottom: 10px;
+}
+
+.phenology-table .table-header h3 {
+  font-size: 0.95rem;
+}
+
+.phenology-table .table-subtitle {
+  font-size: 0.8rem;
+}
+
+.phenology-table table {
+  min-width: 100%;
+}
+
+.phenology-table th,
+.phenology-table td {
+  padding: 8px 10px;
+  font-size: 0.75rem;
+}
+
+body[data-page="phenology"] .topbar-title {
+  color: #111827;
+}
+
+body[data-page="dashboard"] .topbar-farm-name {
+  display: none;
+}
+
+body[data-page="dashboard"] .topbar-title {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 680px) {
+  .tab-container {
+    display: none;
+  }
+
+  .topbar {
+    padding: 12px 14px;
+  }
+
+  .topbar .btn-primary {
+    display: none;
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dashboard-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .weather-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .growth-timeline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1114,6 +2317,7 @@ body {
 }
 
 .amount-input[type="number"] {
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 
@@ -1179,14 +2383,6 @@ body {
 .schedule-btn:active {
   transform: scale(0.98);
   background: #dee2e6;
-}
-
-.schedule-btn::after {
-  content: ">";
-  font-size: 12px;
-  font-weight: bold;
-  color: #6c757d;
-  margin-left: auto;
 }
 
 /* Remove the material icon from the button in HTML */

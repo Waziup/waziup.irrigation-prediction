@@ -5,7 +5,6 @@ Split out of the original create_model.py - function bodies are verbatim
 """
 import csv
 import ctypes
-from datetime import timedelta, datetime
 import gc
 import json
 import logging
@@ -51,7 +50,9 @@ from subprocess_manager import run_tuning_and_ensemble_nn_with_subprocess, run_t
 from . import state
 from .constants import *
 from .cleaning import convert_cols, fill_gaps, remove_large_gaps, resample
-from .weather import get_historical_weather_api, get_weather_forecast_api
+from .weather import get_historical_weather_api
+from sensor_quality import capture_tension_observations
+from sensor_roles import update_soil_sensor_groups
 
 
 # TODO: more sophisticated approach needed: needs to learn from former => introduce model, is now excluded when flow meter is installed
@@ -85,6 +86,7 @@ def ensure_json_file(file_path):
 
 # include the (on device saved) amount of irrigation given
 def include_irrigation_amount(df, plot):
+    timezone_name = TimeUtils.for_plot(plot)
     irrigation_file = plot.irrigations_from_json
     # Check and ensure the JSON file exists
     ensure_json_file(irrigation_file)
@@ -139,7 +141,7 @@ def include_irrigation_amount(df, plot):
 
             # Convert the 'Timestamp' column to datetime, ensuring it is in UTC
             df_irrigation['Timestamp'] = pd.to_datetime(df_irrigation['Timestamp'], utc=True)
-            df_irrigation['Timestamp'] = df_irrigation['Timestamp'].dt.tz_convert(TimeUtils.Timezone)  # Replace with the correct timezone
+            df_irrigation['Timestamp'] = df_irrigation['Timestamp'].dt.tz_convert(timezone_name)
 
             df_irrigation.rename(columns={'value': 'irrigation_amount'}, inplace=True)
 
@@ -157,7 +159,7 @@ def include_irrigation_amount(df, plot):
             df_irrigation.set_index('Timestamp', inplace=True)
 
             # Timezone has to be set for df_irrigation
-            df_irrigation = df_irrigation.tz_convert(TimeUtils.Timezone)
+            df_irrigation = df_irrigation.tz_convert(timezone_name)
 
             # Merge the dataframes
             df = pd.merge(df, df_irrigation, left_index=True, right_index=True, how='outer', suffixes=('_main', '_irrigation'))
@@ -187,7 +189,7 @@ def add_weather_derived_features(df):
     df['et0_sum_72h'] = df['Et0_evapotranspiration'].rolling(rows(72), min_periods=1).sum()
 
     # Simplified running soil water balance over the last 7 days: supply - demand.
-    # Supply includes measured irrigation when a flow meter provides it (the forecast
+    # Supply includes measured irrigation depth when a flow meter provides it (the forecast
     # frame assigns irrigation_amount=0, i.e. "behavior without watering", which is the
     # scenario the prediction is asking about).
     water_in = df['Rain']
@@ -239,7 +241,12 @@ Weather_derived_feature_cols = [
 # Augment the dataset creating new features
 def create_features(data, plot):
     # Create average cols
-    data['grouped_soil'] = data[plot.device_and_sensor_ids_moisture].mean(axis=1)
+    tension_ids, vwc_ids, unknown_ids = update_soil_sensor_groups(plot)
+    capacitive_only = str(getattr(plot, "sensor_kind", "tension")).lower() == "capacitive"
+    target_ids = vwc_ids if capacitive_only else tension_ids
+    if not target_ids or (unknown_ids and not capacitive_only):
+        raise ValueError("Soil model requires unambiguous sensor types and a configured target sensor")
+    data['grouped_soil'] = data[target_ids].mean(axis=1)
     data['grouped_soil_temp'] = data[plot.device_and_sensor_ids_temp].mean(axis=1)
     
     # Create rolling mean: introduces NaN again -> later just cut off
@@ -262,28 +269,16 @@ def create_features(data, plot):
     # Save the length of sensordata to var in days -> to dynamically adjust train interval
     plot.train_period_days = (data.index[-1] - data.index[0]).days
 
-    # Get weather from weather meteo
+    # Fetch the exact sensor-training interval. The shared adapter joins
+    # archive/recent sources itself and rejects incomplete coverage.
     data_weather = get_historical_weather_api(data, plot)
 
     # Resample weatherdata before merge => takes a long time
     data_weather = resample(data_weather)
 
-    # historical weather data is not available for the latest two days, use forecast to account for that!
-    if not plot.load_data_from_csv:
-        data_weather_endtime = data_weather.index[-1]
-        data_endtime = data.index[-1]
-
-        # Get forecast for the ~last two days
-        data_weather_recent_forecast = get_weather_forecast_api(data_weather_endtime, data_endtime, plot, data)
-
-        # Merge weather data to one dataframe
-        data_weather_merged = pd.concat([data_weather.loc[data.index[0]:], 
-                                        data_weather_recent_forecast.loc[data_weather_endtime + 
-                                                                        timedelta(minutes=Sample_rate) 
-                                                                        : data_endtime]
-                                                                        ])
-    else:
-        data_weather_merged = data_weather.loc[data.index[0]:data.index[-1]]
+    # Use only timestamps represented by the tension sensors. This prevents
+    # future weather or unrelated historical rows leaking into model training.
+    data_weather_merged = data_weather.loc[data.index[0]:data.index[-1]]
 
     # Merge data_weather_merged into data
     data = pd.merge(data, data_weather_merged, left_index=True, right_index=True, how='outer')
@@ -310,6 +305,22 @@ def create_features(data, plot):
     # Skip the pump state if there is a flow meter where the artificial irrigation amount is measured
     if "DeviceAndSensorIdsFlow" in plot.config:
         data = include_irrigation_amount(data, plot)
+        if 'irrigation_amount' in data.columns:
+            try:
+                area_m2 = float(getattr(plot, 'plot_area_m2'))
+            except (AttributeError, TypeError, ValueError):
+                area_m2 = 0.0
+            if np.isfinite(area_m2) and area_m2 > 0:
+                # Historical actuator values are m3. Convert them to mm before
+                # combining them with rainfall and ET0 depths.
+                data['irrigation_amount'] = (
+                    pd.to_numeric(data['irrigation_amount'], errors='coerce')
+                    .fillna(0.0) * 1000.0 / area_m2
+                )
+            else:
+                logging.getLogger(__name__).warning(
+                    "Ignoring irrigation volumes in the water-balance feature because plot area is unavailable")
+                data['irrigation_amount'] = 0.0
     else:
         data['pump_state'] = int(0)
         data = add_pump_state(data, plot)
@@ -349,11 +360,13 @@ def prepare_data(plot):
 
     # start date is in UTC, but user expects it in his timezone
     start_date = plot.start_date
-    lat = plot.gps_info['lattitude']
-    long = plot.gps_info['longitude']
-    TimeUtils.Timezone = TimeUtils.get_timezone(lat, long)
-    start_date = parser.parse(start_date)
-    start_date = start_date.replace(tzinfo=pytz.timezone(TimeUtils.Timezone))
+    timezone_name = TimeUtils.for_plot(plot)
+    start_date = pd.Timestamp(parser.parse(start_date))
+    if start_date.tzinfo is None:
+        start_date = start_date.tz_localize(
+            timezone_name, ambiguous="raise", nonexistent="raise")
+    else:
+        start_date = start_date.tz_convert(timezone_name)
 
     if plot.load_data_from_csv:
         # Load from CSV
@@ -361,10 +374,11 @@ def prepare_data(plot):
         data.rename(columns={'timestamp': 'Time'}, inplace=True)
         data['Time'] = pd.to_datetime(data['Time'])
         data.set_index('Time', inplace=True)
-        # Correct timestamp for timezone
-        # Add timezone information without converting 
-        data.index = data.index.map(lambda x: x.replace(tzinfo=pytz.timezone(TimeUtils.Timezone)))
-        #data.index = pd.to_datetime(data.index) + pd.DateOffset(hours=get_timezone_offset(Timezone))
+        if data.index.tz is None:
+            data.index = data.index.tz_localize(
+                timezone_name, ambiguous="raise", nonexistent="raise")
+        else:
+            data.index = data.index.tz_convert(timezone_name)
     else:
         # Load data from API
         for moisture in plot.device_and_sensor_ids_moisture:
@@ -400,12 +414,17 @@ def prepare_data(plot):
             d.set_index('Time', inplace=True)
             data = pd.merge(data, d, left_index=True, right_index=True, how='outer')
 
+    # Capture physical readings before any interpolation, resampling or rolling
+    # mean. This metadata is the evidence used by the actuation data-quality gate.
+    capture_tension_observations(
+        plot, data, plot.device_and_sensor_ids_moisture)
+
     # Rename index
     data.rename_axis('Timestamp', inplace=True)
 
     # Convert index
     data.index = pd.to_datetime(data.index, utc=True)
-    data.index = data.index.tz_convert(TimeUtils.Timezone)
+    data.index = data.index.tz_convert(timezone_name)
         
     # Impute gaps in data
     data = fill_gaps(data)

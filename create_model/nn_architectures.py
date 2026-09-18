@@ -107,6 +107,7 @@ def create_nn_model(hp, shape):
 def create_cnn_model(hp, shape):
     model = Sequential()
     num_conv_layers = hp.Int('num_conv_layers', 1, 3)
+    remaining_length = shape[0]
 
     for i in range(num_conv_layers):
         filters = hp.Int(f'filters_{i}', min_value=32, max_value=256, step=32)
@@ -118,8 +119,11 @@ def create_cnn_model(hp, shape):
         else:
             model.add(Conv1D(filters=filters, kernel_size=kernel_size, padding='same', activation='relu'))
         
-        if shape[0] > 1:
+        # Valid pooling halves the current length, not the original input
+        # length. Keep later convolutions but stop pooling once length is one.
+        if remaining_length > 1:
             model.add(MaxPooling1D(pool_size=2))
+            remaining_length //= 2
         
         dropout_rate = hp.Float('dropout_rate', min_value=0.1, max_value=0.5, step=0.1)
         model.add(Dropout(dropout_rate))

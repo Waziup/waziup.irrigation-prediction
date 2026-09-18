@@ -28,6 +28,21 @@
 | usock.py | ~200 | HTTP server routing and request handling |
 | subprocess_manager.py ⚠️ | 500+ | Memory-efficient subprocess execution |
 
+### Crop parameter library
+
+`crops.py` is the single registry for crop-specific phenology and water-use
+priors. Each `CropParams` entry supplies temperature bounds, cumulative GDD
+stage breakpoints, FAO-style crop coefficients (`Kc_ini`, `Kc_mid`, `Kc_end`),
+and satellite validation timing. The prediction pipeline uses the selected
+crop to compute growth stage, dynamic `Kc`, and crop evapotranspiration.
+
+The registry includes maize, beans, wheat, tomato, sorghum, rice, and olive.
+The rice entry is a conservative tropical prior for Lake Victoria basin
+production. Rice in the basin includes lowland/flooded and upland/rainfed or
+irrigated systems, so the cultivar, establishment method, and water regime
+must be validated locally before relying on its GDD breakpoints. Its `Kc`
+values are based on the rice values in [FAO-56](https://www.fao.org/4/x0490e/x0490e00.htm).
+
 ---
 
 ## API & Server (main.py)
@@ -173,10 +188,14 @@
 **Returns**: CSV string  
 **Location**: Lines 669-705
 
+#### `pumpControl(url, body)`
+**Purpose**: Turn the configured pump or valve ON or OFF in Semi-auto mode
+**Parameters**: `state=on|off` and an optional idempotency key
+**Hardware contract**: Sends JSON boolean `true` or `false` to the WaziGate actuator. The calculated volume is displayed as advice and is not sent as an actuator value.
+**Safety**: OFF remains available as a fail-safe. Metered delivery is stored when a flow reading is available.
+
 #### `irrigateManually(url, body)`
-**Purpose**: Manually trigger irrigation for a plot  
-**Parameters**: `body` contains `amount` (liters)  
-**Location**: Lines 706-723
+**Purpose**: Backward-compatible alias for `pumpControl(state=on)`
 
 #### `getValuesForDashboard(url, body)`
 **Purpose**: Get current sensor values and predictions for UI dashboard  
@@ -814,7 +833,8 @@
 - `device_and_sensor_ids_moisture`, `_temp`, `_flow`: Sensor references
 - `gps_info`: GPS coordinates
 - `sensor_kind`: "tension" or "volumetric"
-- `threshold`, `irrigation_amount`, `look_ahead_time`: Irrigation settings
+- `threshold_static`, `threshold_mode`, `application_efficiency`,
+  `effective_rainfall_fraction`, `look_ahead_time`: Irrigation settings
 - `start_date`, `period`, `train_period_days`: Training parameters
 - `soil_type`, `permanent_wilting_point`, `field_capacity_*`: Soil properties
 - `currently_training`, `training_finished`: State flags
@@ -921,7 +941,7 @@
 1. Wait until scheduled time
 2. Call `create_model.main()` for training
 3. Save results to pickle
-4. Trigger actuation if flow meters exist
+4. Trigger actuation when a compatible actuator is configured
 5. Start prediction thread
 6. Repeat with new interval
 
@@ -1006,23 +1026,26 @@
 **Returns**: Number of irrigation events  
 **Location**: Line 124
 
-#### `update_irrigation_status(plot, status="not_confirmed")`
-**Purpose**: Update status of last irrigation (confirmed/failed)  
-**Location**: Line 147
+#### `update_irrigation_status(plot, status, operation_id=None, detail=None)`
+**Purpose**: Update the compatibility irrigation record for the exact persisted operation
 
-#### `verify_irrigation(plot, amount)`
-**Purpose**: Check if actual irrigation occurred via flow meter  
-**Verification**: Compare expected vs actual water flow  
-**Retries**: Up to `Irrigation_retries` times  
-**Returns**: Boolean success  
-**Location**: Line 161
+#### `verify_irrigation(plot, amount, context=None)`
+**Purpose**: Confirm automatic irrigation using the configured flow meter sensor
+**Verification**: `event` meters compare the fresh channel value directly; `cumulative` meters subtract the pre-command baseline from the post-command total
+**Safety**: A mismatch marks the operation failed and never automatically repeats irrigation
 
-#### `irrigate_amount(plot, amount=0)`
+#### `irrigate_amount(plot, amount, authorized=False, operation_id=None, verification_context=None)`
 **Purpose**: Send irrigation command to WaziGate  
 **Parameters**: 
 - `plot`: Plot object
-- `amount`: Liters to dispense (0=use default)  
-**Location**: Line 220
+- `amount`: Calculated cubic metres to apply
+- `authorized`: Whether a manual/approval-required operation may execute
+
+For automatic mode, `irrigate_amount` requires a readable confirmation sensor.
+An explicitly configured sensor is preferred; compatible WaziGate devices can
+discover it from sensor metadata where `xlppChan == 5`. HTTP acceptance moves
+the operation to `completed`; only the delayed meter check moves it to
+`verified`. Pending checks are reconstructed after an application restart.
 
 #### `main_old(currentSoilTension, threshold_timestamp, predictions, plot) -> int`
 **Purpose**: Old actuation logic (deprecated)  
@@ -1032,10 +1055,10 @@
 **Purpose**: Main irrigation decision and execution  
 **Logic**:
 1. Check if threshold will be crossed in look-ahead window
-2. If yes, trigger irrigation
-3. Verify with flow meter
-4. Update status
-5. Log event  
+2. Calculate the irrigation volume from ETc, effective rainfall, efficiency,
+   and plot area
+3. If irrigation is required, send the calculated volume
+4. Record the operation and event
 **Returns**: Status code  
 **Location**: Line 318
 
@@ -1162,7 +1185,10 @@ Currently_active = False                # Global training lock
   },
   "irrigation": {
     "threshold": 30,
-    "amount": 100,
+    "threshold_mode": "dynamic",
+    "application_efficiency": 0.85,
+    "effective_rainfall_fraction": 0.8,
+    "plot_area_m2": 1000,
     "look_ahead": 24
   },
   "soil": {
@@ -1184,13 +1210,24 @@ Currently_active = False                # Global training lock
 
 ---
 
-## Global Actuation Constants (actuation.py)
+## Crop-water calculation
 
-```python
-OverThresholdAllowed = 1.2              # 20% tolerance for threshold
-Irrigation_confirmation_sec = 10800     # 3 hours until verification
-Irrigation_retries = 0                  # Number of retry attempts
-```
+The recommendation contract calculates ETc, effective rainfall, net irrigation,
+gross irrigation, and volume. Historical irrigation volumes are converted to a
+depth using plot area before they enter model water-balance features.
+
+## Soil-tension trigger modes
+
+The configured `threshold_static` value is the field-calibrated baseline in
+cbar. In `static` mode it is used unchanged. In `dynamic` mode, cumulative GDD
+selects the crop stage and its crop-specific cbar delta:
+
+`active_trigger_cbar = max(1, threshold_static + stage_delta_cbar)`
+
+The active trigger—not the GDD breakpoint—is compared with current and
+forecast soil tension. Negative deltas trigger earlier during sensitive stages;
+positive late-season deltas permit more drying. Crop-stage deltas are
+calibration priors, not universal field values.
 
 ---
 

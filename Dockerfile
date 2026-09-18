@@ -1,4 +1,4 @@
-FROM python:3.9-slim-bullseye
+FROM python:3.9-slim-bookworm
 
 #later alpine to save even more filesize of container, but is it worth it? (Alpine uses musl instead of glibc)
 
@@ -17,12 +17,13 @@ RUN apt-get update \
     build-essential \
     pkg-config \
     libhdf5-dev \
+    libexpat1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN \
     pip install --upgrade pip setuptools wheel && \
     \
-    pip install --retries 10 --timeout 120 tensorflow-aarch64 && \
+    pip install --retries 10 --timeout 120 tensorflow && \
     \
     pip install --retries 10 --timeout 120 pycaret && \
     \
@@ -42,10 +43,12 @@ RUN \
         timezonefinder \
         python-dotenv \
         python-dateutil \
+        pyyaml \
         joblib==1.3 \
         xmlrunner \
         psutil \
-        gevent
+        gevent \
+        rasterio==1.3.11
         
 # keras tuner check usage, also xmlrunner for unittests, does not need to be included in the image
 

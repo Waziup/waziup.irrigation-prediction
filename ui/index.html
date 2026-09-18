@@ -5,909 +5,1301 @@
     <title>WAZIUP Irrigation Dashboard</title>
     <meta name="description" content="WAZIUP Irrigation Prediction Dashboard" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
 
-    <link rel="stylesheet" href="styles.css" type="text/css" />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-
-    <script type="text/javascript" src="libs/jquery-3.2.1.min.js"></script>
-    <script type="text/javascript" src="libs/apexcharts.min.js"></script>
+    <link rel="stylesheet" href="styles.css?v=20260825-3" type="text/css" />
+    <link rel="stylesheet" href="responsive.css?v=20260825-6" type="text/css" />
+    <script src="libs/chart.umd.min.js"></script>
+    <script src="ui-icons.js"></script>
 
     <script type="text/javascript">
-      var waitForTraining = true;
-      var timestamp = "";
-      var MaxValuesToBeDisplayed = 1000;
-      let chartHist = null;
-      let chartDataSet = null;
-      let chartPred = null;
-      let chartHistLoaded = false,
-        chartDataSetLoaded = false,
-        chartPredLoaded = false;
-      var TrainingReadyCheck = 10000;
-      let tabCounter = 0;
+      // This script adapts the mock UI to call the app backend endpoints.
+      // It intentionally avoids hardcoded farm data and uses API calls.
 
-      // Event listeners
-      document.addEventListener("DOMContentLoaded", function () {
-        // Tooltips
-        fetch("tooltips.json")
-          .then((response) => response.json())
-          .then((tooltips) => {
-            document.querySelectorAll(".tooltip").forEach((tooltip) => {
-              const tooltipId = tooltip.getAttribute("data-tooltip-id");
-              if (tooltips[tooltipId]) {
-                tooltip.querySelector(".tooltiptext").textContent =
-                  tooltips[tooltipId];
-              }
-            });
-          })
-          .catch((error) =>
-            console.error("Error loading tooltip text:", error)
-          );
+      let forecastChart;
+      let chartRefreshGeneration = 0;
+      let metricsRefreshGeneration = 0;
+      let thresholdRefreshGeneration = 0;
+      let recommendationRefreshGeneration = 0;
+      let topbarRefreshGeneration = 0;
+      let farmDashboardRefreshGeneration = 0;
+      let weatherRefreshGeneration = 0;
+      let phenologyRefreshGeneration = 0;
+      let currentIrrigationActuatorBased = null;
+      let currentTensionUnit = "cbar";
+      function tensionUnitLabel(value) {
+        return /cbar|soil tension|moisture in/i.test(value || '') ? 'cbar' : (value || 'cbar');
+      }
+      let waitForTraining = false;
+      let activeTrainingPlotId = null;
+      const TrainingReadyCheck = 10000;
 
-        // Get plots formerly saved
-        fetch(`../api/getPlots`)
-          .then((response) => response.json())
-          .then((data) => {
-            if (data.tabnames.length == 0) {
-              addTab("Plot 1");
-              fetch(`../api/addPlot`)
-                .then((response) => response.json())
-                .then((data) => {
-                  console.log(
-                    "Next Plot was added with nr: ",
-                    data.next_number
-                  );
-                });
-              switchTab(1);
-            } else {
-              const tabPromises = data.tabnames.map((name) => {
-                return new Promise((resolve) => {
-                  addTab(name);
-                  resolve();
-                });
-              });
-              return Promise.all(tabPromises);
-            }
-          })
-          .then(() => {
-            return fetch(`../api/getCurrentPlot`);
-          })
-          .then((response) => response.json())
-          .then((currentPlotData) => {
-            const currentTabId = currentPlotData["currentPlot"];
-            const tabExists = document.getElementById(`tab-${currentTabId}`);
-
-            if (tabExists) {
-              switchTab(currentTabId);
-            } else {
-              console.warn(
-                `Tab ${currentTabId} not found, defaulting to first`
-              );
-              switchTab(1);
-            }
-          })
-          .catch((error) => {
-            console.error("Error in tab initialization:", error);
-            switchTab(1);
-          });
-
-        // Add plot when add button is clicked
-        document
-          .getElementById("addTabButton")
-          .addEventListener("click", () => {
-            const tabId = ++tabCounter;
-            const newTab = document.createElement("div");
-            newTab.id = `tab-${tabId}`;
-            newTab.className = "tab";
-            newTab.textContent = `Plot ${tabId}`;
-            newTab.addEventListener("click", () => switchTab(tabId));
-            document.getElementById("tabs").appendChild(newTab);
-
-            fetch(`../api/addPlot`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-              },
-              body: `tab_nr=${tabId}`,
-            })
-              .then((response) => response.json())
-              .then((data) => {
-                console.log("Next Plot was added with nr: ", data.next_number);
-              })
-              .catch((error) => {
-                console.error("Error, could not add plot_nr: ", error);
-              });
-
-            switchTab(tabId);
-          });
-      });
-
-      function addTab(name) {
-        const tabId = ++tabCounter;
-        const newTab = document.createElement("div");
-        newTab.id = `tab-${tabId}`;
-        newTab.className = "tab";
-
-        const tabLabel = document.createElement("span");
-        tabLabel.textContent = name;
-        tabLabel.addEventListener("click", () => switchTab(tabId));
-
-        const closeButton = document.createElement("span");
-        closeButton.className = "close-tab";
-        closeButton.innerHTML = "&times;";
-        closeButton.addEventListener("click", (event) => {
-          event.stopPropagation();
-          removeTab(tabId);
-        });
-
-        newTab.appendChild(tabLabel);
-        newTab.appendChild(closeButton);
-        document.getElementById("tabs").appendChild(newTab);
-        return newTab.id;
+      async function safeFetchJson(path) {
+        try {
+          const res = await fetch(path);
+          if (!res.ok) return null;
+          return await res.json();
+        } catch (e) {
+          console.error('Fetch error', path, e);
+          return null;
+        }
       }
 
-      function clearTabContent() {
-        document.getElementById("chart_hist").innerHTML = "";
-        document.getElementById("chart_pred").innerHTML = "";
+      async function updateMetrics() {
+        const generation = ++metricsRefreshGeneration;
+        const payload = await safeFetchJson('../api/getValuesForDashboard');
+        if (generation !== metricsRefreshGeneration) return;
+        // Every refresh replaces the displayed measurements, including failures.
+        // Never retain an old value under a current-reading label after an outage.
+        const dashboard = payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? payload : {};
+        const active = await safeFetchJson('../api/checkActiveIrrigation');
+        if (generation !== metricsRefreshGeneration) return;
+        const alert = await safeFetchJson('../api/getAlertStatus');
+        if (generation !== metricsRefreshGeneration) return;
 
-        if (chartHist) {
-          chartHist.destroy();
-          chartHist = null;
-        }
-        if (chartPred) {
-          chartPred.destroy();
-          chartPred = null;
-        }
+        if (dashboard) {
+          const readingNumber = (value) => {
+            if (typeof value !== 'number' && typeof value !== 'string') return NaN;
+            if (typeof value === 'string' && !value.trim()) return NaN;
+            return Number(value);
+          };
+          const tensionValue = readingNumber(dashboard.moisture_average);
+          const tempValue = readingNumber(dashboard.temp_average);
+          const vwcValue = readingNumber(dashboard.vwc_average);
+          const sensorKind = String(dashboard.sensor_kind || '').toLowerCase();
 
-        document.getElementById("temp-value").textContent = "--";
-        document.getElementById("tension-value").textContent = "--";
-        document.getElementById("humidity-value").textContent = "--";
-        document.getElementById("timestamp_txt").textContent = "";
-      }
-
-      function switchTab(tabId) {
-        const currentTab = document.getElementById(`tab-${tabId}`);
-        if (currentTab && currentTab.classList.contains("active")) {
-          return;
-        }
-
-        clearTabContent();
-        document.querySelector(".main-content").classList.remove("loaded");
-        document.getElementById("loading-indicator").style.display = "block";
-
-        document.querySelectorAll(".tab").forEach((tab) => {
-          tab.classList.remove("active");
-          const closeButton = tab.querySelector(".close-tab");
-          if (closeButton) {
-            closeButton.remove();
+          const tensionEl = document.getElementById('summary-tension');
+          if (tensionEl) {
+            const unitLabel = currentTensionUnit || "kPa";
+            tensionEl.textContent = Number.isFinite(tensionValue) ? `${tensionValue.toFixed(1)} ${unitLabel}` : '--';
           }
-        });
 
-        if (currentTab) {
-          currentTab.classList.add("active");
-          const closeButton = document.createElement("span");
-          closeButton.className = "close-tab";
-          closeButton.innerHTML = "&times;";
-          closeButton.addEventListener("click", (event) => {
-            event.stopPropagation();
-            removeTab(tabId);
-          });
-          currentTab.style.position = "relative";
-          currentTab.appendChild(closeButton);
-        }
-
-        fetch(`../api/setPlot`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: `currentPlot=${tabId}`,
-        })
-          .then((response) => response.text())
-          .then((data) => {
-            console.log(data);
-            loadStuff();
-          })
-          .catch((error) => {
-            console.error("Error, could not set plot_nr: ", error);
-          });
-      }
-
-      function removeTab(tabId) {
-        // Prompt for confirmation
-        if (!confirm("Are you sure you want to delete this plot?")) {
-          return;
-        }
-
-        const tabToRemove = document.getElementById(`tab-${tabId}`);
-        if (tabToRemove) {
-          tabToRemove.remove();
-          if (tabToRemove.classList.contains("active")) {
-            const remainingTabs = document.querySelectorAll(".tab");
-            if (remainingTabs.length > 0) {
-              const nextTab = remainingTabs[remainingTabs.length - 1];
-              const nextTabId = nextTab.id.split("-")[1];
-              switchTab(nextTabId);
-            }
+          const tensionLabel = document.getElementById('summary-tension-label');
+          if (tensionLabel) {
+            tensionLabel.textContent = (sensorKind === 'tension' || sensorKind === 'both')
+              ? 'Soil tension'
+              : 'Soil Tension';
           }
-          fetch(`../api/removePlot`, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: `currentPlot=${tabId}`,
-          })
-            .then((response) => response.text())
-            .then((data) => console.log(data))
-            .catch((error) => console.error("Error in removeTab():", error));
+
+          const tempEl = document.getElementById('summary-temp');
+          if (tempEl) {
+            tempEl.textContent = Number.isFinite(tempValue) ? `${tempValue.toFixed(1)} °C` : '--';
+          }
+          const readingSource = dashboard.data_source || 'IoT sensor';
+          const tensionSourceEl = document.getElementById('summary-tension-source');
+          const tempSourceEl = document.getElementById('summary-temp-source');
+          if (tensionSourceEl) tensionSourceEl.textContent = Number.isFinite(tensionValue)
+            ? `${readingSource} · ${dashboard.recorded_or_live || 'observed'} reading` : 'Reading unavailable';
+          if (tempSourceEl) tempSourceEl.textContent = Number.isFinite(tempValue)
+            ? `${readingSource} · latest sensor average` : 'Reading unavailable';
+
+          const vwcEl = document.getElementById('summary-vwc');
+          if (vwcEl) {
+            vwcEl.textContent = Number.isFinite(vwcValue) ? `${vwcValue.toFixed(1)} %` : '--';
+          }
+          const vwcSourceEl = document.getElementById('summary-vwc-source');
+          if (vwcSourceEl) vwcSourceEl.textContent = Number.isFinite(vwcValue)
+            ? 'Volumetric water content' : 'Reading unavailable';
+
+        }
+
+        const pumpActive = active?.data?.activeIrrigation === true;
+        const pumpMode = active?.data?.mode;
+        const pumpCard = document.getElementById('plot-pump-control');
+        if (pumpCard) {
+          pumpCard.hidden = !active?.data?.actuatorConfigured
+            || !['manual', 'approval_required', 'automatic'].includes(pumpMode);
+          pumpCard.dataset.mode = pumpMode || '';
+        }
+        // Pump status and Semi-auto controls.
+        if (pumpActive) {
+          const on = document.getElementById('pump-status-on');
+          const off = document.getElementById('pump-status-off');
+          if (on) on.style.display = 'inline-block';
+          if (off) off.style.display = 'none';
+        } else {
+          const on = document.getElementById('pump-status-on');
+          const off = document.getElementById('pump-status-off');
+          if (on) on.style.display = 'none';
+          if (off) off.style.display = 'inline-block';
+        }
+        const pumpOnButton = document.getElementById('pump-on-button');
+        const pumpOffButton = document.getElementById('pump-off-button');
+        const semiAuto = ['manual', 'approval_required'].includes(pumpMode);
+        if (pumpOnButton) {
+          pumpOnButton.hidden = !semiAuto;
+          pumpOnButton.disabled = pumpActive;
+        }
+        if (pumpOffButton) {
+          pumpOffButton.hidden = !semiAuto;
+          pumpOffButton.disabled = !pumpActive;
+        }
+
+        // Alert status
+        if (alert && alert.available === true) {
+          const pill = document.querySelector('.alert-pill');
+          if (pill) {
+            const urg = (alert.urgency || 'ok').toLowerCase();
+            const isNeutral = urg === 'ok';
+            pill.hidden = isNeutral;
+            pill.className = 'alert-pill ' + (urg === 'critical' ? 'critical' : urg === 'watch' ? 'watch' : 'ok');
+            pill.textContent = isNeutral ? '' : (alert.urgency || 'OK').toUpperCase();
+          }
+        } else {
+          const pill = document.querySelector('.alert-pill');
+          if (pill) pill.hidden = true;
         }
       }
 
-      function goToSettings() {
-        window.location.href = "settings.html";
-      }
-
-      function stateConfigPresent() {
-        const set_button = document.getElementById("settings_btn");
-        set_button.classList.remove("highlight");
-        const train_button = document.getElementById("train_btn");
-        // Instead of replacing all classes, just remove highlight and keep styling
-        train_button.className = "train-button modern-train-btn";
-        train_button.disabled = false;
-      }
-
-      function stateConfigNotPresent() {
-        document.getElementById("loading-indicator").style.display = "none";
-        document.querySelector(".main-content").classList.add("loaded");
-        alert(
-          "Please press the 'Settings' button and set up the needed parameters."
-        );
-        const set_button = document.getElementById("settings_btn");
-        set_button.classList.add("highlight");
-        const train_button = document.getElementById("train_btn");
-        // Keep the styling classes and add disabled state
-        train_button.className = "train-button modern-train-btn";
-        train_button.disabled = true;
-      }
-
-      function checkConfigPresent() {
-        return fetch(`../api/checkConfigPresent`)
-          .then((response) => response.json())
-          .then((data) => {
-            if (data.data.config_present == true) {
-              stateConfigPresent();
-              return true;
-            } else {
-              stateConfigNotPresent();
-            }
-            console.log(data);
-            return false;
-          });
-      }
-
-      function checkActiveIrrigation() {
-        return fetch(`../api/checkActiveIrrigation`)
-          .then((response) => response.json())
-          .then((data) => {
-            const statusOff = document.getElementById("pump-status-off");
-            const statusOn = document.getElementById("pump-status-on");
-            const button = document.getElementById("schedule_irrigation");
-            
-            if (data.data.activeIrrigation == true) {
-              statusOn.style.display = "block";
-              statusOff.style.display = "none";
-
-              //statusOn.className = "status-active";
-              //statusOn.innerText = "Active - pump is present";
-
-              button.className = "button-cancel";
-              button.disabled = false;
-              return true;
-            } else {
-              statusOn.style.display = "none";
-              statusOff.style.display = "block";
-
-              //statusOff.className = "status-inactive";
-              //statusOff.innerText = "Inactive - No present";
-
-              button.className = "button-cancel";
-              button.disabled = true;
-              return false;
-            }
-           console.log(data);
-          });
-      }
-
-      function formatTimestamp(isoTimestamp) {
-        const date = new Date(isoTimestamp);
-        const options = {
-          year: "numeric",
-          month: "short",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
+      async function loadCharts() {
+        console.info('[IRRIGATION_TRACE] plot charts: requesting sensor history and predictions');
+        const generation = ++chartRefreshGeneration;
+        const chartPayload = (value) => {
+          if (!value || value.available === false || !Array.isArray(value.timestamps)
+              || !Array.isArray(value.moistureSeries) || !value.timestamps.length
+              || value.timestamps.length !== value.moistureSeries.length
+              || !value.timestamps.every(t => typeof t === 'string' && Number.isFinite(Date.parse(t)))
+              || !value.moistureSeries.every(v => v === null || (typeof v === 'number' && Number.isFinite(v)))
+              || !value.moistureSeries.some(v => typeof v === 'number' && Number.isFinite(v))) return null;
+          return value;
         };
-        const formatter = new Intl.DateTimeFormat("de-DE", options);
-        return formatter.format(date);
-      }
+        const hist = chartPayload(await safeFetchJson('../api/getHistoricalChartData'));
+        if (generation !== chartRefreshGeneration) return;
+        const pred = chartPayload(await safeFetchJson('../api/getPredictionChartData'));
+        if (generation !== chartRefreshGeneration) return;
+        console.info('[IRRIGATION_TRACE] plot charts: completed', {
+          sensorPoints: hist?.timestamps?.length || 0,
+          predictionAvailable: Boolean(pred),
+          predictionPoints: pred?.timestamps?.length || 0,
+          thresholdMode: pred?.threshold_mode || hist?.threshold_mode,
+        });
+        // Only the newest refresh may publish series, units, metadata or warnings.
 
-      function fetchCurrentValues() {
-        fetch("../api/getValuesForDashboard")
-          .then((response) => response.json())
-          .then((dashboardData) => {
-            document.getElementById("temp-value").textContent = parseFloat(
-              dashboardData.temp_average
-            ).toFixed(2);
-            document.getElementById("tension-value").textContent = parseFloat(
-              dashboardData.moisture_average
-            ).toFixed(2);
-            document.getElementById("humidity-value").textContent = parseFloat(
-              dashboardData.vwc_average
-            ).toFixed(2);
-          })
-          .catch((error) => console.error("Error fetching data:", error));
-      }
-
-      function fetchHistoricalChartData() {
-        if (chartHist) {
-          chartHist.destroy();
+        const detectedUnit = pred?.unit || hist?.unit;
+        if (detectedUnit) {
+          currentTensionUnit = tensionUnitLabel(detectedUnit);
         }
 
-        fetch("../api/getHistoricalChartData")
-          .then((response) => response.json())
-          .then((chartData) => {
-            const chartContainer = document.getElementById("chart_hist");
-            if (chartData.available == false) {
-              chartContainer.innerHTML = "";
-              chartContainer.style.display = "none";
-            } else {
-              chartContainer.style.display = "block";
+        const histLabels = hist && hist.timestamps ? hist.timestamps.map(t => new Date(t).toLocaleString()) : [];
+        const predLabels = pred && pred.timestamps ? pred.timestamps.map(t => new Date(t).toLocaleString()) : [];
+        const histSeries = hist && hist.moistureSeries ? hist.moistureSeries : [];
+        const predSeries = pred && pred.moistureSeries ? pred.moistureSeries : [];
+        const chartMeta = pred?.available === false ? hist : (pred || hist);
 
-              const totalValues = chartData.timestamps.length;
-              if (totalValues > MaxValuesToBeDisplayed) {
-                const step = Math.ceil(totalValues / MaxValuesToBeDisplayed);
-                chartData.timestamps = chartData.timestamps.filter(
-                  (timestamp, index) => index % step === 0
-                );
-                chartData.temperatureSeries =
-                  chartData.temperatureSeries.filter(
-                    (value, index) => index % step === 0
-                  );
-                chartData.moistureSeries = chartData.moistureSeries.filter(
-                  (value, index) => index % step === 0
-                );
-              }
+        let chartError = null;
+        try {
+        if (histLabels.length || predLabels.length) {
+          if (typeof Chart === 'undefined') throw new Error('Chart library failed to load. Check JavaScript response headers.');
+          initForecastChart(histLabels, histSeries, predLabels, predSeries, hist, chartMeta);
+        } else {
+          if (forecastChart) forecastChart.destroy();
+          forecastChart = null;
+        }
+        } catch (error) {
+          chartError = error;
+          console.error('Forecast chart rendering failed', error);
+        }
+        const chartStatus = document.getElementById('chart-data-status');
+        if (chartStatus) chartStatus.textContent = chartError ? `Chart unavailable: ${chartError.message}` : hist && pred ? ''
+          : hist ? 'Forecast unavailable. Showing observations only.'
+          : pred ? 'Observations unavailable. Showing forecast only.'
+          : 'Chart data unavailable.';
 
-              const temperatureSeriesRounded = chartData.temperatureSeries.map(
-                (value) => parseFloat(value.toFixed(1))
-              );
-              const moistureSeriesRounded = chartData.moistureSeries.map(
-                (value) => parseFloat(value.toFixed(2))
-              );
-              const formattedTimestamps = chartData.timestamps.map(
-                (timestamp) => formatTimestamp(timestamp)
-              );
-
-              const options = {
-                chart: {
-                  type: "line",
-                  height: 300,
-                  toolbar: {
-                    show: true,
-                    tools: {
-                      download: true,
-                      selection: true,
-                      zoom: true,
-                      zoomin: true,
-                      zoomout: true,
-                      pan: true,
-                      reset: true,
-                    },
-                  },
-                  fontFamily: "Inter, sans-serif",
-                },
-                series: [
-                  {
-                    name: "Temperature in °C",
-                    data: temperatureSeriesRounded,
-                    color: "#3498db",
-                  },
-                  {
-                    name: chartData.unit,
-                    data: moistureSeriesRounded,
-                    color: "#2ecc71",
-                  },
-                ],
-                xaxis: {
-                  categories: formattedTimestamps,
-                  labels: {
-                    rotate: -45,
-                    minHeight: 40,
-                    style: {
-                      fontSize: "12px",
-                      fontFamily: "Inter, sans-serif",
-                    },
-                  },
-                },
-                yaxis: {
-                  labels: {
-                    style: {
-                      fontSize: "12px",
-                      fontFamily: "Inter, sans-serif",
-                    },
-                  },
-                },
-                stroke: {
-                  curve: "smooth",
-                  width: 2,
-                },
-                grid: {
-                  borderColor: "#f1f1f1",
-                },
-                legend: {
-                  position: "bottom",
-                  horizontalAlign: "center",
-                  fontFamily: "Inter, sans-serif",
-                },
-              };
-
-              document.getElementById("loading-indicator").style.display =
-                "none";
-              document.querySelector(".main-content").classList.add("loaded");
-
-              chartHist = new ApexCharts(
-                document.querySelector("#chart_hist"),
-                options
-              );
-              chartHist.render();
-            }
-          })
-          .catch((error) => console.error("Error fetching data:", error));
-      }
-      // TODO: keys are wrong, data missing
-      function fetchDatasetChartData() {
-        // Destroy existing chart instance
-        if (chartDataSet) {
-          chartDataSet.destroy();
+        const thresholdMode = chartMeta?.threshold_mode === 'dynamic'
+          ? 'dynamic'
+          : 'static';
+        const badge = document.getElementById('threshold-source-badge');
+        if (badge) {
+          badge.textContent = thresholdMode === 'dynamic'
+            ? 'Dynamic crop-stage trigger'
+            : chartMeta ? 'Static field trigger' : 'Threshold mode unavailable';
+          badge.classList.toggle('dynamic', thresholdMode === 'dynamic');
+          badge.classList.toggle('static', !!chartMeta && thresholdMode !== 'dynamic');
         }
 
-        fetch("../api/getDatasetChartData")
-          .then((response) => response.json())
-          .then((chartData) => {
-            const chartContainer = document.getElementById("chart_train_data");
-            if (chartData.model == false) {
-              chartContainer.innerHTML = ""; // Clears the chart div
-              chartContainer.style.display = "none"; // Hide the div
-            } else {
-              chartContainer.style.display = "block"; // Show it when there’s data
-              // Initialize variables outside the loop
-              var elementsToDisplay = [];
-              var formattedTimestamps;
-              const totalValues = chartData.timestamps.length;
-              const step = Math.ceil(totalValues / MaxValuesToBeDisplayed);
-
-              // Iterate through the keys in chartData
-              for (var key in chartData) {
-                if (chartData.hasOwnProperty(key)) {
-                  // Check the type for each element in the array
-                  var isNumberArray = chartData[key].every(
-                    (value) => typeof value === "number"
-                  );
-
-                  if (isNumberArray) {
-                    if (totalValues > MaxValuesToBeDisplayed) {
-                      chartData[key] = chartData[key].filter(
-                        (value, index) => index % step === 0
-                      );
-                    }
-                    // If all elements are numbers, push the series data
-                    elementsToDisplay.push({
-                      name: key,
-                      data: chartData[key].map((value) =>
-                        parseFloat(value.toFixed(2))
-                      ),
-                    });
-                  } else if (typeof chartData[key][0] === "string") {
-                    if (totalValues > MaxValuesToBeDisplayed) {
-                      chartData[key] = chartData[key].filter(
-                        (value, index) => index % step === 0
-                      );
-                    }
-                    formattedTimestamps = chartData.timestamps.map(
-                      (timestamp) => formatTimestamp(timestamp)
-                    );
-                  }
-                }
-              }
-
-              var options = {
-                chart: {
-                  type: "line",
-                  title: "All values of the dataset", // Set the title here
-                },
-                series: elementsToDisplay, // Use the prepared series data
-                xaxis: {
-                  categories: formattedTimestamps || [], // Use formattedTimestamps if available, otherwise an empty array
-                  labels: {
-                    rotate: -45,
-                    minHeight: 40,
-                  },
-                },
-              };
-
-              chartDataSet = new ApexCharts(
-                document.querySelector("#chart_train_data"),
-                options
-              );
-              chartDataSet.render();
-
-              // Hide some series after rendering
-              chartDataSet.hideSeries("hour");
-              chartDataSet.hideSeries("Cloudcover");
-              chartDataSet.hideSeries("Shortwave_Radiation");
-              chartDataSet.hideSeries("Soil_temperature_7-28");
-              chartDataSet.hideSeries("Soil_moisture_0-7");
-              chartDataSet.hideSeries("Et0_evapotranspiration");
-            }
-          })
-          .catch((error) => console.error("Error fetching data:", error));
-      }
-
-      // Fetch prediction chart data
-      function fetchPredictionChartData() {
-        // Destroy existing chart instance
-        if (chartPred) {
-          chartPred.destroy();
-          chartPred = null;
+        const phenoSource = document.getElementById('pheno-threshold-source');
+        if (phenoSource) {
+          phenoSource.textContent = thresholdMode === 'dynamic'
+            ? 'Dynamic crop-stage trigger'
+            : chartMeta ? 'Static field trigger' : 'Threshold mode unavailable';
+          phenoSource.classList.toggle('dynamic', thresholdMode === 'dynamic');
+          phenoSource.classList.toggle('static', !!chartMeta && thresholdMode !== 'dynamic');
         }
 
-        fetch("../api/getPredictionChartData")
-          .then((response) => response.json())
-          .then((chartData) => {
-            const chartContainer = document.getElementById("chart_pred");
-            chartContainer.innerHTML = ""; // Clears the chart div
-            if (chartData.model === false) {
-              chartContainer.style.display = "none"; // Hide the div
-              // highlight train
-              const trainButton = document.getElementById("train_btn");
-              trainButton.classList.add("highlight");
-              alert(
-                'Please start training by pressing the "Start Training" button.'
-              ); //TODO: this needs to be capsulated and also checked for training in progress REFINE!!!
+        const phenoThreshold = document.getElementById('pheno-threshold-value');
+        if (phenoThreshold) {
+          const thresholdRaw =
+            chartMeta?.threshold_cbar ?? chartMeta?.threshold_cbar_static;
+          const thresholdValue = thresholdRaw === null || thresholdRaw === undefined
+            ? NaN
+            : Number(thresholdRaw);
+          phenoThreshold.textContent = Number.isFinite(thresholdValue)
+            ? thresholdValue.toFixed(1)
+            : '--';
+        }
+
+
+      }
+
+      async function loadTopbar() {
+        const generation = ++topbarRefreshGeneration;
+        const plots = await safeFetchJson('../api/getPlots');
+        if (generation !== topbarRefreshGeneration) return null;
+        const farmReg = await safeFetchJson('../api/getFarmRegistry');
+        if (generation !== topbarRefreshGeneration) return null;
+        const configResponse = await safeFetchJson('../api/returnConfig');
+        if (generation !== topbarRefreshGeneration) return null;
+        const alert = await safeFetchJson('../api/getAlertStatus');
+        // Publish farm, plot, spatial metadata and alert as one current snapshot.
+        if (generation !== topbarRefreshGeneration) return null;
+        const activeConfig = configResponse?.data || {};
+        const currentPlot = parseInt(plots?.currentPlot, 10);
+        const currentPlotId = plots?.current_plot_id;
+        activeTrainingPlotId = currentPlotId || null;
+        const farms = Array.isArray(farmReg?.farms) ? farmReg.farms : [];
+        const plotRecord = Array.isArray(plots?.plots)
+          ? plots.plots.find((entry) => entry.plot_id === currentPlotId)
+          : null;
+        const plotName = plotRecord?.name || (Array.isArray(plots?.tabnames) && currentPlot > 0
+          ? plots.tabnames[currentPlot - 1]
+          : null);
+        const farm = farms.find((entry) => Array.isArray(entry.plot_ids)
+          && entry.plot_ids.includes(currentPlotId));
+        const el = document.getElementById('farmName');
+        const pageTitle = document.getElementById('pageTitle');
+        const pageFarmName = document.getElementById('pageFarmName');
+        const currentPage = document.body.dataset.page || 'dashboard';
+        const farmLabel = farm
+          ? `${farm.name || 'Farm'} · ${plotName || `Plot ${currentPlot}`}`
+          : (plotName || 'No farm configured');
+        if (el) {
+          el.textContent = farmLabel;
+        }
+        if (pageFarmName) pageFarmName.textContent = '';
+        if (pageTitle) {
+          const titles = { dashboard: 'Farm Overview', plot: 'Plot Overview', phenology: 'Growth & Water Demand' };
+          pageTitle.textContent = titles[currentPage] || 'Farm Overview';
+        }
+        const plotTitle = document.getElementById('selectedPlotTitle');
+        if (plotTitle) plotTitle.textContent = plotName || 'Plot details';
+        const gps = activeConfig.Gps_info || {};
+        const latitude = Number(gps.latitude ?? gps.lattitude);
+        const longitude = Number(gps.longitude);
+        const area = Number(activeConfig.Plot_area_m2);
+        const areaUnit = activeConfig.Plot_area_unit || 'm2';
+        const areaDivisors = {m2: 1, ha: 10000, acre: 4046.8564224};
+        const displayArea = area / (areaDivisors[areaUnit] || 1);
+        const areaLabels = {m2: 'm²', ha: 'ha', acre: 'acres'};
+        const locationMeta = document.getElementById('plot-location-meta');
+        const areaMeta = document.getElementById('plot-area-meta');
+        if (locationMeta) locationMeta.textContent = Number.isFinite(latitude) && Number.isFinite(longitude)
+          ? `Plot/EO reference point ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+          : 'Plot/EO reference point unavailable';
+        if (areaMeta) areaMeta.textContent = area > 0
+          ? `Area ${displayArea.toLocaleString(undefined, {maximumFractionDigits: 4})} ${areaLabels[areaUnit] || 'm²'}`
+          : 'Area not measured';
+        // Check alert status and update badge
+        const badge = document.getElementById('alertsBadge');
+        if (alert && alert.available === true) {
+          if (badge) { badge.style.display = 'inline-block'; badge.textContent = '1'; }
+        } else {
+          if (badge) badge.style.display = 'none';
+        }
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>'"]/g, (char) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+        })[char]);
+      }
+
+      function formatDashboardTime(value) {
+        if (!value) return 'Not forecast';
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
+      }
+
+      function renderFarmDashboard(data) {
+        const summary = data?.summary || {};
+        const setText = (id, value) => {
+          const node = document.getElementById(id);
+          if (node) node.textContent = value;
+        };
+        setText('farm-total-plots', summary.total_plots ?? '--');
+        setText('farm-attention-count', summary.plots_needing_attention ?? '--');
+        const plan = Array.isArray(data?.todays_plan) ? data.todays_plan : [];
+        const scheduled = plan.filter((item) => !['declined', 'failed'].includes(item.status));
+        setText('farm-scheduled-irrigations', scheduled.length);
+        setText('farm-scheduled-water', Number.isFinite(Number(summary.planned_water_m3))
+          ? `${Number(summary.planned_water_m3).toFixed(2)} m³ planned` : 'Amount unavailable');
+
+        const connectivity = document.getElementById('connectivity-notification');
+        if (connectivity) {
+          connectivity.classList.remove('visible');
+          connectivity.textContent = '';
+        }
+
+        const plots = Array.isArray(data?.plots) ? data.plots : [];
+        const plotContainer = document.getElementById('farm-plot-list');
+        if (plotContainer) {
+          plotContainer.innerHTML = plots.length ? plots.map((plot) => {
+            const farmName = data?.farm?.name || "";
+            const prefix = `${farmName} Plot `;
+            const rawName = plot.name || 'Unnamed plot';
+            const plotName = farmName && rawName.startsWith(prefix) && /^\d+$/.test(rawName.slice(prefix.length))
+              ? rawName.slice(farmName.length + 1) : rawName;
+            const margin = Number(plot.threshold_margin_cbar);
+            const marginText = Number.isFinite(margin)
+              ? (margin >= 0 ? `${margin.toFixed(1)} cbar remaining` : `${Math.abs(margin).toFixed(1)} cbar over threshold`)
+              : 'Threshold margin unavailable';
+            const urgency = String(plot.urgency || 'unknown').toLowerCase();
+            return `<button type="button" class="farm-plot-card urgency-${escapeHtml(urgency)}" onclick="switchDashboardPlot('${escapeHtml(plot.plot_id)}')">
+              <div class="farm-plot-main"><strong>${escapeHtml(plotName)}</strong><span>Farm: ${escapeHtml(farmName)}</span><span>${escapeHtml(plot.crop_type || '--')} · ${escapeHtml(plot.growth_stage || '--')}</span></div>
+              <div class="farm-plot-condition"><strong>${escapeHtml(plot.next_action || '')}</strong><span>${escapeHtml(marginText)} · ${escapeHtml(formatDashboardTime(plot.next_action_time))}</span></div>
+              <div class="farm-plot-meta"><span class="status-chip ${escapeHtml(urgency)}">${escapeHtml(urgency)}</span><span class="plot-open-hint">View plot →</span></div>
+            </button>`;
+          }).join('') : '<div class="dashboard-empty">No plots are configured for this farm.</div>';
+        }
+
+        const alerts = Array.isArray(data?.active_alerts) ? data.active_alerts : [];
+        const badge = document.getElementById('alertsBadge');
+        if (badge) {
+          badge.style.display = alerts.length ? 'inline-block' : 'none';
+          badge.textContent = String(alerts.length);
+        }
+      }
+
+      async function loadFarmDashboard() {
+        const generation = ++farmDashboardRefreshGeneration;
+        const data = await safeFetchJson('../api/farmDashboard');
+        if (generation !== farmDashboardRefreshGeneration) return null;
+        if (data) {
+          renderFarmDashboard(data, false);
+          return data;
+        }
+        renderFarmDashboard({});
+        return null;
+      }
+
+      async function switchDashboardPlot(plotId) {
+        try {
+          const response = await fetch('../api/setPlot', {method: 'POST', headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'},
+            body: `plot_id=${encodeURIComponent(plotId)}`});
+          if (!response.ok) throw new Error('Could not open this plot.');
+          navigateTo('plot');
+          await loadTopbar();
+        } catch (error) {
+          alert(error.message || 'Could not open this plot.');
+        }
+      }
+
+      function formatRange(start, end, digits = 0) {
+        const startMissing = start === null || start === undefined || start === '';
+        const endMissing = end === null || end === undefined || end === '';
+        const startNum = Number(start);
+        const endNum = Number(end);
+        const hasStart = !startMissing && Number.isFinite(startNum);
+        const hasEnd = !endMissing && Number.isFinite(endNum);
+        if (!hasStart && !hasEnd) return '--';
+        const format = (val) => digits > 0 ? val.toFixed(digits) : String(Math.round(val));
+        if (hasStart && !hasEnd) return `${format(startNum)}+`;
+        if (!hasStart && hasEnd) return `0-${format(endNum)}`;
+        return `${format(startNum)}-${format(endNum)}`;
+      }
+
+      async function loadPhenologySummary() {
+        console.info('[IRRIGATION_TRACE] phenology: requesting crop stage and dynamic threshold');
+        const generation = ++phenologyRefreshGeneration;
+        const pageTitle = document.getElementById('pageTitle');
+        const pageFarmName = document.getElementById('pageFarmName');
+        if (pageTitle && document.body.dataset.page === 'phenology') {
+          pageTitle.textContent = 'Growth & Water Demand';
+          setTimeout(() => {
+            pageTitle.textContent = 'Growth & Water Demand';
+          }, 0);
+        }
+        if (pageFarmName) {
+          pageFarmName.style.display = 'inline-flex';
+        }
+        const summary = await safeFetchJson('../api/getPhenologySummary');
+        console.info('[IRRIGATION_TRACE] phenology: completed', summary);
+        if (generation !== phenologyRefreshGeneration) return null;
+        const sourceEl = document.getElementById('pheno-threshold-source');
+        const valueEl = document.getElementById('pheno-threshold-value');
+        const mode = summary?.available ? summary.threshold_mode : null;
+        if (sourceEl) {
+          sourceEl.textContent = mode === 'dynamic' ? 'Dynamic crop-stage trigger'
+            : mode === 'static' ? 'Static field trigger' : 'Threshold unavailable';
+          sourceEl.classList.toggle('dynamic', mode === 'dynamic');
+          sourceEl.classList.toggle('static', mode === 'static');
+        }
+        if (valueEl) valueEl.textContent = summary?.available
+          && Number.isFinite(summary.threshold_active_cbar)
+          ? summary.threshold_active_cbar.toFixed(1) : '--';
+        const cropNameEl = document.getElementById('pheno-crop-name');
+        const dateLabelEl = document.getElementById('pheno-date-label');
+        const plantingEl = document.getElementById('pheno-planting-date');
+        const daysEl = document.getElementById('pheno-days');
+        const tableBody = document.getElementById('pheno-stage-table');
+        const thresholdNote = document.getElementById('pheno-threshold-note');
+
+        if (!summary || !summary.available) {
+          if (cropNameEl) cropNameEl.textContent = summary?.crop_type || 'Not specified';
+          if (dateLabelEl) dateLabelEl.textContent = 'Phenology reference';
+          if (plantingEl) plantingEl.textContent = 'Not available';
+          if (daysEl) daysEl.textContent = '--';
+          if (tableBody) {
+            tableBody.innerHTML = `<tr><td colspan="4">${escapeHtml(summary?.reason || 'No phenology data available.')}</td></tr>`;
+          }
+          return;
+        }
+
+        if (cropNameEl) cropNameEl.textContent = summary.crop_name || summary.crop_type || '--';
+        const referenceDate = summary.planting_date || summary.phenology_reference_date;
+        const referenceIsEO = summary.phenology_reference_source === 'eo_estimated_emergence';
+        if (dateLabelEl) dateLabelEl.textContent = referenceIsEO
+          ? 'EO-estimated emergence' : 'Planting date';
+        if (plantingEl) {
+          if (referenceDate) {
+            const planted = new Date(referenceDate);
+            plantingEl.textContent = Number.isNaN(planted.getTime())
+              ? referenceDate
+              : `${planted.toLocaleDateString()}${referenceIsEO ? ` (${summary.phenology_reference_confidence || 'estimated'})` : ''}`;
+          } else {
+            plantingEl.textContent = '--';
+          }
+        }
+        if (daysEl) {
+          if (referenceDate) {
+            const planted = new Date(referenceDate);
+            if (!Number.isNaN(planted.getTime())) {
+              const diffMs = (summary.evaluated_at ? Date.parse(summary.evaluated_at) : Date.now()) - planted.getTime();
+              const days = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+              daysEl.textContent = `${days} days${referenceIsEO ? ' since estimated emergence' : ''}`;
             } else {
-              chartContainer.style.display = "block"; // Show it when there’s data
-              // Format the data
-              const moistureSeriesRounded = chartData.moistureSeries.map(
-                (value) => parseFloat(value.toFixed(2))
-              );
-              let moistureSeriesVolRounded = null;
-              if (
-                chartData.kind === "tension" &&
-                Array.isArray(chartData.moistureSeriesVol)
-              ) {
-                moistureSeriesVolRounded = chartData.moistureSeriesVol.map(
-                  (value) => parseFloat(value.toFixed(4))
-                );
-              }
-              const formattedTimestamps = chartData.timestamps.map(
-                (timestamp) => formatTimestamp(timestamp)
-              );
-
-              // Initialize series visibility state TODO: check for capcitive
-              const seriesVisibility = {
-                "Moisture in cbar (Soil Tension)": true,
-                "Volumetric Water Content": false,
-              };
-
-              // Configure chart options
-              const options = {
-                chart: {
-                  type: "line",
-                  events: {
-                    render: function (chartContext, config) {
-                      // Make sure the series exists before calling hideSeries
-                      if (
-                        chartData.kind === "tension" &&
-                        moistureSeriesVolRounded
-                      ) {
-                        chartPred.hideSeries("Volumetric Water Content");
-                      }
-                    },
-                    legendClick: function (chartContext, seriesIndex) {
-                      const seriesName =
-                        chartContext.w.globals.seriesNames[seriesIndex];
-                      // Toggle visibility state for the clicked series
-                      seriesVisibility[seriesName] =
-                        !seriesVisibility[seriesName];
-
-                      // Determine the new annotations
-                      const annotations = seriesVisibility[
-                        "Moisture in cbar (Soil Tension)"
-                      ]
-                        ? getSoilTensionAnnotations(chartData)
-                        : [];
-
-                      // Additional annotations from backend, like
-                      const additionalAnnotations = seriesVisibility[
-                        "Moisture in cbar (Soil Tension)"
-                      ]
-                        ? chartData.annotations.yaxis
-                        : [];
-
-                      // Update the chart annotations
-                      chartContext.updateOptions({
-                        annotations: {
-                          yaxis: [...annotations, ...additionalAnnotations],
-                        },
-                      });
-                    },
-                  },
-                },
-                series: [
-                  {
-                    name: chartData.unit,
-                    data: moistureSeriesRounded,
-                  },
-                  ...(moistureSeriesVolRounded
-                    ? [
-                        {
-                          name: "Volumetric Water Content",
-                          data: moistureSeriesVolRounded,
-                        },
-                      ]
-                    : []),
-                ],
-                xaxis: {
-                  categories: formattedTimestamps,
-                  labels: {
-                    rotate: -45,
-                    minHeight: 40,
-                  },
-                },
-                yaxis: [
-                  {
-                    title: {
-                      text: chartData.unit,
-                    },
-                    labels: {
-                      formatter: function (val) {
-                        return typeof val === "number" && !isNaN(val)
-                          ? val.toFixed(1)
-                          : "";
-                      },
-                    },
-                    min: 0,
-                    max: Math.max(...moistureSeriesRounded),
-                  },
-                  ...(moistureSeriesVolRounded
-                    ? [
-                        {
-                          opposite: true,
-                          title: {
-                            text: "Volumetric Water Content",
-                          },
-                          labels: {
-                            formatter: function (val) {
-                              return typeof val === "number" && !isNaN(val)
-                                ? val.toFixed(2)
-                                : "";
-                            },
-                          },
-                          min: Math.min(...moistureSeriesVolRounded).toFixed(0),
-                          max: Math.max(...moistureSeriesVolRounded).toFixed(0),
-                        },
-                      ]
-                    : []),
-                ],
-                annotations: {
-                  yaxis: [
-                    ...(() => {
-                      if (chartData.kind === "tension") {
-                        // Combine both soil tension annotations and the other y-axis annotations
-                        const soilTensionAnnotations =
-                          getSoilTensionAnnotations(chartData);
-                        const additionalAnnotations = Array.isArray(
-                          chartData.annotations?.yaxis
-                        )
-                          ? chartData.annotations.yaxis
-                          : [];
-                        return [
-                          ...soilTensionAnnotations,
-                          ...additionalAnnotations,
-                        ];
-                      }
-                      // Return only the additional annotations if not tension
-                      return Array.isArray(chartData.annotations?.yaxis)
-                        ? chartData.annotations.yaxis
-                        : [];
-                    })(),
-                  ],
-                  xaxis: getMidnightAnnotations(chartData.timestamps), // Add midnight annotations here
-                  legend: {
-                    show: true, // Ensure the legend is always shown
-                  },
-                },
-              };
-
-              chartPred = new ApexCharts(
-                document.querySelector("#chart_pred"),
-                options
-              );
-              chartPred.render();
+              daysEl.textContent = '--';
             }
-          })
-          .catch((error) => console.error("Error fetching data:", error));
+          } else {
+            daysEl.textContent = '--';
+          }
+        }
+
+        setActiveGrowthStage(summary.current_stage || summary.growth_stage);
+        if (thresholdNote) thresholdNote.textContent = summary.threshold_mode === 'dynamic'
+          ? 'Stage-entry reference triggers calculated using current ET0. They change with weather; the active trigger reflects the current crop stage.' : '';
+
+        if (tableBody) {
+          const rows = Array.isArray(summary.stage_rows) ? summary.stage_rows : [];
+          if (!rows.length) {
+            tableBody.innerHTML = '<tr><td colspan="4">No crop-stage data available.</td></tr>';
+          } else {
+            tableBody.innerHTML = rows.map((row) => {
+              const gddRange = formatRange(row.gdd_start, row.gdd_end, 0);
+              const kcRange = formatRange(row.kc_start, row.kc_end, 2);
+              const trigger = row.threshold_cbar === null || row.threshold_cbar === undefined
+                ? NaN
+                : Number(row.threshold_cbar);
+              const triggerText = Number.isFinite(trigger)
+                ? `${trigger.toFixed(1)} cbar`
+                : (['fao56_root_zone_depletion', 'existing_soil_curve_crop_demand']
+                    .includes(row.threshold_source)
+                    ? 'Unavailable: weather or calibration missing'
+                    : row.threshold_source === 'inactive_season' ? 'Not applicable' : '--');
+              return `
+                <tr>
+                  <td>${row.stage || '--'}</td>
+                  <td>${gddRange}</td>
+                  <td>${kcRange}</td>
+                  <td>${triggerText}</td>
+                </tr>`;
+            }).join('');
+          }
+        }
       }
 
-      // Function to get midnight annotations
-      function getMidnightAnnotations(timestamps) {
-        days = 0;
-        return timestamps
-          .filter(
-            (timestamp) =>
-              new Date(timestamp).getHours() === 0 &&
-              new Date(timestamp).getMinutes() === 0
-          )
-          .map((midnight) => ({
-            x: formatTimestamp(midnight),
-            borderColor: "#FF5733", // Choose any color you like for midnight lines
-            strokeDashArray: 4, // Dashed lines
-          }));
-      }
+      const soilChartDecorations = {
+        id: 'soilChartDecorations',
+        beforeDraw(chart, args, options) {
+          const {ctx, chartArea, scales} = chart;
+          if (!chartArea || !scales.y || !options?.enabled) return;
+          const y = scales.y;
+          const refs = options.references || {};
+          const finite = value => Number.isFinite(Number(value));
+          const clamp = value => Math.max(y.min, Math.min(y.max, Number(value)));
+          const boundaries = [
+            {to: refs.fieldCapacityLower, color: 'rgba(191, 219, 254, .34)'},
+            {from: refs.fieldCapacityLower, to: refs.fieldCapacityUpper, color: 'rgba(187, 247, 208, .34)'},
+            {from: refs.fieldCapacityUpper, to: refs.permanentWiltingPoint, color: 'rgba(254, 215, 170, .32)'},
+            {from: refs.permanentWiltingPoint, to: y.max, color: 'rgba(254, 202, 202, .38)'},
+          ];
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(chartArea.left, chartArea.top, chartArea.width, chartArea.height);
+          ctx.clip();
+          boundaries.forEach(zone => {
+            const from = finite(zone.from) ? clamp(zone.from) : y.min;
+            const to = finite(zone.to) ? clamp(zone.to) : y.max;
+            if (!(to > from)) return;
+            const top = y.getPixelForValue(to);
+            const bottom = y.getPixelForValue(from);
+            ctx.fillStyle = zone.color;
+            ctx.fillRect(chartArea.left, top, chartArea.width, bottom - top);
+          });
+          ctx.restore();
+        },
+        afterDatasetsDraw(chart, args, options) {
+          const {ctx, chartArea, scales} = chart;
+          if (!chartArea || !scales.x || !scales.y || !options?.enabled) return;
+          const x = scales.x;
+          const y = scales.y;
+          const refs = options.references || {};
+          const finite = value => Number.isFinite(Number(value));
+          const label = (text, value, color = '#475569', background = 'rgba(255,255,255,.9)') => {
+            if (!finite(value) || Number(value) < y.min || Number(value) > y.max) return;
+            const py = y.getPixelForValue(Number(value));
+            ctx.save();
+            ctx.font = '600 11px system-ui, sans-serif';
+            const width = ctx.measureText(text).width + 10;
+            const height = 20;
+            const left = Math.max(chartArea.left + 4, chartArea.right - width - 6);
+            ctx.fillStyle = background;
+            ctx.fillRect(left, py - height / 2, width, height);
+            ctx.fillStyle = color;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, left + 5, py);
+            ctx.restore();
+          };
+          const rule = (value, color, dash = [5, 5], width = 1) => {
+            if (!finite(value) || Number(value) < y.min || Number(value) > y.max) return;
+            const py = y.getPixelForValue(Number(value));
+            ctx.save();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width;
+            ctx.setLineDash(dash);
+            ctx.beginPath();
+            ctx.moveTo(chartArea.left, py);
+            ctx.lineTo(chartArea.right, py);
+            ctx.stroke();
+            ctx.restore();
+          };
 
-      // Get active series dynamically
-      function getActiveSeries(chartContext) {
-        const activeSeries = [];
-        chartContext.w.globals.seriesNames.forEach((name, index) => {
-          // A series is active if its value is not null
-          if (chartContext.w.globals.series[index] !== null) {
-            activeSeries.push(name);
+          rule(refs.saturation, '#93c5fd', [], 1);
+          rule(refs.fieldCapacityLower, '#86efac', [], 1);
+          rule(refs.fieldCapacityUpper, '#fdba74', [], 1);
+          rule(refs.permanentWiltingPoint, '#fca5a5', [], 1);
+          label('Saturation', refs.saturation);
+          label('Field Capacity Lower', refs.fieldCapacityLower);
+          label('Field Capacity Higher', refs.fieldCapacityUpper);
+          label('Permanent Wilting Point', refs.permanentWiltingPoint);
+          if (finite(refs.activeThreshold)) {
+            label('Threshold for irrigation', refs.activeThreshold, '#fff', '#ff4560');
+          }
+
+          const labels = chart.data.labels || [];
+          let previousDay = null;
+          labels.forEach((value, index) => {
+            const parsed = new Date(value);
+            if (Number.isNaN(parsed.getTime())) return;
+            const day = `${parsed.getFullYear()}-${parsed.getMonth()}-${parsed.getDate()}`;
+            if (previousDay !== null && day !== previousDay) {
+              const px = x.getPixelForValue(index);
+              ctx.save();
+              ctx.strokeStyle = 'rgba(249, 115, 22, .55)';
+              ctx.lineWidth = 1;
+              ctx.setLineDash([5, 5]);
+              ctx.beginPath();
+              ctx.moveTo(px, chartArea.top);
+              ctx.lineTo(px, chartArea.bottom);
+              ctx.stroke();
+              ctx.restore();
+            }
+            previousDay = day;
+          });
+
+          const historyCount = Number(options.historyCount || 0);
+          if (historyCount > 0 && historyCount < labels.length) {
+            const leftPixel = x.getPixelForValue(historyCount - 1);
+            const rightPixel = x.getPixelForValue(historyCount);
+            const divider = (leftPixel + rightPixel) / 2;
+            ctx.save();
+            ctx.strokeStyle = '#64748b';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.moveTo(divider, chartArea.top);
+            ctx.lineTo(divider, chartArea.bottom);
+            ctx.stroke();
+            ctx.fillStyle = '#475569';
+            ctx.font = '600 11px system-ui, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText('Historical Data', (chartArea.left + divider) / 2, chartArea.bottom + 54);
+            ctx.fillText('Forecast Period', (divider + chartArea.right) / 2, chartArea.bottom + 54);
+            ctx.restore();
+          }
+        },
+      };
+
+      // Chart initializer styled after the original clear dual-axis forecast.
+      function initForecastChart(histLabels, histSeries, predLabels, predSeries, histMeta, predMeta) {
+        // Preserve the former five-argument entry point for embedded consumers.
+        if (predMeta === undefined) {
+          predMeta = histMeta;
+          histMeta = null;
+        }
+        try { if (forecastChart) forecastChart.destroy(); } catch(e){}
+        const ctx = document.getElementById('chart_forecast')?.getContext('2d');
+        if (!ctx) return;
+
+        const combinedLabels = histLabels.concat(predLabels);
+        const histData = histSeries.concat(predLabels.map(() => null));
+        const predData = histLabels.map((value, index) => index === histLabels.length - 1
+          ? histSeries[histSeries.length - 1] : null).concat(predSeries);
+        const datasets = [];
+        const cleanVwc = (values, expected) => Array.isArray(values) && values.length === expected
+          ? values.map(value => Number.isFinite(Number(value)) ? Number(value) : null)
+          : Array(expected).fill(null);
+        const histVwc = cleanVwc(histMeta?.moistureSeriesVol, histLabels.length);
+        const predVwc = cleanVwc(predMeta?.moistureSeriesVol, predLabels.length);
+        const hasVwc = histVwc.concat(predVwc).some(value => Number.isFinite(value));
+
+        if (predMeta && predMeta.kind === 'tension') {
+          const saturation = Number(predMeta.saturation);
+          const fcl = Number(predMeta.fieldCapacityLower);
+          const pwp = Number(predMeta.permanentWiltingPoint);
+          const thresholdMode = predMeta.threshold_mode === 'dynamic'
+            ? 'dynamic'
+            : 'static';
+          const activeThresholdRaw =
+            predMeta.threshold_cbar ?? predMeta.threshold_cbar_static;
+          const baselineThresholdRaw = predMeta.threshold_cbar_static;
+          const activeThreshold = activeThresholdRaw === null || activeThresholdRaw === undefined
+            ? NaN
+            : Number(activeThresholdRaw);
+          const baselineThreshold = baselineThresholdRaw === null || baselineThresholdRaw === undefined
+            ? NaN
+            : Number(baselineThresholdRaw);
+          const projectedThresholds = Array.isArray(predMeta.threshold_series)
+            ? predMeta.threshold_series.map((value) => {
+                if (value === null || value === undefined) return null;
+                const parsed = Number(value);
+                return Number.isFinite(parsed) ? parsed : null;
+              })
+            : [];
+
+          if (thresholdMode === 'dynamic' && Number.isFinite(activeThreshold)) {
+            const dynamicValues = projectedThresholds.length === predLabels.length
+              ? projectedThresholds.map(value => Number.isFinite(value) ? value : activeThreshold)
+              : predLabels.map(() => activeThreshold);
+            const dynamicData = predLabels.length
+              ? histLabels.map(() => null).concat(dynamicValues)
+              : combinedLabels.map(() => activeThreshold);
+            datasets.push({
+              label: 'Dynamic forecast trigger',
+              data: dynamicData,
+              borderColor: '#ff4560',
+              borderDash: [4, 4],
+              borderWidth: 2,
+              pointRadius: 0,
+              fill: false,
+              yAxisID: 'y',
+            });
+          } else if (thresholdMode !== 'dynamic' && Number.isFinite(activeThreshold)) {
+            datasets.push({
+              label: 'Static field trigger',
+              data: combinedLabels.map(() => activeThreshold),
+              borderColor: '#ff4560',
+              borderDash: [],
+              borderWidth: 2,
+              pointRadius: 0,
+              fill: false,
+              yAxisID: 'y',
+            });
+          }
+          // The configured static value remains a backend safety fallback,
+          // but it is not plotted or labelled as the active trigger while the
+          // dynamic crop/ETc threshold is available.
+        }
+
+        datasets.push(
+          { label:'Observed', data: histData, borderColor:'#3b82b6', borderWidth:3,
+            pointRadius:0, pointHoverRadius:4, tension:0.2, yAxisID:'y' },
+          { label:'Forecast', data: predData, borderColor:'#3b82b6', borderDash:[7,5],
+            borderWidth:3, pointRadius:0, pointHoverRadius:4, tension:0.2, yAxisID:'y' }
+        );
+        if (hasVwc) {
+          datasets.push(
+            { label:'Historical VWC', data: histVwc.concat(predLabels.map(() => null)), borderColor:'#34d399',
+              borderWidth:3, pointRadius:0, pointHoverRadius:4, tension:0.25, yAxisID:'vwc' },
+            { label:'Forecast VWC', data: histLabels.map((value, index) => index === histLabels.length - 1
+                ? histVwc[histVwc.length - 1] : null).concat(predVwc), borderColor:'#2dd4bf',
+              borderDash:[7,5], borderWidth:3, pointRadius:0, pointHoverRadius:4,
+              tension:0.25, yAxisID:'vwc' }
+          );
+        }
+
+        const referenceMeta = predMeta || histMeta || {};
+        const activeThreshold = Number(referenceMeta.threshold_cbar ?? referenceMeta.threshold_cbar_static);
+
+        forecastChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: combinedLabels,
+            datasets,
+          },
+          plugins: [soilChartDecorations],
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {mode:'index', intersect:false},
+            layout: {padding: {top:8, right:8, bottom:70, left:4}},
+            plugins: {
+              legend: {display:false},
+              tooltip: {
+                backgroundColor:'rgba(15, 23, 42, .92)',
+                padding:10,
+                callbacks: {
+                  label: context => `${context.dataset.label}: ${Number(context.parsed.y).toFixed(
+                    context.dataset.yAxisID === 'vwc' ? 3 : 1)}`,
+                },
+              },
+              soilChartDecorations: {
+                enabled: predMeta?.kind === 'tension' || histMeta?.kind === 'tension',
+                historyCount: histLabels.length,
+                references: {
+                  saturation: Number(referenceMeta.saturation),
+                  fieldCapacityLower: Number(referenceMeta.fieldCapacityLower),
+                  fieldCapacityUpper: Number(referenceMeta.fieldCapacityUpper),
+                  permanentWiltingPoint: Number(referenceMeta.permanentWiltingPoint),
+                  activeThreshold,
+                },
+              },
+            },
+            scales: {
+              x: {
+                grid:{display:false},
+                ticks:{autoSkip:true, maxTicksLimit:12, minRotation:48, maxRotation:48,
+                  color:'#475569', font:{size:10}, padding:6},
+              },
+              y: {
+                beginAtZero:true,
+                grid:{color:'rgba(148, 163, 184, .24)'},
+                border:{display:false},
+                ticks:{color:'#475569', precision:1, maxTicksLimit:9},
+                title:{display:true, text:`Moisture in ${currentTensionUnit || 'cbar'} (Soil Tension)`,
+                  color:'#334155', font:{weight:'600'}},
+              },
+              vwc: {
+                display:hasVwc,
+                position:'right',
+                beginAtZero:true,
+                grid:{drawOnChartArea:false},
+                border:{display:false},
+                ticks:{color:'#475569', maxTicksLimit:9,
+                  callback:value => Number(value).toFixed(2)},
+                title:{display:hasVwc, text:'Volumetric Water Content', color:'#334155',
+                  font:{weight:'600'}},
+              },
+            }
           }
         });
-        return activeSeries;
       }
 
-      // Initial annotations function
-      function getInitialAnnotations(chartData) {
-        if (chartData.kind === "tension") {
-          return getSoilTensionAnnotations(chartData);
+      // Navigation and UI wiring
+      function navigateTo(page, el) {
+        if (page === 'settings') {
+          window.location.href = `settings.html${window.location.search}`;
+          return;
         }
-        return [];
-      }
-
-      // Function to get annotations for soil tension with colored areas
-      function getSoilTensionAnnotations(chartData) {
-        return [
-          // Area between Saturation and Field Capacity Lower
-          {
-            y: chartData.fieldCapacityLower,
-            borderColor: "transparent",
-            label: {
-              text: "Saturation",
-              style: {
-                fontSize: "12px",
-              },
-              position: "right", // Align to the right
-              offsetY: 50, // Vertical offset for middle alignment
-              offsetX: 0, // Horizontal offset for right alignment
-            },
-            offsetX: 0,
-            offsetY: 0,
-            shape: "rect",
-            x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-            fillColor: "rgba(173, 216, 255, 0.5)", // Color for this area (light blue)
-            y2: chartData.saturation, // Ending y value to create the filled area
-          },
-          // Area between Field Capacity Lower and Field Capacity Upper
-          {
-            y: chartData.fieldCapacityUpper,
-            borderColor: "transparent",
-            label: {
-              text: "Field Capacity Lower",
-              style: {
-                fontSize: "12px",
-              },
-              position: "right", // Align to the right
-              offsetY: 50, // Vertical offset for middle alignment
-              offsetX: 0, // Horizontal offset for right alignment
-            },
-            offsetX: 0,
-            offsetY: 0,
-            shape: "rect",
-            x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-            fillColor: "rgba(144, 238, 144, 0.5)", // Color for this area (light green)
-            y2: chartData.fieldCapacityLower, // Ending y value to create the filled area
-          },
-          {
-            y: chartData.permanentWiltingPoint,
-            borderColor: "transparent",
-            label: {
-              text: "Field Capacity Higher",
-              style: {
-                fontSize: "12px",
-              },
-              position: "right", // Align to the right
-              offsetY: 50, // Vertical offset for middle alignment
-              offsetX: 0, // Horizontal offset for right alignment
-            },
-            offsetX: 0,
-            offsetY: 0,
-            shape: "rect",
-            x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-            fillColor: "rgba(255, 200, 124, 0.5)", // Color for this area (light orange)
-            y2: chartData.fieldCapacityUpper, // Ending y value to create the filled area
-          },
-          {
-            y: Math.max(...chartData.moistureSeries).toFixed(0),
-            borderColor: "transparent",
-            label: {
-              text: "Permanent Wilting Point",
-              style: {
-                fontSize: "12px",
-              },
-              position: "right", // Align to the right
-              offsetY: 50, // Vertical offset for middle alignment
-              offsetX: 0, // Horizontal offset for right alignment
-            },
-            offsetX: 0,
-            offsetY: 0,
-            shape: "rect",
-            x: chartData.timestamps.length - 1, // Rightmost position to cover the area
-            fillColor: "rgba(255, 182, 193, 0.5)", // Color for this area (light red)
-            y2: chartData.permanentWiltingPoint, // Ending y value to create the filled area
-          },
-        ];
+        document.body.dataset.page = page;
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        const target = document.getElementById('page-' + page);
+        if (target) target.classList.add('active');
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.querySelectorAll(`.nav-item[data-page="${page}"]`).forEach(n => n.classList.add('active'));
+        document.querySelectorAll('[data-plot-view]').forEach((button) => {
+          button.classList.toggle('active', button.dataset.plotView === page);
+        });
+        const titles = {dashboard:'Farm Overview', plot:'Plot Overview', phenology:'Growth & Water Demand', settings:'Settings'};
+        const pageTitle = document.getElementById('pageTitle');
+        if (pageTitle) {
+          pageTitle.textContent = titles[page] || '';
+          setTimeout(() => {
+            pageTitle.textContent = titles[page] || '';
+          }, 0);
+        }
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${page}`);
+        if (page === 'dashboard') setTimeout(() => {
+          Promise.allSettled([loadFarmDashboard(), loadWeatherForecast()]);
+        }, 0);
+        if (page === 'plot') setTimeout(() => {
+          Promise.allSettled([updateMetrics(), fetchIrrigationRecommendation(), loadCharts(), fetchThreshold(), loadEOObservationTrace()]);
+        }, 0);
+        if (page === 'phenology') setTimeout(() => {
+          Promise.allSettled([loadPhenologySummary(), fetchIrrigationRecommendation(), loadEOObservationTrace()]);
+        }, 0);
       }
 
       function fetchThreshold() {
-        fetch("../api/getThreshold")
-          .then((response) => response.json())
+        const generation = ++thresholdRefreshGeneration;
+        return fetch("../api/getThreshold")
+          .then((response) => {
+            if (!response.ok) throw new Error('Threshold request failed');
+            return response.json();
+          })
           .then((timestamp_data) => {
-            if (timestamp_data.threshold == false) {
-              console.log(
-                "No timestamp, when threshold is reached, could be fetched from backend."
-              );
-              document.getElementById("timestamp_txt").innerHTML =
-                "The threshold is not reached in the current forecast horizon.";
+            if (generation !== thresholdRefreshGeneration) return;
+            if (!timestamp_data || typeof timestamp_data !== 'object' || Array.isArray(timestamp_data)) {
+              throw new Error('Invalid threshold response');
+            }
+            if (timestamp_data.threshold === false) {
+              document.getElementById("timestamp_txt").textContent =
+                timestamp_data.available === false
+                  ? "No forecast available yet. Train this plot to evaluate the threshold."
+                  : "The threshold is not reached in the current forecast horizon.";
             } else {
-              document.getElementById("timestamp_txt").innerHTML =
-                "The threshold will be reached on " + timestamp_data.timestamp;
+              // The backend's crossing response contains a timestamp without
+              // a threshold flag. Do not turn absent/invalid data into a forecast.
+              if ((timestamp_data.threshold !== undefined && timestamp_data.threshold !== true)
+                  || typeof timestamp_data.timestamp !== 'string'
+                  || !timestamp_data.timestamp.trim()
+                  || !Number.isFinite(Date.parse(timestamp_data.timestamp))) {
+                throw new Error('Invalid threshold timestamp');
+              }
+              document.getElementById("timestamp_txt").textContent =
+                "The threshold is forecast to be reached " + formatDashboardTime(timestamp_data.timestamp) + ".";
+            }
+          })
+          .catch((error) => {
+            if (generation !== thresholdRefreshGeneration) return;
+            console.error("Error fetching threshold:", error);
+            const timestampTxt = document.getElementById("timestamp_txt");
+            if (timestampTxt) {
+              timestampTxt.textContent = "Threshold data unavailable.";
             }
           });
       }
 
-      function irrigateManually() {
-        const inputElement = document.getElementById("irrigation_value_form");
-        const amount = parseFloat(inputElement.value);
+      function fetchIrrigationRecommendation() {
+        const generation = ++recommendationRefreshGeneration;
+        return fetch("../api/getIrrigationRecommendation")
+          .then((response) => response.json())
+          .then((data) => {
+            // The recommendation is a single UI snapshot. A response superseded
+            // while in flight must not publish any part of its state.
+            if (generation !== recommendationRefreshGeneration) return null;
+            const note = document.getElementById("irrigation-recommendation");
+            const pumpInput = document.getElementById("irrigation_value_form");
+            const scheduleButton = document.getElementById("schedule_irrigation");
+            const ndviEl = document.getElementById("sat-ndvi-value");
+            const ndreEl = document.getElementById("sat-ndre-value");
+            const ageEl = document.getElementById("sat-age-value");
+            const stalenessBanner = document.getElementById("data-staleness-notification");
+            const phenoStageEl = document.getElementById("pheno-stage");
+            const phenoGddEl = document.getElementById("pheno-gdd");
+            const phenoKcEl = document.getElementById("pheno-kc");
+            const phenoThresholdValue = document.getElementById("pheno-threshold-value");
+            const phenoEtcEl = document.getElementById("pheno-etc");
+            const summaryThreshold = document.getElementById("summary-threshold");
+            const adviceVolume = document.getElementById("advice-volume");
+            const adviceVolumeBasis = document.getElementById("advice-volume-basis");
+            const adviceTime = document.getElementById("advice-time");
+            const adviceTimeBasis = document.getElementById("advice-time-basis");
+            const adviceMode = document.getElementById("advice-mode");
+            const adviceModeBasis = document.getElementById("advice-mode-basis");
+            const actionTitle = document.getElementById("plot-action-title");
+            const decisionCard = document.getElementById("plot-decision-card");
+            const decisionCopy = document.getElementById("plot-decision-copy");
+            const waterGrid = document.getElementById("plot-water-grid");
+            const cropMeta = document.getElementById("plot-crop-meta");
+            const stageMeta = document.getElementById("plot-stage-meta");
+            const asNumber = (value) => value === null || value === undefined ? NaN : Number(value);
 
-        if (!isNaN(amount)) {
-          fetch(`../api/irrigateManually?amount=${amount}`)
-            .then((response) => response.text())
-            .then((data) => {
-              const dataObject = JSON.parse(data);
-              if (dataObject.status == "success") {
-                alert(
-                  "Manual Irrigation was scheduled, will be performed within the next uplink cycle. Do not press this button again until irrigation is completed."
-                );
-              } else {
-                alert(
-                  "Cannot schedule irrigation, see console for more info! Error:",
-                  data
-                );
+            if (!data.available) {
+              if (decisionCard) decisionCard.hidden = true;
+              if (decisionCopy) decisionCopy.hidden = true;
+              if (waterGrid) waterGrid.hidden = true;
+              const unavailableCrop = data.crop || {};
+              const unavailableCondition = data.condition || {};
+              const configuredThreshold = asNumber(unavailableCondition.threshold_cbar);
+              const reason = data.reason || "Irrigation recommendation unavailable.";
+              note.textContent = reason.startsWith('Planting date is not available.') ? '' : reason;
+              if (scheduleButton) scheduleButton.disabled = true;
+              if (ndviEl) ndviEl.textContent = "--";
+              if (ndreEl) ndreEl.textContent = "--";
+              if (ageEl) ageEl.textContent = "--";
+              if (phenoStageEl) phenoStageEl.textContent = "--";
+              if (phenoGddEl) phenoGddEl.textContent = "--";
+              if (phenoKcEl) phenoKcEl.textContent = "--";
+              if (summaryThreshold) {
+                summaryThreshold.textContent = Number.isFinite(configuredThreshold)
+                  ? `${configuredThreshold.toFixed(1)} cbar`
+                  : "--";
               }
-              console.log(data);
-            })
-            .catch((error) => {
-              console.error("Error:", error);
-              alert("An error occurred during the request. Please try again.");
-            });
-        } else {
-          alert("First type a valid amount in m³ to be irrigated!(min 0.01m³=10l)");
+              if (phenoEtcEl) phenoEtcEl.textContent = "--";
+              if (adviceVolume) adviceVolume.textContent = "--";
+              if (adviceVolumeBasis) adviceVolumeBasis.textContent = "Plot area and complete weather data are required to calculate volume";
+              if (adviceTime) adviceTime.textContent = "Unavailable";
+              if (adviceTimeBasis) adviceTimeBasis.textContent = "No recommendation time is available";
+              if (adviceMode) adviceMode.textContent = "Not configured";
+              if (adviceModeBasis) adviceModeBasis.textContent = "Choose a mode in Settings";
+              if (actionTitle) actionTitle.textContent = data.model_forecast_available
+                ? "Tension forecast available"
+                : "Recommendation unavailable";
+              if (cropMeta) {
+                const cropLabel = unavailableCrop.crop_name
+                  || unavailableCrop.type
+                  || data.crop_type;
+                cropMeta.textContent = !cropLabel
+                  ? "--"
+                  : cropLabel;
+              }
+              if (stageMeta) {
+                stageMeta.textContent = unavailableCrop.current_stage
+                  || data.growth_stage
+                  || "--";
+              }
+              if (stalenessBanner) {
+                stalenessBanner.classList.remove("visible");
+                stalenessBanner.textContent = "";
+              }
+              return data;
+            }
+
+            if (decisionCard) decisionCard.hidden = false;
+            if (decisionCopy) decisionCopy.hidden = false;
+            if (waterGrid) waterGrid.hidden = false;
+
+            const action = data.action || {};
+            const condition = data.condition || {};
+            const crop = data.crop || {};
+            const water = data.water || {};
+            const weather = data.weather || {};
+            const satellite = data.satellite || {};
+            const freshness = data.freshness || {};
+            const timing = data.timing || {};
+            const volumeM3 = asNumber(water.recommended_volume_m3);
+            const calculatedRequirementM3 = asNumber(
+              water.calculated_requirement_volume_m3);
+            const appliedSinceCalculationM3 = asNumber(
+              water.applied_since_previous_calculation_m3);
+            const actuatorBased = action.advisory_only === false;
+            const etcDailyValue = asNumber(weather.etc_daily_mm);
+            const satNdvi = satellite.ndvi;
+            const satNdre = satellite.ndre;
+            const satAge = satellite.source_age_hours;
+            const weatherAge = weather.age_hours;
+            const staleSources = Array.isArray(freshness.stale_sources)
+              ? freshness.stale_sources
+              : [];
+            const staleWeather = staleSources.includes("weather");
+            const staleSatellite = staleSources.includes("satellite");
+            const growthStage = crop.current_stage;
+            const gddCumulative = crop.gdd_cumulative;
+            const kcValue = crop.kc;
+            const thresholdCbar = asNumber(condition.threshold_cbar);
+            const irrigationNeeded = action.should_irrigate === true;
+            const farmerReason = ["threshold_exceeded", "at_threshold"].includes(condition.status)
+              ? "The soil has reached the irrigation trigger."
+              : "The soil is expected to become too dry.";
+            const modeDetails = {
+              automatic: ["Full-auto", "The system starts and stops irrigation"],
+              approval_required: ["Semi-auto", "You turn irrigation on and off"],
+              manual: ["Semi-auto", "You turn irrigation on and off"],
+              advisory_only: ["Off", "No hardware commands"],
+            };
+            const configuredMode = modeDetails[action.mode]
+              || ["Not configured", "Choose a mode in Settings"];
+            const formatIrrigationTime = (value) => {
+              const parsed = new Date(value);
+              if (!value || Number.isNaN(parsed.getTime())) return null;
+              const today = new Date();
+              const tomorrow = new Date(today);
+              tomorrow.setDate(today.getDate() + 1);
+              const sameDate = (left, right) => left.getFullYear() === right.getFullYear()
+                && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
+              const clock = parsed.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+              if (sameDate(parsed, today)) return `Today, ${clock}`;
+              if (sameDate(parsed, tomorrow)) return `Tomorrow, ${clock}`;
+              return `${parsed.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock}`;
+            };
+            const recommendedTime = formatIrrigationTime(timing.first_breach_timestamp);
+            const actionHeading = !irrigationNeeded
+              ? "No irrigation needed today"
+              : recommendedTime?.startsWith("Tomorrow")
+                ? "Irrigate by tomorrow"
+                : recommendedTime && !recommendedTime.startsWith("Today")
+                  ? "Irrigation needed"
+                  : "Irrigate today";
+
+            currentIrrigationActuatorBased = actuatorBased;
+            if (actionTitle) actionTitle.textContent = actionHeading;
+            if (cropMeta) cropMeta.textContent = crop.crop_name || crop.crop_type || "--";
+            if (stageMeta) stageMeta.textContent = growthStage || "--";
+            setPumpActuatorVisibility(actuatorBased, action.mode);
+            const pumpRecommended = document.getElementById('pump-recommended-amount');
+            if (pumpRecommended) pumpRecommended.textContent =
+              Number.isFinite(volumeM3) && volumeM3 > 0
+                ? `${volumeM3.toFixed(2)} m³`
+                : '--';
+            if (scheduleButton) {
+              scheduleButton.textContent = action.mode === "approval_required"
+                ? "Request Irrigation Approval"
+                : "Schedule Irrigation";
+            }
+
+            if (actuatorBased) {
+              if (scheduleButton) scheduleButton.disabled = false;
+              if (pumpInput && !Number.isNaN(volumeM3) && volumeM3 > 0) {
+                pumpInput.value = volumeM3.toFixed(2);
+              }
+              note.textContent = `${farmerReason} The displayed volume is calculated from crop demand, effective rain, efficiency, and plot area.`;
+            } else {
+              if (scheduleButton) scheduleButton.disabled = true;
+              if (pumpInput) pumpInput.value = "0.00";
+              note.textContent = irrigationNeeded
+                ? `${farmerReason} The calculated amount is shown below for manual application.`
+                : `No irrigation is needed today. ${condition.message || "The crop water need and expected rain have been considered."}`;
+            }
+
+            if (ndviEl) {
+              ndviEl.textContent =
+                typeof satNdvi === "number" ? satNdvi.toFixed(3) : "--";
+            }
+            if (ndreEl) {
+              ndreEl.textContent =
+                typeof satNdre === "number" ? satNdre.toFixed(3) : "--";
+            }
+            if (ageEl) {
+              ageEl.textContent =
+                typeof satAge === "number" ? `${satAge.toFixed(1)} h` : "--";
+            }
+
+            if (phenoStageEl) {
+              phenoStageEl.textContent = growthStage || "--";
+            }
+            if (phenoGddEl) {
+              phenoGddEl.textContent =
+                typeof gddCumulative === "number" ? gddCumulative.toFixed(1) : "--";
+            }
+            if (phenoKcEl) {
+              phenoKcEl.textContent =
+                typeof kcValue === "number" ? kcValue.toFixed(3) : "--";
+            }
+            if (phenoThresholdValue) {
+              phenoThresholdValue.textContent = Number.isFinite(thresholdCbar)
+                ? thresholdCbar.toFixed(1)
+                : "--";
+            }
+            if (phenoEtcEl) {
+              const etcDaily = asNumber(weather.etc_daily_mm);
+              phenoEtcEl.textContent = Number.isFinite(etcDaily) ? `${etcDaily.toFixed(1)} mm` : "--";
+            }
+
+            if (summaryThreshold) {
+              summaryThreshold.textContent = Number.isFinite(thresholdCbar)
+                ? `${thresholdCbar.toFixed(1)} cbar`
+                : "--";
+            }
+
+            setActiveGrowthStage(growthStage);
+
+            if (adviceVolume) {
+              adviceVolume.textContent = Number.isFinite(volumeM3)
+                ? `${Math.round(volumeM3 * 1000).toLocaleString()} litres`
+                : "Amount unavailable";
+            }
+            if (adviceVolumeBasis) {
+              if (!irrigationNeeded && Number.isFinite(volumeM3)) {
+                adviceVolumeBasis.textContent = (
+                  Number.isFinite(appliedSinceCalculationM3)
+                  && appliedSinceCalculationM3 > 0
+                  && Number.isFinite(calculatedRequirementM3)
+                  && appliedSinceCalculationM3 >= calculatedRequirementM3
+                )
+                  ? "Recorded irrigation already covers this calculated requirement."
+                  : "Soil conditions do not call for irrigation now.";
+              } else if (Number.isFinite(volumeM3)) {
+                const requirement = water.outlook?.requirement || {};
+                const net = asNumber(requirement.remaining_net_irrigation_mm);
+                const remainingGross = asNumber(
+                  requirement.remaining_gross_irrigation_mm);
+                const appliedText = Number.isFinite(appliedSinceCalculationM3)
+                  && appliedSinceCalculationM3 > 0
+                  ? ` ${Math.round(appliedSinceCalculationM3 * 1000).toLocaleString()} litres already recorded as applied since the previous calculation.`
+                  : "";
+                adviceVolumeBasis.textContent = Number.isFinite(net) && Number.isFinite(remainingGross)
+                  ? `${net.toFixed(1)} mm net demand / ${remainingGross.toFixed(1)} mm gross remaining.${appliedText}`
+                  : `${volumeM3.toFixed(2)} m³ remaining crop requirement.${appliedText}`;
+              } else {
+                adviceVolumeBasis.textContent = "Volume needs plot area plus complete ET₀ and rainfall forecasts";
+              }
+            }
+            if (adviceTime) {
+              adviceTime.textContent = irrigationNeeded ? (recommendedTime || "Today") : "Not needed";
+            }
+            if (adviceTimeBasis) {
+              adviceTimeBasis.textContent = irrigationNeeded
+                ? (recommendedTime ? "Irrigate before the soil becomes too dry" : "Exact time is not available")
+                : "No irrigation is recommended today";
+            }
+            if (adviceMode) adviceMode.textContent = configuredMode[0];
+            if (adviceModeBasis) adviceModeBasis.textContent = configuredMode[1];
+
+            syncIrrigationScheduleState();
+
+            return data;
+          })
+          .catch((error) => {
+            console.error("Error fetching irrigation recommendation:", error);
+            const actionTitle = document.getElementById("plot-action-title");
+            const note = document.getElementById("irrigation-recommendation");
+            const decisionCard = document.getElementById("plot-decision-card");
+            const decisionCopy = document.getElementById("plot-decision-copy");
+            const waterGrid = document.getElementById("plot-water-grid");
+            if (decisionCard) decisionCard.hidden = true;
+            if (decisionCopy) decisionCopy.hidden = true;
+            if (waterGrid) waterGrid.hidden = true;
+            if (actionTitle) actionTitle.textContent = "Recommendation unavailable";
+            if (note) note.textContent = "The recommendation response could not be loaded.";
+          });
+      }
+
+      async function loadWeatherForecast() {
+        console.info('[IRRIGATION_TRACE] weather forecast: request started');
+        const generation = ++weatherRefreshGeneration;
+        const forecast = await safeFetchJson('../api/getWeatherForecast');
+        console.info('[IRRIGATION_TRACE] weather forecast: request completed', forecast);
+        if (generation !== weatherRefreshGeneration) return null;
+        const container = document.getElementById('weather-forecast-grid');
+        const panel = document.getElementById('farm-weather-forecast');
+        if (!container) return;
+
+        if (forecast?.reason === 'configuration_required') {
+          container.replaceChildren();
+          if (panel) panel.hidden = false;
+          return forecast;
         }
+        if (panel) panel.hidden = false;
+
+        if (!forecast || !Array.isArray(forecast.days)) {
+          container.innerHTML = '<div class="weather-empty">No forecast data.</div>';
+          return;
+        }
+
+        const today = forecast.today || forecast.days[0] || {};
+        const todayMin = Number(today.temperature_min_c);
+        const todayMax = Number(today.temperature_max_c);
+        const todayRain = Number(today.rain_mm);
+        container.innerHTML = forecast.days.map((day, index) => {
+          const numberOrNaN = (value) => value === null || value === undefined ? NaN : Number(value);
+          const parsedDate = day.date ? new Date(`${day.date}T12:00:00`) : null;
+          const label = index === 0 ? 'Today' : index === 1 ? 'Tomorrow'
+            : parsedDate && !Number.isNaN(parsedDate.getTime())
+              ? parsedDate.toLocaleDateString(undefined, {weekday: 'short'})
+              : day.label || `+${index} days`;
+          const rain = numberOrNaN(day.rain_mm);
+          const tempMin = numberOrNaN(day.temperature_min_c);
+          const tempMax = numberOrNaN(day.temperature_max_c);
+          const humidity = numberOrNaN(day.humidity_percent);
+          const wind = numberOrNaN(day.wind_speed);
+          const iconKey = String(day.icon || '').toLowerCase();
+          const icon = iconKey.includes('rain') ? '🌧' : iconKey.includes('sun') ? '☀' : iconKey.includes('cloud') ? '⛅' : '🌤';
+          return `
+            <div class="weather-card">
+              <span class="weather-icon" aria-hidden="true">${icon}</span>
+              <div class="weather-label">${escapeHtml(label)}</div>
+              <div class="weather-amount">${Number.isFinite(tempMin) && Number.isFinite(tempMax) ? `${tempMin.toFixed(0)}–${tempMax.toFixed(0)} °C` : '--'}</div>
+              <div class="weather-detail">Rain total ${Number.isFinite(rain) ? rain.toFixed(1) : '--'} mm</div>
+              <div class="weather-detail">Avg humidity ${Number.isFinite(humidity) ? humidity.toFixed(1) : '--'}%</div>
+              <div class="weather-detail">Avg wind ${Number.isFinite(wind) ? wind.toFixed(1) : '--'} km/h</div>
+            </div>`;
+        }).join('');
+      }
+
+      async function loadEOObservationTrace() {
+        console.info('[IRRIGATION_TRACE] EO observation: request started');
+        const observation = await safeFetchJson('../api/getEOObservation');
+        console.info('[IRRIGATION_TRACE] EO observation: request completed', observation);
+        return observation;
+      }
+
+      function setActiveGrowthStage(stageLabel) {
+        if (!stageLabel) return;
+        const normalized = String(stageLabel).toLowerCase();
+        const aliases = {
+          'pre-emergence': ['emergence'],
+          'development': ['vegetative'],
+          'mid-season': ['flowering'],
+          'late-season': ['grain fill'],
+          'post-maturity': ['maturity'],
+        };
+        const tokens = [normalized];
+        Object.entries(aliases).forEach(([key, values]) => {
+          if (normalized.includes(key)) {
+            tokens.push(...values);
+          }
+        });
+
+        const nodes = document.querySelectorAll('.growth-node');
+        nodes.forEach((node) => {
+          const stage = String(node.dataset.stage || '').toLowerCase();
+          const isActive = tokens.some((token) => stage.includes(token));
+          node.classList.toggle('active', isActive);
+        });
+      }
+
+      function syncIrrigationScheduleState() {
+        // Placeholder for future schedule state sync.
+      }
+
+      function setPumpActuatorVisibility(actuatorBased, mode) {
+        const card = document.getElementById('plot-pump-control');
+        const amount = document.getElementById('irrigation_value_form');
+        const schedule = document.getElementById('schedule_irrigation');
+        if (card) card.hidden = !actuatorBased || mode === 'advisory_only';
+        if (amount) amount.disabled = !actuatorBased;
+        if (schedule) schedule.disabled = !actuatorBased;
+      }
+
+      let manualIrrigationRequestKey = null;
+
+      async function setPumpState(state) {
+        const onButton = document.getElementById('pump-on-button');
+        const offButton = document.getElementById('pump-off-button');
+        if (!manualIrrigationRequestKey) {
+          manualIrrigationRequestKey = (window.crypto?.randomUUID?.() ||
+            `pump-${state}-${Date.now()}`);
+        }
+        if (onButton) onButton.disabled = true;
+        if (offButton) offButton.disabled = true;
+        try {
+          const response = await fetch('../api/pumpControl', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: new URLSearchParams({
+              state,
+              idempotency_key: manualIrrigationRequestKey,
+            }).toString(),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.message || `Pump ${state} failed`);
+          await updateMetrics();
+          return data;
+        } catch (error) {
+          console.error('Pump control failed:', error);
+          alert(error.message || 'The pump command failed.');
+          return null;
+        } finally {
+          manualIrrigationRequestKey = null;
+        }
+      }
+
+      function irrigateManually() {
+        return setPumpState('on');
       }
 
       function startTraining() {
@@ -922,13 +1314,15 @@
           <div class="btn-ripple"></div>
         `;
 
-        fetch(`../api/startTraining`)
-          .then((response) => response.text())
-          .then((data) => {
-            if (data == "") {
-              alert(
-                "Training process was started, page will reload when procedure is finished!"
-              );
+        const plotQuery = activeTrainingPlotId
+          ? `?plot_id=${encodeURIComponent(activeTrainingPlotId)}` : '';
+        fetch(`../api/startTraining${plotQuery}`)
+          .then(async (response) => ({
+            ok: response.ok,
+            payload: await response.json().catch(() => ({})),
+          }))
+          .then(({ok, payload}) => {
+            if (ok && payload.status === "started") {
               waitForTraining = true;
               isTrainingReady();
             } else {
@@ -939,9 +1333,11 @@
                 <span class="btn-text">Start Training</span>
                 <div class="btn-ripple"></div>
               `;
-              alert("Cannot start, see console for more info! Error:", data);
+              const details = Array.isArray(payload.missing)
+                ? ` Missing: ${payload.missing.join(', ')}.` : '';
+              alert(`${payload.message || 'Training could not be started.'}${details}`);
             }
-            console.log(data);
+            console.log(payload);
           })
           .catch((error) => {
             // Re-enable button if there's an error
@@ -952,7 +1348,7 @@
               <div class="btn-ripple"></div>
             `;
             console.error("Error starting training:", error);
-          });
+            });
       }
 
       function sleep(ms) {
@@ -963,78 +1359,157 @@
         const train_button = document.getElementById("train_btn");
 
         while (waitForTraining) {
-          fetch(`../api/isTrainingReady`)
-            .then((response) => response.json())
-            .then((response_data) => {
-              if (response_data.isTrainingFinished == true) {
-                waitForTraining = false;
-                // Re-enable button when training is finished
-                train_button.disabled = false;
-                train_button.innerHTML = `
-                  <span class="material-symbols-outlined">psychology</span>
-                  <span class="btn-text">Start Training</span>
-                  <div class="btn-ripple"></div>
-                `;
-                loadStuff();
-                alert("Training process is finished!");
-              }
-            });
+          const plotQuery = activeTrainingPlotId
+            ? `?plot_id=${encodeURIComponent(activeTrainingPlotId)}` : '';
+          const response_data = await safeFetchJson(`../api/isTrainingReady${plotQuery}`);
+          if (response_data?.isTrainingFinished === true || response_data?.status === 'error') {
+            waitForTraining = false;
+            train_button.disabled = false;
+            train_button.innerHTML = `
+              <span class="material-symbols-outlined">psychology</span>
+              <span class="btn-text">Start Training</span>
+              <div class="btn-ripple"></div>
+            `;
+            if (response_data.status === 'error') {
+              alert(`Training failed: ${response_data.error || 'See application logs.'}`);
+            } else {
+              await loadStuff();
+              alert(response_data.recommendation_available
+                ? 'Training completed. Forecast and irrigation decision are available.'
+                : `Training completed, but the irrigation recommendation is unavailable: ${response_data.recommendation_error || 'Check the plot status for missing inputs or safety restrictions.'}`);
+            }
+            break;
+          }
           await sleep(TrainingReadyCheck);
         }
       }
 
       function loadStuff() {
-        $.get("../../../devices", function (data) {
-          checkConfigPresent()
-            .then((ret) => {
-              if (ret) {
-                console.log("Config is already present...");
-                return Promise.all([
-                  checkActiveIrrigation(),
-                  fetchHistoricalChartData(),
-                  fetchCurrentValues(),
-                  fetchDatasetChartData(),
-                  fetchPredictionChartData(),
-                  fetchThreshold(),
-                ]);
+        currentIrrigationActuatorBased = null;
+        console.log("Starting dashboard data load...");
+        const currentPage = document.body.dataset.page || 'dashboard';
+        const pageLoaders = currentPage === 'plot'
+          ? [updateMetrics(), fetchIrrigationRecommendation(), loadCharts(), fetchThreshold(), loadEOObservationTrace()]
+          : currentPage === 'phenology'
+            ? [loadPhenologySummary(), fetchIrrigationRecommendation(), loadEOObservationTrace()]
+            : [loadFarmDashboard(), loadWeatherForecast()];
+        const loadPromises = Promise.allSettled(pageLoaders);
+
+        const finishLoading = () => {
+          try {
+            document.getElementById("loading-indicator").style.display = "none";
+            document.querySelector(".main-content").classList.add("loaded");
+          } catch (e) {
+            console.warn('Could not update loading indicator state', e);
+          }
+          // After loading, ensure tooltip helpers are visible only if they contain text
+          try {
+            document.querySelectorAll('.tooltip').forEach(function(t){
+              const textEl = t.querySelector('.tooltiptext');
+              if (!textEl || !textEl.textContent.trim()) {
+                t.style.display = 'none';
+              } else {
+                t.style.display = '';
+                t.classList.add('has-tooltip');
               }
-            })
-            .catch((e) => {
-              console.log("Config is not present... Error: ", e);
             });
-        });
+          } catch(e) { console.warn('Tooltip visibility update failed', e); }
+        };
+
+        loadPromises
+          .then((results) => {
+            results.forEach((result, index) => {
+              if (result.status === 'rejected') console.error(
+                `Dashboard loader ${index} failed`, result.reason);
+            });
+            finishLoading();
+          })
+          .catch((err) => {
+            console.error("Error loading one or more resources:", err);
+            finishLoading();
+          });
+
+        return loadPromises;
       }
 
-      $(function () {
-        $("#sensor_list")
-          .html('<img src="./loading.gif" /> Loading...')
-          .fadeIn();
+      function hideLoadingIndicator() {
+        try {
+          const indicator = document.getElementById("loading-indicator");
+          if (indicator) {
+            indicator.style.display = "none";
+          }
+          const mainContent = document.querySelector(".main-content");
+          if (mainContent) {
+            mainContent.classList.add("loaded");
+          }
+        } catch (e) {
+          console.warn('Could not update loading indicator state', e);
+        }
+      }
+
+      window.setTimeout(hideLoadingIndicator, 2000);
+
+      window.addEventListener('load', async () => {
+        const initialPage = (window.location.hash || '').replace('#', '').trim();
+        if (initialPage === 'dashboard' || initialPage === 'plot' || initialPage === 'phenology') {
+          document.body.dataset.page = initialPage;
+        }
+        try {
+          await loadTopbar();
+          if (initialPage === 'phenology') {
+            navigateTo('phenology');
+          } else if (initialPage === 'plot') {
+            navigateTo('plot');
+          } else if (initialPage === 'dashboard') {
+            navigateTo('dashboard');
+          }
+          await loadStuff();
+        } catch (err) {
+          console.error('Initial dashboard load failed:', err);
+        } finally {
+          hideLoadingIndicator();
+          setTimeout(hideLoadingIndicator, 500);
+        }
+        setInterval(() => {
+          if (document.body.dataset.page === 'plot') updateMetrics();
+        }, 30000);
+        setInterval(loadTopbar, 60000);
+        setInterval(() => {
+          if (document.body.dataset.page === 'dashboard') loadFarmDashboard();
+        }, 60000);
       });
 
-      function adjustAmount(change) {
-        const input = document.getElementById("irrigation_value_form");
-        let currentValue = parseFloat(input.value) || 0;
-        let newValue = currentValue + change;
-        newValue = Math.round(newValue * 100) / 100; // Round to 2 decimal places
-
-        // Safety checks
-        if (newValue < 0.01) {
-          newValue = 0.01;
-        }
-        if (newValue > 1000) {
-          newValue = 1000;
-        }
-
-        input.value = newValue;
-      }
     </script>
   </head>
 
   <body>
-    <!-- Tab container for plot selection -->
+    <aside class="app-sidebar" aria-label="Primary navigation">
+      <div class="sidebar-logo"><span aria-hidden="true">🌱</span><strong>WaziFarm</strong></div>
+      <nav class="sidebar-links">
+        <button class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard', this)"><span aria-hidden="true">▦</span><span>Dashboard</span></button>
+        <button class="nav-item" data-page="settings" onclick="navigateTo('settings', this)"><span aria-hidden="true">⚙</span><span>Farm settings</span></button>
+      </nav>
+    </aside>
+    <!-- Tab container for plot selection + controls -->
     <div class="tab-container">
       <div id="tabs" class="tabs"></div>
+      <div class="tab-controls">
+        <button id="addTabButton" class="add-tab-button">+ Add Plot</button>
+      </div>
     </div>
+    <script>
+      // Hide tooltip elements with empty text and show has-tooltip when populated
+      document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.tooltip').forEach(function(t){
+          const textEl = t.querySelector('.tooltiptext');
+          if (!textEl || !textEl.textContent.trim()) {
+            t.style.display = 'none';
+          } else {
+            t.classList.add('has-tooltip');
+          }
+        });
+      });
+    </script>
 
     <!-- Loading Indicator -->
     <div id="loading-indicator" class="loading-indicator">
@@ -1047,188 +1522,202 @@
       </div>
     </div>
 
+    <!-- Topbar (farm selector + alerts) -->
+    <div class="topbar">
+      <div class="topbar-title-wrap">
+        <div id="pageTitle" class="topbar-title">Loading farm...</div>
+      </div>
+      <div class="topbar-actions">
+        <button id="settingsQuick" class="settings-button icon-only" onclick="navigateTo('settings', this)" aria-label="Settings">
+          <span class="emoji-icon">⚙</span>
+        </button>
+      </div>
+    </div>
+
     <!-- Main content -->
     <div class="main-content">
-      <!-- Header with location and controls -->
-      <header class="app-header">
-        <!-- Training buttons -->
-        <div class="action-buttons">
-          <button
-            id="train_btn"
-            class="train-button modern-train-btn"
-            onclick="startTraining()"
-          >
-            <span class="material-symbols-outlined">psychology</span>
-            <span class="btn-text">Start Training</span>
-            <div class="btn-ripple"></div>
-          </button>
+      <div id="alert-notification" class="alert-notification"></div>
+      <div id="connectivity-notification" class="connectivity-notification" role="status"></div>
+
+      <div id="page-dashboard" class="page active">
+
+      <section class="farm-overview" aria-labelledby="farm-overview-title">
+        <div class="dashboard-section-header">
+          <div><h2 id="farm-overview-title">Farm overview</h2><p>Current plot conditions, scheduled irrigation, and farm weather.</p></div>
         </div>
-        <div class="header-controls">
-          <button
-            id="settings_btn"
-            class="settings-button"
-            onclick="goToSettings()"
-          >
-            <span class="material-symbols-outlined">settings</span>
-          </button>
-
-          <button id="addTabButton" class="add-tab-button">+ Add Plot</button>
+        <div class="farm-summary-grid">
+          <div class="farm-summary-card"><span>Total plots</span><strong id="farm-total-plots">--</strong></div>
+          <div class="farm-summary-card attention"><span>Need attention</span><strong id="farm-attention-count">--</strong></div>
+          <div class="farm-summary-card"><span>Scheduled irrigations</span><strong id="farm-scheduled-irrigations">--</strong><small id="farm-scheduled-water">--</small></div>
         </div>
-      </header>
-
-      <!-- Sensor metrics cards -->
-      <div class="metrics-container">
-        <div class="metric-card compact">
-          <div class="metric-header">
-            <span class="material-symbols-outlined">water_drop</span>
-            <span class="metric-title">Soil Humidity</span>
-            <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorHumidityTooltip">help
-              <span class="tooltiptext" id="sensorTooltip"></span>
-            </span>
-          </div>
-          <div class="metric-value">
-            <span id="humidity-value">--</span>
-            <span class="metric-unit">%</span>
-          </div>
+        <div class="farm-operations-grid">
+          <div class="card farm-plots-panel"><div class="panel-title">Plot status</div><div id="farm-plot-list" class="farm-plot-list"><div class="dashboard-empty">Loading plots…</div></div></div>
         </div>
-
-        <div class="metric-card compact">
-          <div class="metric-header">
-            <span class="material-symbols-outlined">compress</span>
-            <span class="metric-title">Soil Tension</span>
-            <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorTensionTooltip">help
-              <span class="tooltiptext" id="sensorTooltip"></span>
-            </span>
-          </div>
-          <div class="metric-value">
-            <span id="tension-value">--</span>
-            <span class="metric-unit">cb</span>
-          </div>
+        <div id="farm-weather-forecast" class="card dashboard-weather-forecast">
+          <div class="weather-heading"><div class="weather-title">Farm weather forecast</div></div>
+          <div id="weather-forecast-grid" class="weather-grid"></div>
         </div>
+      </section>
 
-        <div class="metric-card compact">
-          <div class="metric-header">
-            <span class="material-symbols-outlined">device_thermostat</span>
-            <span class="metric-title">Soil Temperature</span>
-            <span class="tooltip material-symbols-outlined" data-tooltip-id="sensorTempTooltip">help
-              <span class="tooltiptext" id="sensorTooltip"></span>
-            </span>
-          </div>
-          <div class="metric-value">
-            <span id="temp-value">--</span>
-            <span class="metric-unit">°C</span>
-          </div>
+      </div>
+
+      <div id="page-plot" class="page">
+        <div class="plot-overview-shell">
+          <header class="plot-page-header">
+            <button type="button" class="back-to-farm" onclick="navigateTo('dashboard')" aria-label="Back to farm overview">← <span>Farm overview</span></button>
+            <div class="plot-title-copy">
+              <span class="context-label">Selected plot</span>
+              <h1 id="selectedPlotTitle">Plot details</h1>
+              <div class="plot-context" hidden><span id="plot-crop-meta">--</span><span id="plot-stage-meta">--</span></div>
+              <div class="plot-context plot-spatial-context" hidden><span id="plot-location-meta">Plot/EO reference point unavailable</span><span id="plot-area-meta">Area not measured</span></div>
+            </div>
+          </header>
+
+          <nav class="plot-subnav" aria-label="Selected plot sections">
+            <button type="button" class="active" data-plot-view="plot" onclick="navigateTo('plot', this)">Overview</button>
+            <button type="button" data-plot-view="phenology" onclick="navigateTo('phenology', this)">Growth &amp; Water Demand</button>
+          </nav>
+
+          <section id="plot-decision-card" class="plot-decision-card" aria-labelledby="plot-action-title" hidden>
+            <div class="plot-decision-heading">
+              <span>Today’s plot status</span>
+              <div class="alert-pill" hidden></div>
+            </div>
+            <div id="plot-decision-copy" class="plot-decision-copy" hidden>
+              <h2 id="plot-action-title">Loading recommendation…</h2>
+              <p id="irrigation-recommendation">Waiting for irrigation recommendation...</p>
+            </div>
+            <div id="plot-water-grid" class="plot-water-grid" aria-label="Today’s irrigation details" hidden>
+              <div class="plot-water-item plot-water-amount"><span>Calculated water to apply</span><strong id="advice-volume">--</strong><small id="advice-volume-basis">ETc, effective rain, and application efficiency are included</small></div>
+              <div class="plot-water-item"><span>When to irrigate</span><strong id="advice-time">--</strong><small id="advice-time-basis">Before the soil becomes too dry</small></div>
+              <div class="plot-water-item"><span>Irrigation mode</span><strong id="advice-mode">--</strong><small id="advice-mode-basis">Configured by the farmer</small></div>
+            </div>
+            <div id="plot-pump-control" class="plot-pump-control" hidden>
+              <div><span>Pump</span><strong id="pump-status-on" class="status-on" style="display:none">ON</strong><strong id="pump-status-off" class="status-off">OFF</strong></div>
+              <div><span>Recommended</span><strong id="pump-recommended-amount">--</strong></div>
+              <div class="plot-pump-actions">
+                <button id="pump-on-button" type="button" onclick="setPumpState('on')">Turn ON</button>
+                <button id="pump-off-button" type="button" onclick="setPumpState('off')" disabled>Turn OFF</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="plot-readings-section" aria-labelledby="plot-readings-title">
+            <div class="plot-content-heading"><div><h2 id="plot-readings-title">Current readings</h2></div></div>
+            <div class="plot-readings-grid">
+              <div class="plot-reading-card"><span id="summary-tension-label">Soil tension</span><strong id="summary-tension">--</strong><small id="summary-tension-source" hidden>Current sensor reading</small></div>
+              <div class="plot-reading-card"><span>Active field threshold</span><strong id="summary-threshold">--</strong><small id="threshold-source-badge" class="threshold-badge static" hidden>Threshold unavailable</small></div>
+              <div class="plot-reading-card"><span>Soil temperature</span><strong id="summary-temp">--</strong><small id="summary-temp-source" hidden>Latest sensor average</small></div>
+              <div class="plot-reading-card"><span>Soil VWC</span><strong id="summary-vwc">--</strong><small id="summary-vwc-source" hidden>Volumetric water content</small></div>
+            </div>
+          </section>
+
+          <section class="plot-trend-card" aria-labelledby="plot-trend-title">
+            <div class="plot-content-heading trend-heading">
+              <div><h2 id="plot-trend-title">Predicted sensor values <span class="chart-info" aria-hidden="true">ⓘ</span></h2><p id="timestamp_txt" role="status"></p></div>
+            </div>
+            <div class="forecast-chart-frame"><canvas id="chart_forecast" class="chart-area"></canvas></div>
+            <p id="chart-data-status" role="status"></p>
+            <div class="chart-footnotes"><p id="forecast_horizons_txt"></p><p id="sensor-data-provenance"></p></div>
+          </section>
         </div>
+      </div>
 
-        <div class="metric-card compact pump-card">
-          <div class="metric-header">
-            <span class="material-symbols-outlined">water_pump</span>
-            <span class="metric-title">Water Pump</span>
-            <span class="tooltip material-symbols-outlined" data-tooltip-id="irrigationTooltip">help
-               <span class="tooltiptext" id="irrigationTooltip"></span>
-            </span>
-          </div>
-
-          <!-- Row 1: Irrigation Amount Input -->
-          <div class="pump-row">
-            <label class="pump-label">Irrigation amount:</label>
-            <div class="amount-input-group">
-              <button
-                type="button"
-                class="amount-btn decrease"
-                onclick="adjustAmount(-0.1)"
-              >
-                <span class="material-symbols-outlined">remove</span>
-              </button>
-              <input
-                id="irrigation_value_form"
-                type="number"
-                min="0.01"
-                max="1000"
-                value="1"
-                class="amount-input"
-              />
-              <button
-                type="button"
-                class="amount-btn increase"
-                onclick="adjustAmount(0.1)"
-              >
-                <span class="material-symbols-outlined">add</span>
-              </button>
-              <span class="amount-unit">m³</span>
+      <div id="page-phenology" class="page">
+        <nav class="plot-subnav" aria-label="Selected plot sections">
+          <button type="button" data-plot-view="plot" onclick="navigateTo('plot', this)">Overview</button>
+          <button type="button" class="active" data-plot-view="phenology" onclick="navigateTo('phenology', this)">Growth &amp; Water Demand</button>
+        </nav>
+        <div class="card phenology-hero">
+          <div class="phenology-header">
+            <div>
+              <h2>Growth Stage Timeline</h2>
+            </div>
+            <div class="phenology-meta">
+              <div class="meta-item">
+                <span>Crop</span>
+                <strong id="pheno-crop-name">--</strong>
+              </div>
+              <div class="meta-item">
+                <span id="pheno-date-label">Planting date</span>
+                <strong id="pheno-planting-date">--</strong>
+              </div>
+              <div class="meta-item">
+                <span>Days since planting</span>
+                <strong id="pheno-days">--</strong>
+              </div>
             </div>
           </div>
+        </div>
 
-          <!-- Row 2: Status and Schedule Button -->
-          <div class="pump-row">
-            <div class="pump-status-section">
-              <div id="pump-status-off" class="status-off">OFF</div>
-              <div id="pump-status-on" class="status-on">ON</div>
-            </div>
-            </div>
-            <button
-              id="schedule_irrigation"
-              class="schedule-btn"
-              onclick="irrigateManually()"
-            >
-              Schedule Irrigation
-            </button>
+        <div class="phenology-metrics">
+          <div class="phenology-metric">
+            <div class="metric-label">Threshold</div>
+            <div class="metric-value"><span id="pheno-threshold-value">--</span> <span class="metric-unit">cbar</span></div>
+            <div class="metric-subtext" id="pheno-threshold-source">Threshold unavailable</div>
+          </div>
+          <div class="phenology-metric">
+            <div class="metric-label">Kc today</div>
+            <div class="metric-value" id="pheno-kc">--</div>
+            <div class="metric-subtext" id="pheno-stage">--</div>
+          </div>
+          <div class="phenology-metric">
+            <div class="metric-label">ETc today</div>
+            <div class="metric-value" id="pheno-etc">--</div>
+            <div class="metric-subtext" id="pheno-etc-subtext">Crop water need</div>
+          </div>
+          <div class="phenology-metric">
+            <div class="metric-label">GDD today</div>
+            <div class="metric-value" id="pheno-gdd">--</div>
+            <div class="metric-subtext">Cumulative heat units</div>
           </div>
         </div>
-      </div>
 
-      <!-- Charts section -->
-      <div class="chart-card">
-        <div class="chart-header">
-          <div class="chart-title-section">
-            <h3>Raw captured sensor values</h3>
-            <span
-              class="tooltip material-symbols-outlined"
-              data-tooltip-id="chart_hist_tooltip"
-              >help
-              <span class="tooltiptext" id="chart_hist_tooltip"></span>
-            </span>
+        <div class="card phenology-timeline">
+          <div class="growth-title">Phenology timeline</div>
+          <div class="growth-timeline">
+            <div class="growth-node" data-stage="pre-emergence">Pre-emergence</div>
+            <div class="growth-node" data-stage="development">Development</div>
+            <div class="growth-node" data-stage="mid-season">Mid-season</div>
+            <div class="growth-node" data-stage="late-season">Late-season</div>
+            <div class="growth-node" data-stage="post-maturity">Post-maturity</div>
           </div>
         </div>
-        <div id="chart_hist" class="chart-area"></div>
-      </div>
 
-      <div class="chart-card">
-        <div class="chart-header">
-          <div class="chart-title-section">
-            <h3>Data as input for machine learning procedure</h3>
-            <span
-              class="tooltip material-symbols-outlined"
-              data-tooltip-id="chart_train_data_tooltip"
-              >help
-              <span class="tooltiptext" id="chart_train_data_tooltip"></span>
-            </span>
+        <div class="card phenology-table">
+          <div class="table-header">
+            <h3>Crop development reference</h3>
+            <p id="pheno-threshold-note" class="table-subtitle" hidden></p>
+          </div>
+          <div class="phenology-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Stage</th>
+                  <th>GDD range</th>
+                  <th>Kc range</th>
+                  <th>Tension trigger</th>
+                </tr>
+              </thead>
+              <tbody id="pheno-stage-table">
+                <tr>
+                  <td colspan="4">Loading crop development data...</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
-        <div id="chart_train_data" class="chart-area"></div>
+
       </div>
 
-      <div class="chart-card">
-        <div class="chart-header">
-          <div class="chart-title-section">
-            <h3>Predicted sensor values</h3>
-            <span
-              class="tooltip material-symbols-outlined"
-              data-tooltip-id="chart_pred_tooltip"
-              >help
-              <span class="tooltiptext" id="chart_pred_tooltip"></span>
-            </span>
-          </div>
-        </div>
-        <div id="chart_pred" class="chart-area"></div>
-        <p id="timestamp_txt"></p>
-      </div>
-
-      <!-- Hidden irrigation form for manual irrigation -->
-      <div style="display: none">
-        <input id="irrigation_value_form" type="number" value="10" />
-        <button id="schedule_irrigation" onclick="irrigateManually()">
-          Schedule Irrigation
+      <div class="page-switcher">
+        <button class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard', this)">
+          <span class="emoji-icon">▦</span>
+          <span>Dashboard</span>
+        </button>
+        <button class="nav-item" data-page="settings" onclick="navigateTo('settings', this)">
+          <span class="emoji-icon">⚙</span>
+          <span>Settings</span>
         </button>
       </div>
     </div>

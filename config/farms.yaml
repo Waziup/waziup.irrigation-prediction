@@ -1,0 +1,37 @@
+# Farm configurations for irrigation-prediction pipeline
+
+
+
+dresden:
+  enabled: false  # Historical dataset template; enable only after agronomic calibration fields are supplied.
+  name: "Dresden (Site1)"
+  csv_path: "New_Data/extracted/export_05_2024/binned.csv"
+  latitude: 51.0236
+  longitude: 13.7441
+  timezone: "Europe/Berlin"
+  sensor_kind: "tension"
+  site_id: 0
+  irrigation_type: ""
+
+
+nabeul:
+  enabled: false  # Historical dataset template; enable only after agronomic calibration fields are supplied.
+  name: "Nabeul (Tunisia)"
+  csv_path: "New_Data/extracted/export_nabeul/binned - nabeul_2.csv"
+  latitude: 36.4513
+  longitude: 10.7357
+  timezone: "Africa/Tunis"
+  sensor_kind: "tension"
+  site_id: 1
+  irrigation_type: ""
+
+sbeitla:
+  enabled: false  # Historical dataset template; enable only after agronomic calibration fields are supplied.
+  name: "Sbeitla (Tunisia)"
+  csv_path: "New_Data/extracted/export_sbeitla/binned - nabeul_1.csv"
+  latitude: 35.2256
+  longitude: 9.1284
+  timezone: "Africa/Tunis"
+  sensor_kind: "tension"
+  site_id: 2
+  irrigation_type: ""

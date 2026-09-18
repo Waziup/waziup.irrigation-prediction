@@ -36,9 +36,9 @@
 ## Introduction
 The **Irrigation Prediction Application** optimizes agricultural water management by leveraging real-time data from soil moisture sensors via the **WaziGate IoT platform**, employing **predictive analytics** to **minimize water waste** and **enhance crop yields.**
 
-The Wazigate is a **LoRa Gateway.** It is the connecting link between your **sensor devices and the WaziCloud platform**. It merges and stores all the sensor values and also can **run custom applications**. 
+The Wazigate is a **LoRa Gateway.** It is the connecting link between your **sensor devices and the WaziCloud platform**. It merges and stores all the sensor values and also can **run custom applications**.
 
-&nbsp;<p style="text-align: center;">![WaziGate](./media/thumbnail.png)</p><p style="text-align: center;"> Figure : </p> 
+&nbsp;<p style="text-align: center;">![WaziGate](./media/thumbnail.png)</p><p style="text-align: center;"> Figure : </p>
 
 ## System Requirements
 - **Supported OS:** WaziGateOS
@@ -58,20 +58,20 @@ For this application to work properly, an internet connection is needed
 
 1. Power the WaziGate with the delivered power supply and wait for 3min.
 2. Connect your smartphone or PC to a WIFI with the following SSID: `WAZIGATE_XXXXXXXXX` (X is arbitrary). The password for this network is `loragateway`. Your device may state that this network has no internet connection, but connect anyways.
-3. Open the browser of your choice, type the address [http://10.42.0.1](http://10.42.0.1) as URL and hit enter or scan this QR code. <p style="text-align: center;">![http://10.42.0.1](./media/qr_10_42_0_1_low.png)</p> <p style="text-align: center;"> Figure : </p> 
+3. Open the browser of your choice, type the address [http://10.42.0.1](http://10.42.0.1) as URL and hit enter or scan this QR code. <p style="text-align: center;">![http://10.42.0.1](./media/qr_10_42_0_1_low.png)</p> <p style="text-align: center;"> Figure : </p>
 4. The login screen of the WaziGate is shown. Use the following credentials:
    - **Username:** `admin`
    - **Password:** `loragateway`
-5. Next step is to connect to a local Wifi with internet access: Go to Settings -> Wifi. The WaziGate will now scan for local networks nearby. ![Connect to a Wifi](./media/connect_wifi_ui.png)<p style="text-align: center;"> Figure : </p> 
+5. Next step is to connect to a local Wifi with internet access: Go to Settings -> Wifi. The WaziGate will now scan for local networks nearby. ![Connect to a Wifi](./media/connect_wifi_ui.png)<p style="text-align: center;"> Figure : </p>
 6. To connect to your Wifi, you have to issue the password of your network.
 7. After connecting, the UI is not any more responsive and the access point of the WaziGate will be closed. Now connect your device (smartphone, pc or tablet) to the same network like you formerly connected your WaziGate.
-8. Now you can access the WaziGate via the IP-address (`http://<ip address>`), via the alias [http://wazigate.local](http://wazigate.local) or scan just this QR code. <p style="text-align: center;">![http://wazigate.local](./media/qr_wazigate_local_low.png)</p><p style="text-align: center;"> Figure : </p> 
+8. Now you can access the WaziGate via the IP-address (`http://<ip address>`), via the alias [http://wazigate.local](http://wazigate.local) or scan just this QR code. <p style="text-align: center;">![http://wazigate.local](./media/qr_wazigate_local_low.png)</p><p style="text-align: center;"> Figure : </p>
 
 The last two options are only available if there is only one WaziGate connected to the same Wifi network.
 
-### Connect the WaziGate via GSM modem 
+### Connect the WaziGate via GSM modem
 
-If there is no local wifi available there is also the option to use a `USB GSM modem` with a SIM card to connect the gateway. There are many available options on the market, use a self hosted device that is detected as a ethernet card. It should be plug and play. 
+If there is no local wifi available there is also the option to use a `USB GSM modem` with a SIM card to connect the gateway. There are many available options on the market, use a self hosted device that is detected as a ethernet card. It should be plug and play.
 
 It is suggested to run the setup and installation of apps via wifi or via the provided hotspot of the gateway, in order to be able to connect from everywhere via the remote tunnel or the vpn.
 
@@ -83,11 +83,11 @@ The application needs to be manually installed on the WaziGate, in order to use 
 2. In the side menu, go to the App section.
 3. Press the `+` button.
 4. Click the option: `INSTALL` in the yellow `Install a Custom App` tile.
-5. A textfield dialog will appear, type: `waziup/irrigation-prediction:latest` click install and wait. 
-6. Press `Launch the App`. 
-7. In the `Apps` section: in the `Irrgiation Prediction` App tile, click on 
-`SETTINGS`. 
-8. In Settings press the dropdown to the left of the `UNINSTALL` button, 
+5. A textfield dialog will appear, type: `waziup/irrigation-prediction:latest` click install and wait.
+6. Press `Launch the App`.
+7. In the `Apps` section: in the `Irrgiation Prediction` App tile, click on
+`SETTINGS`.
+8. In Settings press the dropdown to the left of the `UNINSTALL` button,
 select here the option: `Always`.
 
 All dependencies are included in the docker image, so no further actions are required.
@@ -97,7 +97,7 @@ All dependencies are included in the docker image, so no further actions are req
 In this section we are covering the steps involved of changing the LoRa frequency of the WaziGate, it is possible in a range of 433-915Mhz, keep in mind that you always have to have the compatible antenna as otherwise you will experience bad reception and poor range.
 
 **Steps:**
-1. Connect to the Wazigate via ssh (**user:** `pi@wazigate.local`, **pw:** `loragateway`) 
+1. Connect to the Wazigate via ssh (**user:** `pi@wazigate.local`, **pw:** `loragateway`)
 2. Navigate to:
 `cd /var/lib/wazigate/apps/waziup.wazigate-lora/chirpstack-network-server`
 3. Open the file with the editor of your choice, we
@@ -112,12 +112,12 @@ name=”EU868”
 and select `“Reboot Wazigate”`
 
 ## Soil Sensor
-The soil sensors are LoRa enabled arduino microcontrollers with attached sensors housed in a waterproof case, powered by a solar panel. 
+The soil sensors are LoRa enabled arduino microcontrollers with attached sensors housed in a waterproof case, powered by a solar panel.
 
 &nbsp;<p style="text-align: center;">![WaziSense](./media//20240131_143113.jpg)</p>
-<p style="text-align: center;"> Figure : WaziSense V2 with different sensor configuration.</p> 
+<p style="text-align: center;"> Figure : WaziSense V2 with different sensor configuration.</p>
 
-For the purpose of developing IoT solutions and testing them, we developed a new version of the development board “WaziSense”. This board will be used in the development and testing of the minimum viable products prosed hereafter. It is capable of supporting harsh outdoor environments. The WaziSense is an all-in-one style development board for projects involving outdoor sensing and agricultural purposes. 
+For the purpose of developing IoT solutions and testing them, we developed a new version of the development board “WaziSense”. This board will be used in the development and testing of the minimum viable products prosed hereafter. It is capable of supporting harsh outdoor environments. The WaziSense is an all-in-one style development board for projects involving outdoor sensing and agricultural purposes.
 
 Fitted with a LoRa sx1276 chip, it can communicate with a LoRa enabled gateway over long distances. It has terminal connectors which make it easy to hookup peripherals and deploy outdoor solutions with ease. This second version of the board has better energy control and optimization, aligning with our commitment to sustainability and resource conservation. It includes a Maximum Power Point Tracking (MPPT) solar charge controller. This enhancement eliminates the need for extra hardware to connect a solar panel and rechargeable battery, simplifying the setup process.
 
@@ -133,14 +133,14 @@ The WaziSense V2 can support different types of sensors and actuators. In the ir
 The following the needed hardware is presented that is required in order build a soil device:
 
 &nbsp;<p style="text-align: center;">![WaziSense](./media/20241217_141231.jpg)</p>
-<p style="text-align: center;"> Figure : WaziSense V2 assembly</p> 
+<p style="text-align: center;"> Figure : WaziSense V2 assembly</p>
 
 **Components:**
 - WaziSense V2 Board
 - 868 Mhz dipole Antenna
 - Wires and jumpers
 - Irrometer Watermark Sensor 200SS
-- DS18B20 temperature sensor 
+- DS18B20 temperature sensor
 - 10 kOhm resistor, for the Watermark
 - 4.7 kOhm resistor, for the DS18B20
 - Waterproof WaziSense casing (contact us) or custom case
@@ -148,7 +148,7 @@ The following the needed hardware is presented that is required in order build a
     - seals
 - FTDI connector + USB cable
 - Power:
-    - Solar panel 6 V, 1 W 
+    - Solar panel 6 V, 1 W
     - 18650 3,7V Li-Ion battery
     - 18650 battery holder
 
@@ -159,7 +159,7 @@ We created an in depth guide on how to build a sensor device on [WaziLab.](https
 The connection between the sensor devices and the WaziGate is being realized via LoRa. The activation procedure is done via Activation By Personalization (ABP). When using ABP to connect sensor devices to a WaziGate via LoRa, you must hardcode specific keys and addresses like:
 - `Device Addresses`
 - `Network Session Keys`
-- `App Key` 
+- `App Key`
 
 directly into the microcontroller's firmware. Unlike OTAA, ABP does not require a join procedure, so the device assumes it is already connected upon startup.
 
@@ -188,7 +188,7 @@ If you intend to use a different frequency for LoRa transmission, it can be also
 // Frequency band - do not change in SX12XX_RadioSettings.h anymore
 // if using a native LoRaWAN module such as RAK3172, also select band in RadioSettings.h
 #define EU868
-//#define AU915 
+//#define AU915
 //#define EU433
 //#define AS923-2
 ```
@@ -199,7 +199,7 @@ Keep in mind that in this case you also have to make changes to the file located
 const uint32_t DEFAULT_CHANNEL=CH_18_868;
 ```
 
-To perform those frequency change also on the WaziGate, follow the instructions here. 
+To perform those frequency change also on the WaziGate, follow the instructions here.
 
 ### How to prepare and deploy the Watermark SS200 sensor
 
@@ -211,10 +211,10 @@ To deploy the WaziSense in the field you will need some tools, they are named he
     - is not mandatory, but makes routing cables more convenient
 - **Shovel**: of your choice
     - to dig a hole into the ground
-- **2x Buckets**: ~10l 
+- **2x Buckets**: ~10l
     - one of them filled with **water**
 - **Ruler**
-    - to measure the depth of the digged hole 
+    - to measure the depth of the digged hole
 
 Thats all, if you have those items, you will be able to deploy the devices.
 
@@ -224,13 +224,13 @@ It is just a brief overview, to obtain more in detail information, consult the [
 
 #### Sensor Hydration Before Installation (RECOMMENDED)
 1. Wet the sensor the first time by submerging less than halfway for 30 minutes in the morning.
-2. Fully submerging the sensor will trap air inside it and will require drying the sensor completely and restarting this procedure. 
+2. Fully submerging the sensor will trap air inside it and will require drying the sensor completely and restarting this procedure.
 3. Submerging it only halfway lets air escape out of the pores above the water. It allows the capillary action to pull water into the inner pores. It is the fastest way to get the sensor prepared for installation.
 4. Let it dry until the evening.
 5. Wet the sensor a second time by submerging less than halfway for 30 minutes that same evening.
-6. Let it dry overnight. 
-7. Wet the sensor a third time by submerging less than halfway for 30 minutes the next morning and let dry until the evening. 
-8. Finally, fully submerge the sensor over the 2nd night and install soaking wet in the third morning. 
+6. Let it dry overnight.
+7. Wet the sensor a third time by submerging less than halfway for 30 minutes the next morning and let dry until the evening.
+8. Finally, fully submerge the sensor over the 2nd night and install soaking wet in the third morning.
 
 Full **sensor accuracy will be reached after 2 or more irrigation cycles**, depending on the soil’s wetness.
 
@@ -243,9 +243,9 @@ Full **sensor accuracy will be reached after 5 or more irrigation cycles**, depe
 
 In the following the steps are outlined to deploy a WaziSense with Watermark sensor attached to it. It is just a brief overview, to obtain more in detail information, consult the [Watermark 200SS installation guide](https://www.irrometer.com/pdf/701.pdf) (you can also find this guide in the provided box).
 
-An illustration was created to visualize the process of installing the sensor devices in the ground. 
+An illustration was created to visualize the process of installing the sensor devices in the ground.
 &nbsp;<p style="text-align: center;">![Installation of sensor devices](./media/deploy_vis.png)</p>
-<p style="text-align: center;">Figure : Soil sensor device deployment suggestion schematic.</p> 
+<p style="text-align: center;">Figure : Soil sensor device deployment suggestion schematic.</p>
 
 1. The very first step is to prepare your Watermark SS200 sensors, the procedure is explained in the former bullet point.
 2. In the field, place them diagonally in different locations. If you have drip irrigation, do not place them to close to the pipe with holes.
@@ -263,7 +263,7 @@ Do not forget to read the official guide of the [Watermark 200SS installation gu
 ## Actuator
 In the following it is being explained how an actuator can be used to perform automatic irrigations.
 
-### Different modes of operation 
+### Different modes of operation
 
 The application can be used with two different goals in mind.
 
@@ -284,10 +284,10 @@ For the actuator you can use the WaziAct board or any LoRa enabled arduino board
 - Wires and jumpers
 - Waterproof WaziSense casing (contact us) or custom case
 - FTDI connector + USB cable
-- Powered via the grid: 
+- Powered via the grid:
     - preferably via power outlet of the pump
 - Powered via solar:
-    - Solar panel 6 V, 1 W 
+    - Solar panel 6 V, 1 W
     - 18650 3,7V Li-Ion battery
     - 18650 battery holder
 
@@ -302,7 +302,7 @@ TODO: how to connect pump to relay? how to connect power to mcu?
 
 ### How to flash the firmware of an actuator
 
-In this section the prerequisites and steps of flashing the automatic irrigation actuator are being explained.  
+In this section the prerequisites and steps of flashing the automatic irrigation actuator are being explained.
 
 [Make sure you read this section first, because it covers the basics of flashing a firmware to an arduino mcu.](#how-to-connect-soil-sensor-devices-to-the-wazigate)
 
@@ -327,7 +327,7 @@ const int ledPin = 8;
 const int batt_pin = A0;
 ```
 
-Another important point is that you have to adjust the **conversion factor** of the water flow sensor accordingly, this specifies how much water can run through the flow sensor in one revelation of the impeller. 
+Another important point is that you have to adjust the **conversion factor** of the water flow sensor accordingly, this specifies how much water can run through the flow sensor in one revelation of the impeller.
 
 ```
 volatile float factor_conversion = 0.2;                // estimated for DN50
@@ -337,7 +337,7 @@ volatile float factor_conversion = 5.625;              // calculated for DN20
 
 There are some presets in the script but you can adjust/calculate it on your own, to match your flow meters diameter, there are three methods to do so, they are explained in the following:
 
-1. The Standard Formula (K-Factor): Most flow meters have a K-factor printed on the datasheet or the housing. The K-factor is usually expressed in Pulses per Liter (P/L). 
+1. The Standard Formula (K-Factor): Most flow meters have a K-factor printed on the datasheet or the housing. The K-factor is usually expressed in Pulses per Liter (P/L).
 Example: If your DN20 meter says 450 pulses per liter:
 
 ```
@@ -346,8 +346,8 @@ Flow (L/min) = ----------------
                 K-Factor (P/L)
 ```
 
-2. Manual Calibration (The "Bucket Test") 
-Since pipe diameter (DN20 vs DN50) and pressure greatly affect accuracy, the most reliable way is manual calibration: 
+2. Manual Calibration (The "Bucket Test")
+Since pipe diameter (DN20 vs DN50) and pressure greatly affect accuracy, the most reliable way is manual calibration:
 Reset your NumPulses to 0.
 Run water through the meter into a calibrated container (like a 10-liter bucket) until it is exactly full.
 Read the total pulses (NumPulses) recorded by your code.
@@ -359,7 +359,7 @@ K-Factor (P/L) = ----------------------------
 ```
 
 3. Estimates for DN20 - DN50
-Flow meters vary by brand (e.g., Hall effect vs. Ultrasonic), but here are common starting points for standard plastic Hall-effect sensors: 
+Flow meters vary by brand (e.g., Hall effect vs. Ultrasonic), but here are common starting points for standard plastic Hall-effect sensors:
 
 |Size	    |Typical K-Factor |Estimated `factor_conversion` |
 | :---      |    :----:       |                         ---: |
@@ -375,8 +375,6 @@ Flow (m3/min) = ------------------------
 ```
 
 Since after an potential update of the flow meter or an incorrect calculation/measurement the conversion factor could change, you can just update it via the WaziGates dashboard. Just click on the device, select the actuator (indicated by a robot arm) and send another `conversion_factor` via LoRa. No need to open the device and update it in the arduino code.
-
-There are also confirmations for successful irrigations, the actuator will send back the given amount to the WazGate, after an irrigation was completed successfully.
 
 TODO: show picture of device on dashboard
 
@@ -398,7 +396,7 @@ The irrigation prediction application can survey and automatically irrigate mult
 
 The soil tab covers all soil related aspects of the application. Below there is a screenshot of this section:
 &nbsp;<p style="text-align: center;">![settings_soil](media/settings.png)</p>
-<p style="text-align: center;"> Figure : Soil section of the settings page.</p> 
+<p style="text-align: center;"> Figure : Soil section of the settings page.</p>
 
 In the first option it can decided on the **sensor type**, volumetric water content sensors (returns the humidity in %) or soil tension sensors (returns humidity in kPa or cBar) are supported.
 
@@ -415,7 +413,7 @@ Settings those aspects manually is also possible:
 
 The second tab is the **device tab**, here the sensor devices have to be specified. In the following there is a visualization of the device section.
 &nbsp;<p style="text-align: center;">![settings_device](media/settings_device.png)</p>
-<p style="text-align: center;"> Figure : Device section of the settings page.</p> 
+<p style="text-align: center;"> Figure : Device section of the settings page.</p>
 
 On top a user can specify the name of the plot, this helps to identify the plot.
 
@@ -433,13 +431,20 @@ If there is no pump specified, the system tries to judge when an **irrigation wa
 
 The last tab is the **prediction and scheduling tab**, here the sensor devices have to be specified. In the following there is a visualization of the prediction and scheduling section.
 &nbsp;<p style="text-align: center;">![settings_pred](media/settings_pred.png)</p>
-<p style="text-align: center;"> Figure : Prediction and Scheduling section of the settings page.</p> 
+<p style="text-align: center;"> Figure : Prediction and Scheduling section of the settings page.</p>
 
-On top the **soil tension threshold** in hPa or cBar is specified. When the soil is getting dryer that this threshold and there is no precipitation forecasted for next hours (this can be specified with the option: look ahead time), irrigation is being given.
+The **soil-tension trigger** is specified in cbar. Select **Static** to use the
+field baseline unchanged, or **Dynamic** to adjust that baseline as
+temperature-derived GDD moves the crop through its growth stages. When current
+or forecast soil tension rises above the active trigger, the soil is considered
+dry enough for an irrigation recommendation.
 
-The **irrigation volume** is meant for the specific plot in m³, not in mm, this would also make it necessary to include the area of the plot. Enter the volume of water in m³ (1 m³ = 1000 l) used for a single irrigation event.
+The application calculates irrigation depth from ET₀, crop coefficient, effective rainfall, and application efficiency. Plot area converts that gross depth to a volume in m³ (1 mm over 1 hectare = 10 m³). Configure application efficiency and the effective-rainfall fraction for the local irrigation and field conditions.
 
-Like mentioned before, with this option **forecast look-ahead time**, the number of hours the precipitation forecast should be taken into account, is set. If the soil tension reading is not below 20% of this threshold and there is a precipitation amount in the forecast. The system will skip the irrigation and wait for the natural precipitation.
+**Forecast look-ahead time** sets how far ahead the application checks the soil-
+tension forecast. Forecast rainfall contributes only through the configured
+effective-rainfall fraction; it reduces the calculated net irrigation need and
+can reduce it to zero when it fully covers crop demand.
 
 When sensors are installed, they need to be primed and are inaccurate during early cycles. To not let the model learn from wrong readings the data can be omitted for the modelling process before a certain date. **Start date** selects the start date for sensor data to be included in model creation. It is recommended to allow a short warm-up period after sensor installation.
 
@@ -449,13 +454,13 @@ To ensure good resilience **maximum data duration** was included, in a long term
 
 [After setting everything accordingly up.](#setting-up-the-application) Press the `Start Training` button, to let the application train and compare different machine learning approaches to find the best suiting one for the use case. The application will indicate the start and end of this training procedure with a message from your browser, it can take from 5 minutes - 1 hour. Afterwards the models/predictions are retrained/generated automatically in dynamic intervals for you.
 
-The irrigation prediction application is enabled to manage a whole farm with several plots, they can be added with different configurations and sensors. In the application those views can be changed via the tabs that are located in the top part of the screen. New plots can be added via the `+ Add Plot` button, which can be found next to the configuration button on the right. Plots can be deleted by clicking on the `✖` symbol on the top right corner of the currently active tab (the active tab is indicated by a blue background). 
+The irrigation prediction application is enabled to manage a whole farm with several plots, they can be added with different configurations and sensors. In the application those views can be changed via the tabs that are located in the top part of the screen. New plots can be added via the `+ Add Plot` button, which can be found next to the configuration button on the right. Plots can be deleted by clicking on the `✖` symbol on the top right corner of the currently active tab (the active tab is indicated by a blue background).
 
 Below but still in the top section, there is the **sensor overview**. Here real-time soil temperature and soil tension and humidity data from connected sensors is averaged and shown. As shown in the figure below.
 &nbsp;<p style="text-align: center;">![main_top_bar](media/main_top.png)</p>
-<p style="text-align: center;"> Figure : Top section with tabs, menu and live data from sensors and actuators.</p> 
+<p style="text-align: center;"> Figure : Top section with tabs, menu and live data from sensors and actuators.</p>
 
-On the right hand side there is the **pump section**, it is active when you specified an actuator to perform the irrigation in the device tab of the configuration. If you have an actuated pump or a solenoid valve specified, manual irrigations can be initiated with an arbitrary quantity (in m³). 
+On the right hand side there is the **pump section**. It is active when an actuator is specified and uses the calculated crop-water volume; users do not enter a separate event quantity.
 
 Below, there are three charts that show:
 - **sensor data**
@@ -466,36 +471,36 @@ In the bottom of each individual chart, different parameters can be selected and
 
 The first diagram shows **historical sensor values**, it renders the averaged value of all sensors of the same type, here soil tension and soil temperature is shown.
 &nbsp;<p style="text-align: center;">![main_data](media/main_sensor_data.png)</p>
-<p style="text-align: center;"> Figure : Averaged data accumulated by all soil moisture sensor devices that have the same type.</p> 
+<p style="text-align: center;"> Figure : Averaged data accumulated by all soil moisture sensor devices that have the same type.</p>
 
 The second chart shows **all inputs for the machine learning model**, already cleaned, sampled and prepared. Here certain trends can be visualized/analyzed and how they interlink to other parameters. The features that are shown here are either engineered variables or external data retrieved from a weather services API. An overview of this chart is illustrated in the figure below.
 &nbsp;<p style="text-align: center;">![main_data](media/main_data.png)</p>
-<p style="text-align: center;"> Figure : Data used by the machine learning algorithm, includes sensor data, engineered features and weather data.</p> 
+<p style="text-align: center;"> Figure : Data used by the machine learning algorithm, includes sensor data, engineered features and weather data.</p>
 
 The last chart shows the **predictions for the upcoming week**. It shows the moisture content of the soil as tension and as volumetric water content (VWC), this is realized with help of the soil water retention curve. If the sensor type is a VWC sensor, then it is only shown in VWC. Vertical lines indicate the next days. Vertically separated lines and areas indicate soil moisture levels for the specific soil type that had been set in the settings menu. A figure below gives a visual representation of the chart.
 &nbsp;<p style="text-align: center;">![main_prediction](media/main_prediction.png)</p>
-<p style="text-align: center;"> Figure : Predictions for the upcoming days. Labels are explained above. </p> 
+<p style="text-align: center;"> Figure : Predictions for the upcoming days. Labels are explained above. </p>
 
-The last aspect of this page is the **predicted irrigation time**, it shows a timestamp when the next irrigation is likely to happen, this happens when the threshold is met and there is no precipitation expected in the upcoming hours. 
+The last aspect of this page is the **predicted irrigation time**, it shows a timestamp when the next irrigation is likely to happen, this happens when the threshold is met and there is no precipitation expected in the upcoming hours.
 
-## Maintenance  
+## Maintenance
 This sections explains how to check gateway, sensor devices and app status.
 
 ### Gateway
 Check the gateway regularly by visiting the UI, it should be accessible. If not restart the gateway by cutting the power and let it reboot. After a reboot visit the UI and check whether the application is running and whether there is a config, if necessary press the `Start training` button to create predictions.
 
 ### Sensor devices
-1. To check if the sensor devices work properly you can observe the WaziGates dashboard. In the dashboard view you can see whether sensors send regularly messages. The messages should be received in the preset intervals, that were defined in the arduino script. 
+1. To check if the sensor devices work properly you can observe the WaziGates dashboard. In the dashboard view you can see whether sensors send regularly messages. The messages should be received in the preset intervals, that were defined in the arduino script.
 
 ### App status
 Visit regularly the the UI of the application and interpret the data. Also have a visual check whether plants that you grow in that plot are healthy/with good nutrition and not infected by any diseases. Since this application does not visually check the health of the plants in the plot, human intervention is necessary to check on the status of the plants.
 
 ## Troubleshooting
-Error Messages: 
+Error Messages:
 - TODO: Error messages should be explained here
 
 If you have any further questions/problems, please do not hesitate to contact us.
-You can reach out to us at contact@waziup.org. 
+You can reach out to us at contact@waziup.org.
 
 ## Tooltips from inside the Application
 
@@ -514,7 +519,7 @@ All aspects of the application are explained with tooltips, the tooltips are pri
 
 ### Tooltips of the settings section
 
-In the following different aspects and forms of the application are explained. This information is also available via tooltips, just hover the question mark to observe them. 
+In the following different aspects and forms of the application are explained. This information is also available via tooltips, just hover the question mark to observe them.
 
 - ***Soil Moisture Sensor Selection***: Select one or more soil moisture sensors that monitor soil tension and are connected to your WaziGate. To select or deselect multiple sensors, hold down the **CTRL** key.
 
@@ -526,7 +531,9 @@ In the following different aspects and forms of the application are explained. T
 
 - ***Slope Detection***: Specify the slope of your field to assist in detecting artificial irrigation. This option is needed only if no water flow sensor is added.
 
-- ***Irrigation Volume***: Enter the volume of water (in liters) used for a single irrigation event.
+- ***Application Efficiency***: Enter the fraction of applied water expected to reach the crop root zone.
+
+- ***Effective Rainfall Fraction***: Enter the fraction of forecast rain expected to remain available in the root zone.
 
 - ***Forecast Look-Ahead Time***: Set the number of hours ahead for which you want soil tension forecasts.
 
@@ -546,10 +553,11 @@ In the following different aspects and forms of the application are explained. T
 
 - ***Soil Saturation (SAT)***: Enter the moisture content level for when the soil is fully saturated.
 
-- ***Soil Tension Threshold***: Specify the threshold for soil tension, measured in cbar or hPa, to guide irrigation decisions.
+- ***Soil-tension trigger mode***: Choose a static field trigger or a dynamic
+  trigger that adjusts the field baseline according to crop growth stage.
 
 ## FAQ
-**Q:** How frequently should I re-train the model? 
+**Q:** How frequently should I re-train the model?
 
 &emsp;**A:** This option is hidden from the user, the interval is setup dynamically for you. There is no way to alter this value in the configuration.
 

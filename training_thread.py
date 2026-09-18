@@ -1,24 +1,20 @@
 import threading
-import time
-import pathlib
-import pickle
 from datetime import datetime, timedelta
-import math
 
 # local
-import create_model
+import runtime_config
 import actuation
 import prediction_thread
-import plot_manager
+import create_model
+import pipeline_cache
 
-Restart_time = 1800  # DEBUG 1800 ~ 30 min in s
 
 class TrainingThread(threading.Thread):
-    def __init__(self, plot, startTrainingNow, name=None):
+    def __init__(self, plot, start_immediately, name=None):
         super().__init__(name=name)
         self.daemon = True
         self.currentPlot = plot  # Attach process to a specific plot
-        self.startTrainingNow = startTrainingNow
+        self.start_immediately = start_immediately
         self.stop_event = threading.Event()  # Stop flag
 
     def time_until_noon(self, train_period_days):
@@ -28,59 +24,87 @@ class TrainingThread(threading.Thread):
         noon_today += timedelta(days=train_period_days)
         return (noon_today - now).total_seconds()
 
-    def calculate_retrain_interval(self, current_data_days):
-        base_interval = 1       # Initial daily training
-        growth_factor = 0.7     # Adjusted from 0.15 to 2 for more aggressive growth
-        max_interval = 7        # Maximum interval of 7 days
-        
-        # Modified logarithmic growth curve
-        interval = base_interval * math.exp(growth_factor * math.log1p(current_data_days/30))
-        return min(math.ceil(interval), max_interval)
+    def run_cycle(self):
+        """Execute or restore one training-cycle result."""
+        plot = self.currentPlot
+        if create_model.state.Perform_training:
+            # A real cycle supersedes any earlier cache-fallback state.
+            plot._inference_source = "live"
+            current_tension, threshold_timestamp, predictions = (
+                create_model.run_training_cycle(plot)
+            )
+            pipeline_cache.save_cycle(
+                plot,
+                current_tension,
+                threshold_timestamp,
+                predictions,
+            )
+            plot.pipeline_cache_status = "saved"
+            plot.pipeline_cache_reason = None
+            return current_tension, threshold_timestamp, predictions
+
+        # Reuse the same validated snapshot contract as prediction workers.
+        payload, reason = pipeline_cache.load_cycle(plot.id)
+        if reason is not None:
+            pipeline_cache.record_unavailable(plot, reason)
+            return None
+        restored, reason = pipeline_cache.restore_cycle(
+            plot,
+            payload,
+            max_age_hours=runtime_config.Max_fallback_prediction_age_hours,
+        )
+        if reason is not None:
+            pipeline_cache.record_unavailable(plot, reason)
+            return None
+        return restored
 
     def run(self):
         # To stop via event
         while not self.stop_event.is_set():
             try:
-                #with create_model.Create_model_lock:  # Acquire the lock
-                print(f"Child process started for {self.currentPlot.user_given_name}")
-                if not self.startTrainingNow:
+                print(
+                    f"Child process started for {self.currentPlot.user_given_name}")
+                if not self.start_immediately:
                     # Wait until the next noon
-                    time_to_sleep = self.time_until_noon(self.calculate_retrain_interval(self.currentPlot.train_period_days))
-                    print(f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until next training...")
+                    time_to_sleep = self.time_until_noon(
+                        runtime_config.get_timing_config(
+                            self.currentPlot).retraining_interval_days)
+                    print(
+                        f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until next training...")
                     if self.stop_event.wait(timeout=time_to_sleep):
                         break
 
                 if self.stop_event.is_set():
                     break  # Exit if stopping
 
+                self.currentPlot.currently_training = True
                 start_time = datetime.now().replace(microsecond=0)
-                print("Training for Plot:", self.currentPlot.user_given_name, "started at:", start_time)
+                print("Training for Plot:", self.currentPlot.user_given_name,
+                      "started at:", start_time)
 
-                file_path = pathlib.Path('data/debug/saved_variables_plot_' + str(self.currentPlot.id) + '.pkl')
-
-                if create_model.state.Perform_training:
-                    # Call create model function
-                    currentSoilTension, self.currentPlot.threshold_timestamp, self.currentPlot.predictions = create_model.main(self.currentPlot)
-                    
-                    # Save variables to a file
-                    variables_to_save = {
-                        'currentSoilTension': currentSoilTension,
-                        'threshold_timestamp': self.currentPlot.threshold_timestamp,
-                        'predictions': self.currentPlot.predictions
-                    }
-                    with open(file_path, 'wb') as f:
-                        pickle.dump(variables_to_save, f)
-                else:
-                    # Load saved variables
-                    with open(file_path, 'rb') as f:
-                        loaded_variables = pickle.load(f)
-                    currentSoilTension = loaded_variables['currentSoilTension']
-                    self.currentPlot.threshold_timestamp = loaded_variables['threshold_timestamp']
-                    self.currentPlot.predictions = loaded_variables['predictions']
+                cycle = self.run_cycle()
+                # stop() may have arrived while the model cycle was running.
+                # Do not publish its result or start downstream work afterward.
+                if self.stop_event.is_set():
+                    self.currentPlot.training_finished = False
+                    break
+                if cycle is None:
+                    self.currentPlot.training_finished = False
+                    actuation._trace_event(
+                        "training.unavailable", self.currentPlot,
+                        reason=self.currentPlot.pipeline_cache_reason,
+                    )
+                    print(
+                        f"[{self.currentPlot.user_given_name}] No usable cached training result "
+                        f"({self.currentPlot.pipeline_cache_reason}); stopping training thread."
+                    )
+                    break
+                currentSoilTension, self.currentPlot.threshold_timestamp, self.currentPlot.predictions = cycle
 
                 self.currentPlot.training_finished = True
                 self.currentPlot.currently_training = False
-                self.startTrainingNow = False
+                # Only the user-triggered first cycle runs immediately.
+                self.start_immediately = False
 
                 # main() has returned: its train/val/test frames and scaled arrays are
                 # gone with its stack frame, so this trim hands their pages back to the
@@ -89,34 +113,64 @@ class TrainingThread(threading.Thread):
 
                 end_time = datetime.now().replace(microsecond=0)
                 duration = end_time - start_time
-                print("Training finished for plot: " + self.currentPlot.user_given_name + ", at: ", end_time, "Duration:", duration)
+                prediction_points = (
+                    len(self.currentPlot.predictions)
+                    if self.currentPlot.predictions is not None else 0
+                )
+                actuation._trace_event(
+                    "training.completed", self.currentPlot,
+                    duration_seconds=duration.total_seconds(),
+                    prediction_points=prediction_points,
+                    threshold_timestamp=self.currentPlot.threshold_timestamp,
+                )
+                print("Training finished for plot: " + self.currentPlot.user_given_name +
+                      ", at: ", end_time, "Duration:", duration)
 
-                # Call routine to irrigate
-                if len(self.currentPlot.device_and_sensor_ids_flow) > 0:
-                    actuation.main(currentSoilTension, self.currentPlot.threshold_timestamp, self.currentPlot.predictions, self.currentPlot)
+                # Evaluate/persist alerts for every plot. Advisory-only plots
+                # must receive the same stress-alert lifecycle as actuated plots.
+                actuation.main(currentSoilTension, self.currentPlot.threshold_timestamp,
+                               self.currentPlot.predictions, self.currentPlot)
 
                 # Start prediction process if not running
                 if (
-                    self.currentPlot.prediction_thread is None 
+                    (self.currentPlot.prediction_thread is None
+                     or not self.currentPlot.prediction_thread.is_alive())
                     and not create_model.state.SkipDataPreprocessing
                     and not create_model.state.SkipTraining
                 ):
                     prediction_thread.start(self.currentPlot)
                 else:
-                    print("Prediction thread is already running. Or skipping data preprocessing and model training was set in create_model.")
+                    print("Prediction thread is already running.")
 
             except Exception as e:
-                print(f"[{self.currentPlot.user_given_name }] Training thread error: {e}. Retrying after {Restart_time/60} minute.")
-                # Release resources
-                create_model.state.Currently_active = False
-                if self.stop_event.wait(timeout=Restart_time):
+                self.currentPlot.currently_training = False
+                self.currentPlot.training_finished = False
+                self.currentPlot.pipeline_cache_status = "error"
+                self.currentPlot.pipeline_cache_reason = str(e)
+                actuation._trace_event(
+                    "training.failed", self.currentPlot, error=str(e))
+                print(
+                    f"[{self.currentPlot.user_given_name}] Training thread error: {e}. "
+                    f"Retrying after {runtime_config.get_timing_config(self.currentPlot).error_retry_seconds / 60} minutes.")
+                if self.stop_event.wait(timeout=runtime_config.get_timing_config(
+                        self.currentPlot).error_retry_seconds):
                     break
+
+        self.currentPlot.currently_training = False
 
     def stop(self):
         self.stop_event.set()  # Signal the process to stop
 
 # Starts a training process
+
+
 def start(currentPlot):
+    # Prediction must not enter a new model cycle while an explicit training
+    # request is being prepared.
+    if currentPlot.prediction_thread is not None and currentPlot.prediction_thread.is_alive():
+        currentPlot.prediction_thread.stop()
+        currentPlot.prediction_thread.join()
+
     # Stop previous training process
     if currentPlot.training_thread is not None:
         currentPlot.training_thread.stop()
@@ -126,8 +180,11 @@ def start(currentPlot):
     # Reset flags
     currentPlot.training_finished = False
     currentPlot.currently_training = True
+    currentPlot.pipeline_cache_status = "running"
+    currentPlot.pipeline_cache_reason = None
 
     # Create and start a new training process
-    currentPlot.training_thread = TrainingThread(currentPlot, True, name="TrainingThread_" + str(currentPlot.user_given_name))
+    currentPlot.training_thread = TrainingThread(
+        currentPlot, True, name="TrainingThread_" + str(currentPlot.user_given_name))
     currentPlot.training_thread.start()
     print("Training thread started for plot:", currentPlot.user_given_name)
