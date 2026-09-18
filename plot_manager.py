@@ -6,6 +6,7 @@ import threading
 from farm_registry import FarmRegistry
 from plot import Plot
 from removal_recovery import record_removal, recover_removals, clear_journal
+from state_store import configured_database_path, get_app_state_store
 
 Plots = {}
 CurrentPlotId = 1
@@ -157,6 +158,9 @@ def _is_pristine_install_scaffold(snapshot):
         return False
     farm, plot = farms[0], plots[0]
     config_path = Path(Config_folder_path) / plot.get("config_file", "")
+    has_config = (get_app_state_store().load_plot_config(plot["plot_id"])
+                  is not None if configured_database_path() is not None
+                  else config_path.exists())
     return (
         farm.get("name") == "My Farm"
         and not str(farm.get("owner") or "").strip()
@@ -165,7 +169,7 @@ def _is_pristine_install_scaffold(snapshot):
         and float(farm.get("size", 0) or 0) == 0
         and plot.get("name") == "Plot 1"
         and float(plot.get("area", 0) or 0) == 0
-        and not config_path.exists()
+        and not has_config
     )
 
 
@@ -218,6 +222,8 @@ def removePlot(identifier):
             clear_journal(journal)
             raise
         del Plots[key]
+        if configured_database_path() is not None:
+            get_app_state_store().delete_plot_config(plot.stable_id)
         Plots = {index: item for index, item in enumerate(Plots.values(), start=1)}
         for tab, item in Plots.items():
             item.tab_number = tab

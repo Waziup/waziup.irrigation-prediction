@@ -176,8 +176,41 @@ class HTTPHandler(BaseHTTPRequestHandler):
             return False
         if origin.path not in {'', '/'} or origin.params or origin.query or origin.fragment:
             return False
-        if origin.netloc.lower() == hosts[0].strip().lower():
+        origin_authority = origin.netloc.lower()
+        if origin_authority == hosts[0].strip().lower():
             return True
+
+        # WaziGate serves apps through its local Unix-socket reverse proxy. The
+        # proxy-facing Host can differ from the public browser Origin. Trust
+        # its forwarded host only when the deployment explicitly opts into
+        # that proxy boundary; direct deployments remain same-origin only.
+        trust_proxy = os.getenv(
+            'TRUST_WAZIGATE_PROXY_HEADERS', '').strip().lower() in {
+                '1', 'true', 'yes', 'on'}
+        # WaziGate versions do not all preserve X-Forwarded-Host. Modern
+        # browsers provide Sec-Fetch-Site from the browser's pre-proxy view of
+        # the request; scripts cannot forge this forbidden request header.
+        # Accept only its strict same-origin value and only on the explicitly
+        # trusted Unix-socket proxy deployment.
+        fetch_sites = self.headers.get_all('Sec-Fetch-Site', [])
+        if trust_proxy and fetch_sites:
+            if len(fetch_sites) != 1:
+                return False
+            if fetch_sites[0].strip().lower() == 'same-origin':
+                return True
+        forwarded_hosts = (
+            self.headers.get_all('X-Forwarded-Host', []) if trust_proxy else [])
+        if forwarded_hosts:
+            if len(forwarded_hosts) != 1 or ',' in forwarded_hosts[0]:
+                return False
+            forwarded_host = forwarded_hosts[0].strip().lower()
+            forwarded = urlparse(f'//{forwarded_host}')
+            if (forwarded.netloc == forwarded_host
+                    and forwarded.hostname is not None
+                    and forwarded.username is None
+                    and forwarded.password is None
+                    and origin_authority == forwarded_host):
+                return True
 
         # Development reverse proxies commonly replace Host while preserving
         # the browser's Origin. Permit only explicitly configured full origins;

@@ -10,6 +10,7 @@ import requests
 # local:
 from utils import NetworkUtils, TimeUtils
 from sensor_roles import update_soil_sensor_groups
+from state_store import configured_database_path, get_app_state_store
 
 # Class plot members represent individual plots in the application
 
@@ -190,13 +191,38 @@ class Plot:
     def getConfigFromFile(self):
         # Get path
         currentConfigPath = self.configPath
-
-        if os.path.exists(currentConfigPath):
+        data = None
+        if configured_database_path() is not None:
+            store = get_app_state_store()
+            scope = f"plot_config:{self.stable_id}"
+            data = store.load_plot_config(self.stable_id)
+            if (data is None and not store.legacy_import_complete(scope)
+                    and os.path.exists(currentConfigPath)):
+                with open(currentConfigPath, 'r') as file:
+                    data = json.load(file)
+                store.save_plot_config(self.stable_id, data)
+            if not store.legacy_import_complete(scope):
+                store.mark_legacy_import_complete(scope)
+        elif os.path.exists(currentConfigPath):
             with open(currentConfigPath, 'r') as file:
                 # Parse JSON from the file
                 data = json.load(file)
-
-            if not self.load_data_from_csv:
+        if data is not None:
+            if self.load_data_from_csv:
+                debug_csv = pd.read_csv(self.data_from_csv, header=0)
+                self.device_and_sensor_ids_moisture = []
+                self.device_and_sensor_ids_temp = []
+                self.device_and_sensor_ids_flow = []
+                self.device_and_sensor_ids_flow_confirmation = []
+                for column in debug_csv.columns:
+                    if column.startswith((
+                            "tension", "vwc", "volumetric", "capacitive")):
+                        self.device_and_sensor_ids_moisture.append(column)
+                    elif column.startswith("soil_temp"):
+                        self.device_and_sensor_ids_temp.append(column)
+                    elif column.startswith("flow"):
+                        self.device_and_sensor_ids_flow.append(column)
+            else:
                 # Get chosen sensors
                 self.device_and_sensor_ids_moisture = data.get(
                     'DeviceAndSensorIdsMoisture', [])
@@ -211,6 +237,7 @@ class Plot:
 
             # Get data from forms
             self.user_given_name = data.get('Name', [])
+            self.owner = data.get('Owner', getattr(self, 'owner', ''))
             # Older JSON configurations may omit this during YAML migration.
             self.farm_id = data.get('Farm_id', self.farm_id)
             self.area_unit = data.get('Plot_area_unit', self.area_unit)
@@ -440,9 +467,19 @@ class Plot:
         # Specify the path to the JSON file you want to read
         json_file_path = self.configPath
 
-        # Read the JSON data from the file
-        with open(json_file_path, 'r') as json_file:
-            config = json.load(json_file)
+        store = get_app_state_store() if configured_database_path() is not None else None
+        scope = f"plot_config:{self.stable_id}"
+        config = store.load_plot_config(self.stable_id) if store is not None else None
+        if config is None:
+            if store is not None and store.legacy_import_complete(scope):
+                raise FileNotFoundError(
+                    f"No configuration exists for plot {self.stable_id}")
+            with open(json_file_path, 'r') as json_file:
+                config = json.load(json_file)
+            if store is not None:
+                store.save_plot_config(self.stable_id, config)
+        if store is not None and not store.legacy_import_complete(scope):
+            store.mark_legacy_import_complete(scope)
 
         # Check if the CSV file exists
         try:

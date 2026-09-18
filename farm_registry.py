@@ -13,6 +13,8 @@ import re
 import threading
 import uuid
 
+from state_store import AppStateStore, configured_database_path
+
 
 REGISTRY_VERSION = 1
 DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent / "config"
@@ -47,7 +49,7 @@ def _read_json(path: Path) -> dict:
 
 
 class FarmRegistry:
-    """Atomic JSON registry retaining stable IDs across restarts."""
+    """Persistent registry retaining stable IDs across restarts."""
 
     def __init__(self, path=DEFAULT_REGISTRY_PATH, config_dir=DEFAULT_CONFIG_DIR):
         self.path = Path(path)
@@ -56,14 +58,25 @@ class FarmRegistry:
         self.data = None
         self._committed_data = None
         self._defer_publish = False
+        db_path = configured_database_path()
+        self._state_store = AppStateStore(db_path) if db_path else None
 
     def load_or_migrate(self) -> dict:
         with self._lock:
+            if self._state_store is not None:
+                stored = self._state_store.load_registry()
+                if stored is not None:
+                    self._validate(stored)
+                    self.data = stored
+                    self._committed_data = deepcopy(stored)
+                    return deepcopy(stored)
             if self.path.exists():
                 data = _read_json(self.path)
                 self._validate(data)
                 self.data = data
-                self._committed_data = deepcopy(data)
+                if self._state_store is not None:
+                    self._state_store.save_registry(self.data)
+                self._committed_data = deepcopy(self.data)
                 return deepcopy(data)
             self.data = self._migrate_legacy()
             self._save_unlocked()
@@ -193,6 +206,10 @@ class FarmRegistry:
         # Mutators run under the registry lock. Until replacement succeeds,
         # the last published snapshot remains authoritative for memory too.
         try:
+            if self._state_store is not None:
+                self._state_store.save_registry(self.data)
+                self._committed_data = deepcopy(self.data)
+                return
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.data["updated_at"] = datetime.now(timezone.utc).isoformat()
             temp_path = self.path.with_suffix(self.path.suffix + ".tmp")

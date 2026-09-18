@@ -12,6 +12,8 @@ import sqlite3
 import uuid
 from zoneinfo import ZoneInfo
 
+from state_store import configured_database_path
+
 
 MODES = {"automatic", "approval_required", "manual", "advisory_only"}
 STATUSES = {"planned", "pending_approval", "approved", "active", "completed",
@@ -105,6 +107,34 @@ class OperationsStore:
                     ON alerts(active, farm_id, urgency, updated_at);
             """)
 
+    def import_legacy_database(self, legacy_path):
+        """Copy pre-unification operations once without overwriting new rows."""
+        legacy_path = Path(legacy_path)
+        if not legacy_path.is_file() or legacy_path.resolve() == self.path.resolve():
+            return 0
+        with self._connect() as db:
+            existing = db.execute("SELECT COUNT(*) FROM operations").fetchone()[0]
+            if existing:
+                return 0
+            db.execute("ATTACH DATABASE ? AS legacy", (str(legacy_path),))
+            try:
+                tables = {row[0] for row in db.execute(
+                    "SELECT name FROM legacy.sqlite_master WHERE type='table'")}
+                if "operations" not in tables:
+                    return 0
+                db.execute("BEGIN IMMEDIATE")
+                db.execute("INSERT OR IGNORE INTO operations SELECT * FROM legacy.operations")
+                if "operation_events" in tables:
+                    db.execute("""INSERT OR IGNORE INTO operation_events
+                        SELECT * FROM legacy.operation_events""")
+                if "alerts" in tables:
+                    db.execute("INSERT OR IGNORE INTO alerts SELECT * FROM legacy.alerts")
+                count = db.execute("SELECT COUNT(*) FROM operations").fetchone()[0]
+                db.commit()
+                return int(count)
+            finally:
+                db.execute("DETACH DATABASE legacy")
+
     @staticmethod
     def _operation(row):
         if row is None:
@@ -162,6 +192,36 @@ class OperationsStore:
             return self._operation(db.execute(
                 "SELECT * FROM operations WHERE operation_id=?", (operation_id,)).fetchone())
 
+    def update_operation(self, operation_id, *, amount_m3=None,
+                         recommendation_patch=None):
+        """Persist metered results or control context without changing state."""
+        if amount_m3 is not None:
+            amount_m3 = float(amount_m3)
+            if not math.isfinite(amount_m3) or amount_m3 < 0:
+                raise ValueError("Irrigation amount must be finite and non-negative")
+        timestamp = _now()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM operations WHERE operation_id=?",
+                (operation_id,)).fetchone()
+            if row is None:
+                db.rollback()
+                raise KeyError(f"Unknown operation_id: {operation_id}")
+            recommendation = json.loads(row["recommendation_json"] or "{}")
+            if recommendation_patch:
+                recommendation.update(recommendation_patch)
+            next_amount = row["amount_m3"] if amount_m3 is None else amount_m3
+            db.execute("""UPDATE operations
+                SET amount_m3=?,recommendation_json=?,updated_at=?
+                WHERE operation_id=?""",
+                (next_amount, _json(recommendation), timestamp, operation_id))
+            updated = db.execute(
+                "SELECT * FROM operations WHERE operation_id=?",
+                (operation_id,)).fetchone()
+            db.commit()
+        return self._operation(updated)
+
     def transition(self, operation_id, to_status, detail=None):
         if to_status not in STATUSES:
             raise ValueError(f"Unsupported operation status: {to_status}")
@@ -179,6 +239,14 @@ class OperationsStore:
             if to_status not in TRANSITIONS[current]:
                 db.rollback()
                 raise ValueError(f"Invalid irrigation transition: {current} -> {to_status}")
+            if to_status == "active":
+                active = db.execute("""SELECT operation_id FROM operations
+                    WHERE plot_id=? AND status='active' AND operation_id<>?
+                    LIMIT 1""", (row["plot_id"], operation_id)).fetchone()
+                if active is not None:
+                    db.rollback()
+                    raise ValueError(
+                        f"Plot already has active operation: {active['operation_id']}")
             error = (detail or {}).get("error") if to_status == "failed" else row["error"]
             db.execute("UPDATE operations SET status=?,error=?,updated_at=? WHERE operation_id=?",
                        (to_status, error, timestamp, operation_id))
@@ -386,11 +454,18 @@ class OperationsStore:
 
 
 _default_store = None
+_default_store_path = None
 
 
 def get_operations_store():
-    global _default_store
-    if _default_store is None:
-        _default_store = OperationsStore(
-            os.getenv("IRRIGATION_OPERATIONS_DB", "data/operations.sqlite3"))
+    global _default_store, _default_store_path
+    unified = configured_database_path()
+    path = Path(unified or os.getenv(
+        "IRRIGATION_OPERATIONS_DB", "data/operations.sqlite3"))
+    if _default_store is None or _default_store_path != path:
+        _default_store = OperationsStore(path)
+        _default_store_path = path
+        if unified is not None:
+            _default_store.import_legacy_database(
+                os.getenv("IRRIGATION_OPERATIONS_DB", "data/operations.sqlite3"))
     return _default_store

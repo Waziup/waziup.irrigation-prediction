@@ -3,6 +3,7 @@ import hashlib
 import logging
 import os
 import copy
+import re
 from sqlite3 import Error as SQLiteError
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -19,6 +20,7 @@ import runtime_config
 from recommendation_contract import compose_recommendation, threshold_condition
 from operations_store import get_operations_store, MODES
 from sensor_quality import SENSOR_STALE_HOURS, evaluate_tension_sensor_safety
+from state_store import configured_database_path, get_app_state_store
 
 if __package__:
     from importlib import import_module
@@ -65,6 +67,7 @@ RUNTIME_STATE_CACHE_HOURS = 1.0
 # Tracks in-flight requests per plot so repeated recommendations cannot send
 # duplicate actuator commands while a command is being created and sent.
 _active_irrigations = set()
+_automatic_monitors = {}
 
 
 def _trace_event(event, plot, **details):
@@ -333,6 +336,14 @@ def execute_operation_command(plot, operation):
     if str(operation.get("plot_id")) != plot_id:
         log.warning("Operation plot does not match command target: %s", plot_id)
         return None
+    active = store.latest_for_plot(plot_id, statuses={"active"})
+    if active is not None and active.get("operation_id") != operation.get(
+            "operation_id"):
+        _transition_operation(operation, "failed", {
+            "error": "prior_irrigation_active",
+            "active_operation_id": active.get("operation_id"),
+        })
+        return None
     if store.has_pending_flow_verification(plot_id):
         _transition_operation(operation, "failed", {
             "error": "prior_flow_confirmation_pending",
@@ -351,7 +362,14 @@ def execute_operation_command(plot, operation):
     try:
         operation, claimed = store.transition(
             operation["operation_id"], "active", {"command": "claimed"})
-    except (KeyError, ValueError):
+    except ValueError as exc:
+        if "already has active operation" in str(exc):
+            current = store.get_operation(operation["operation_id"])
+            if current and current.get("status") in {"planned", "approved"}:
+                _transition_operation(current, "failed", {
+                    "error": "prior_irrigation_active"})
+        return None
+    except KeyError:
         return None
     if not claimed:
         return None
@@ -402,6 +420,20 @@ def execute_operation_command(plot, operation):
     if window_error:
         _transition_operation(operation, 'failed', {'error': window_error})
         return None
+    current_mode = resolve_irrigation_mode(plot)
+    if current_mode == "advisory_only" or not _has_actuator_support(plot):
+        _transition_operation(operation, "failed", {
+            "error": "actuator_control_disabled"})
+        return None
+    if current_mode == "automatic":
+        response = start_automatic_irrigation(plot, operation)
+        if not response:
+            # OFF is safe even when ON may have reached the gateway but its
+            # response was lost.
+            set_pump_state(plot, False)
+            _transition_operation(operation, "failed", {
+                "error": "automatic_irrigation_start_failed"})
+        return response
     verification_context = {}
     response = irrigate_amount(
         plot, float(amount), authorized=True,
@@ -1469,15 +1501,18 @@ def _persist_alert_record(
             "inference_source": getattr(plot, "_inference_source", "live"),
         }
 
-        jsonl_path, latest_path = _alert_paths(plot_id)
-        os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)
+        if configured_database_path() is not None:
+            get_app_state_store().append_alert(plot_id, payload)
+        else:
+            jsonl_path, latest_path = _alert_paths(plot_id)
+            os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)
 
-        with open(jsonl_path, "a") as handle:
-            handle.write(json.dumps(payload))
-            handle.write("\n")
+            with open(jsonl_path, "a") as handle:
+                handle.write(json.dumps(payload))
+                handle.write("\n")
 
-        with open(latest_path, "w") as handle:
-            json.dump(payload, handle, indent=2)
+            with open(latest_path, "w") as handle:
+                json.dump(payload, handle, indent=2)
     except Exception as exc:
         log.warning("Failed to persist alert record: %s", exc)
 
@@ -1485,6 +1520,25 @@ def _persist_alert_record(
 
 
 def read_data_from_file(filename):
+    if configured_database_path() is not None:
+        match = re.search(r'irrigations_plot_(.+)\.json$', filename)
+        if match:
+            store = get_app_state_store()
+            plot_id = match.group(1)
+            scope = f"irrigation_history:{plot_id}"
+            records = store.load_irrigation_history(plot_id)
+            if records or store.legacy_import_complete(scope):
+                return {"irrigations": records}
+            # Import a legacy history file once when the database has no rows.
+            if os.path.exists(filename):
+                with open(filename, 'r') as json_file:
+                    legacy = json.load(json_file)
+                store.save_irrigation_history(
+                    plot_id, legacy.get("irrigations", []))
+                store.mark_legacy_import_complete(scope)
+                return legacy
+            store.mark_legacy_import_complete(scope)
+            return {"irrigations": []}
     if os.path.exists(filename):
         with open(filename, 'r') as json_file:
             return json.load(json_file)
@@ -1495,6 +1549,15 @@ def read_data_from_file(filename):
 
 
 def save_data_to_file(filename, data):
+    if configured_database_path() is not None:
+        match = re.search(r'irrigations_plot_(.+)\.json$', filename)
+        if match:
+            store = get_app_state_store()
+            plot_id = match.group(1)
+            store.save_irrigation_history(
+                plot_id, data.get("irrigations", []))
+            store.mark_legacy_import_complete(f"irrigation_history:{plot_id}")
+            return
     if not os.path.exists(filename):
         print(f"{filename} does not exist, creating a new one.")
     parent = os.path.dirname(filename)
@@ -1632,6 +1695,217 @@ def _read_flow_confirmation(sensor_reference):
             "timestamp": parsed_time.isoformat() if parsed_time is not None else None}
 
 
+def _actuator_reference(plot):
+    references = getattr(plot, "device_and_sensor_ids_flow", []) or []
+    reference = str(references[0] if references else "").strip()
+    parts = reference.split("/", 1)
+    return reference if len(parts) == 2 and all(parts) else ""
+
+
+def set_pump_state(plot, enabled):
+    """Set the WaziGate/WaziAct actuator using its boolean value contract."""
+    if not isinstance(enabled, bool):
+        raise TypeError("Pump state must be a boolean")
+    reference = _actuator_reference(plot)
+    if not reference or not _has_actuator_support(plot):
+        log.error("Pump command rejected for plot %s: no actuator configured",
+                  getattr(plot, "id", "?"))
+        return False
+    device_id, actuator_id = reference.split("/", 1)
+    request_url = (f"{NetworkUtils.ApiUrl}devices/{device_id}/actuators/"
+                   f"{actuator_id}/value")
+    try:
+        response = requests.post(
+            request_url,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {NetworkUtils.Token}",
+            },
+            json=enabled,
+            timeout=30,
+        )
+    except requests.exceptions.RequestException as exc:
+        log.error("Pump %s command failed for plot %s: %s",
+                  "ON" if enabled else "OFF", getattr(plot, "id", "?"), exc)
+        return False
+    if not 200 <= response.status_code < 300:
+        log.error("Pump %s command failed for plot %s: HTTP %s",
+                  "ON" if enabled else "OFF", getattr(plot, "id", "?"),
+                  response.status_code)
+        return False
+    return True
+
+
+def _measured_delivery(plot, context):
+    """Return delivered cubic metres and evidence from one current reading."""
+    sensor_reference = context.get("sensor_reference")
+    baseline = context.get("baseline") or {}
+    if not sensor_reference:
+        raise ValueError("confirmation_sensor_unavailable")
+    final = _read_flow_confirmation(sensor_reference)
+    command_time = pd.Timestamp(context.get("command_time"))
+    reading_time = pd.Timestamp(final.get("timestamp"))
+    if pd.isna(command_time) or pd.isna(reading_time):
+        raise ValueError("confirmation_reading_has_no_timestamp")
+    command_time = (command_time.tz_localize("UTC") if command_time.tzinfo is None
+                    else command_time.tz_convert("UTC"))
+    reading_time = (reading_time.tz_localize("UTC") if reading_time.tzinfo is None
+                    else reading_time.tz_convert("UTC"))
+    if reading_time < command_time:
+        raise ValueError("confirmation_reading_predates_command")
+    if reading_time > pd.Timestamp.now(tz="UTC") + pd.Timedelta(minutes=5):
+        raise ValueError("confirmation_reading_is_in_the_future")
+    final_value = float(final["value_m3"])
+    baseline_value = float(baseline["value_m3"])
+    if not np.isfinite(final_value) or not np.isfinite(baseline_value):
+        raise ValueError("non_finite_flow_reading")
+    mode = str(getattr(
+        plot, "flow_confirmation_mode", "event") or "event").strip().lower()
+    if mode == "cumulative":
+        delivered = final_value - baseline_value
+        measurement_mode = "cumulative_delta"
+    elif mode == "event":
+        delivered = final_value
+        measurement_mode = "event_value"
+    else:
+        raise ValueError("unsupported_flow_confirmation_mode")
+    if not np.isfinite(delivered) or delivered < 0:
+        raise ValueError("invalid_delivered_volume")
+    return delivered, {
+        "baseline_m3": baseline_value,
+        "final_m3": final_value,
+        "delivered_m3": delivered,
+        "measurement_mode": measurement_mode,
+        "reading_time": final["timestamp"],
+        "sensor_reference": sensor_reference,
+    }
+
+
+def _finish_metered_operation(plot, operation_id, context, *, automatic):
+    """Monitor flow, stop at target for auto, or measure once for semi-auto."""
+    store = get_operations_store()
+    operation = store.get_operation(operation_id)
+    if operation is None or operation.get("status") != "active":
+        return False
+    target = operation.get("amount_m3") if automatic else None
+    deadline = pd.Timestamp(context["command_time"]) + pd.Timedelta(
+        seconds=runtime_config.get_timing_config(
+            plot).irrigation_confirmation_seconds)
+    try:
+        poll_seconds = max(0.1, float(os.getenv(
+            "IRRIGATION_FLOW_POLL_SECONDS", "5")))
+    except (TypeError, ValueError):
+        poll_seconds = 5.0
+    last_error = None
+    while True:
+        current = store.get_operation(operation_id)
+        if current is None or current.get("status") != "active":
+            return current is not None and current.get("status") == "verified"
+        try:
+            delivered, detail = _measured_delivery(plot, context)
+            last_error = None
+            if not automatic or delivered >= float(target):
+                if not set_pump_state(plot, False):
+                    raise RuntimeError("pump_off_command_failed")
+                if delivered > 0:
+                    store.update_operation(operation_id, amount_m3=delivered)
+                operation = store.get_operation(operation_id)
+                _transition_operation(operation, "verified", detail)
+                try:
+                    update_irrigation_status(
+                        plot, "verified", operation_id, detail)
+                except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                    log.exception("Could not update irrigation history for %s",
+                                  operation_id)
+                return True
+        except (requests.exceptions.RequestException, RuntimeError, ValueError,
+                TypeError, KeyError) as exc:
+            last_error = str(exc) or "flow_confirmation_read_failed"
+            if not automatic:
+                operation = store.get_operation(operation_id)
+                _transition_operation(operation, "completed", {
+                    "command": "pump_off", "meter_error": last_error})
+                return True
+        if pd.Timestamp.now(tz="UTC") >= deadline:
+            set_pump_state(plot, False)
+            operation = store.get_operation(operation_id)
+            _transition_operation(operation, "failed", {
+                "error": "automatic_irrigation_timeout",
+                "meter_error": last_error,
+            })
+            return False
+        threading.Event().wait(poll_seconds)
+
+
+def _automatic_monitor_runner(plot, operation_id, context):
+    try:
+        _finish_metered_operation(
+            plot, operation_id, context, automatic=True)
+    except Exception as exc:
+        log.exception("Automatic irrigation monitor failed for %s", operation_id)
+        set_pump_state(plot, False)
+        operation = get_operations_store().get_operation(operation_id)
+        if operation and operation.get("status") == "active":
+            _transition_operation(operation, "failed", {
+                "error": "automatic_monitor_failed", "reason": str(exc)})
+    finally:
+        with _irrigation_lock:
+            _automatic_monitors.pop(operation_id, None)
+
+
+def _start_automatic_monitor(plot, operation_id, context):
+    with _irrigation_lock:
+        existing = _automatic_monitors.get(operation_id)
+        if existing and existing.is_alive():
+            return existing
+        monitor = threading.Thread(
+            target=_automatic_monitor_runner,
+            args=(plot, operation_id, dict(context)),
+            name=f"IrrigationMonitor-{getattr(plot, 'id', 'unknown')}",
+            daemon=True,
+        )
+        _automatic_monitors[operation_id] = monitor
+        monitor.start()
+        return monitor
+
+
+def start_automatic_irrigation(plot, operation):
+    """Turn a pump on and meter water until the persisted target is reached."""
+    sensor_reference = _confirmation_sensor_reference(
+        plot, getattr(plot, "device_and_sensor_ids_flow", []) or [])
+    if not sensor_reference:
+        return False
+    try:
+        baseline = _read_flow_confirmation(sensor_reference)
+    except (requests.exceptions.RequestException, RuntimeError, ValueError,
+            TypeError, KeyError) as exc:
+        log.error("Automatic irrigation has no readable flow meter: %s", exc)
+        return False
+    context = {
+        "operation_id": operation["operation_id"],
+        "sensor_reference": sensor_reference,
+        "baseline": baseline,
+        "command_time": pd.Timestamp.now(tz="UTC").isoformat(),
+    }
+    get_operations_store().update_operation(
+        operation["operation_id"],
+        recommendation_patch={"flow_control": context})
+    if not set_pump_state(plot, True):
+        return False
+    try:
+        save_irrigation_time(
+            operation["amount_m3"], plot, status="active",
+            operation_id=operation["operation_id"])
+    except (OSError, ValueError, TypeError):
+        log.exception("Automatic irrigation started but history recording failed")
+    try:
+        _start_automatic_monitor(plot, operation["operation_id"], context)
+    except (RuntimeError, TypeError, ValueError) as exc:
+        log.error("Could not start automatic irrigation monitor: %s", exc)
+        return False
+    return True
+
+
 def _schedule_irrigation_verification(
         plot, amount, context, delay_seconds=None):
     delay = (runtime_config.get_timing_config(plot)
@@ -1653,6 +1927,28 @@ def resume_pending_irrigation_verifications(plots):
     }
     store = get_operations_store()
     resumed = 0
+    for operation in store.list_operations(status="active", limit=500):
+        plot = by_id.get(str(operation.get("plot_id")))
+        context = (operation.get("recommendation") or {}).get("flow_control")
+        if plot is None or operation.get("mode") != "automatic" or not isinstance(
+                context, dict):
+            continue
+        try:
+            deadline = pd.Timestamp(context["command_time"]) + pd.Timedelta(
+                seconds=runtime_config.get_timing_config(
+                    plot).irrigation_confirmation_seconds)
+            if pd.Timestamp.now(tz="UTC") >= deadline:
+                set_pump_state(plot, False)
+                _transition_operation(operation, "failed", {
+                    "error": "automatic_irrigation_timeout_after_restart"})
+                continue
+        except (KeyError, TypeError, ValueError, OverflowError):
+            set_pump_state(plot, False)
+            _transition_operation(operation, "failed", {
+                "error": "invalid_automatic_flow_context"})
+            continue
+        _start_automatic_monitor(plot, operation["operation_id"], context)
+        resumed += 1
     for operation in store.list_operations(status="completed", limit=500):
         plot = by_id.get(str(operation.get("plot_id")))
         if plot is None:

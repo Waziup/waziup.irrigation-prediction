@@ -43,6 +43,7 @@ from eo_observation import analyse_vegetation_history
 from api_contract import json_safe
 from operations_store import get_operations_store
 from dashboard_contract import build_farm_dashboard
+from state_store import configured_database_path, get_app_state_store
 
 # Heavy ML modules are loaded only after startup configuration passes. This
 # keeps missing/invalid farm settings from being hidden by dependency errors.
@@ -86,12 +87,24 @@ def _trace_event(event, plot=None, **details):
 
 
 def _load_sensor_registry():
+    if configured_database_path() is not None:
+        store = get_app_state_store()
+        records = store.load_sensor_registry()
+        if records or store.legacy_import_complete("sensor_registry"):
+            return records
+        # One-time import of the legacy file follows below.
     if not os.path.exists(SENSOR_REGISTRY_PATH):
+        if configured_database_path() is not None:
+            get_app_state_store().mark_legacy_import_complete("sensor_registry")
         return []
     try:
         with open(SENSOR_REGISTRY_PATH, "r") as handle:
             payload = json.load(handle)
         if isinstance(payload, list):
+            if configured_database_path() is not None:
+                store = get_app_state_store()
+                store.save_sensor_registry(payload)
+                store.mark_legacy_import_complete("sensor_registry")
             return payload
     except (OSError, ValueError, TypeError):
         logging.getLogger(__name__).exception(
@@ -100,6 +113,11 @@ def _load_sensor_registry():
 
 
 def _save_sensor_registry(records):
+    if configured_database_path() is not None:
+        store = get_app_state_store()
+        store.save_sensor_registry(records)
+        store.mark_legacy_import_complete("sensor_registry")
+        return
     os.makedirs(os.path.dirname(SENSOR_REGISTRY_PATH), exist_ok=True)
     with open(SENSOR_REGISTRY_PATH, "w") as handle:
         json.dump(records, handle, indent=2)
@@ -924,27 +942,30 @@ def _set_config_update(url, body):
     except (TypeError, ValueError):
         currentPlot.initial_gdd = float(
             getattr(currentPlot, 'initial_gdd', 0.0))
-    if currentPlot.irrigation_mode in {'automatic', 'approval_required'}:
+    if currentPlot.irrigation_mode in {
+            'automatic', 'approval_required', 'manual'}:
         control_label = (
-            "Automatic mode" if currentPlot.irrigation_mode == 'automatic'
-            else "Approval-required mode")
+            "Full-auto mode" if currentPlot.irrigation_mode == 'automatic'
+            else "Semi-auto mode")
         if not currentPlot.device_and_sensor_ids_flow:
             errors['actuator'] = f"{control_label} requires a configured actuator."
         elif any(len(str(value).split('/')) != 2 for value in
                  currentPlot.device_and_sensor_ids_flow):
             errors['actuator'] = "Use device-id/actuator-id format."
-        if (currentPlot.irrigation_mode == 'automatic'
+        if (currentPlot.device_and_sensor_ids_flow
                 and not currentPlot.device_and_sensor_ids_flow_confirmation):
             discovered = currentPlot.getConfirmationDeviceID(
                 currentPlot.device_and_sensor_ids_flow)
             if discovered:
                 currentPlot.device_and_sensor_ids_flow_confirmation = [
                     discovered]
-            else:
+            elif currentPlot.irrigation_mode == 'automatic':
                 errors['flow_confirmation'] = (
                     "Automatic mode requires a flow confirmation sensor "
                     "(WaziGate xlpp channel 5).")
-        if not currentPlot.plot_area_m2 or currentPlot.plot_area_m2 <= 0:
+        if (currentPlot.irrigation_mode == 'automatic'
+                and (not currentPlot.plot_area_m2
+                     or currentPlot.plot_area_m2 <= 0)):
             errors['plot_area_m2'] = (
                 f"{control_label} requires plot area to calculate irrigation volume.")
 
@@ -1112,14 +1133,21 @@ def _set_config_update(url, body):
     plot_manager.updateCurrentPlotMetadata(
         currentPlot.user_given_name, currentPlot.plot_area_m2, currentPlot.area_unit)
 
-    # Save the JSON data to the file
-    config_path = plot_manager.getCurrentConfig()
-    temporary_path = config_path + ".tmp"
-    with open(temporary_path, 'w') as json_file:
-        json.dump(data, json_file, indent=4)
-        json_file.flush()
-        os.fsync(json_file.fileno())
-    os.replace(temporary_path, config_path)
+    # SQLite is authoritative in deployed installations. JSON is read only as
+    # a one-time legacy import when APP_STATE_DB is not configured.
+    if configured_database_path() is not None:
+        store = get_app_state_store()
+        store.save_plot_config(currentPlot.stable_id, data)
+        store.mark_legacy_import_complete(
+            f"plot_config:{currentPlot.stable_id}")
+    else:
+        config_path = plot_manager.getCurrentConfig()
+        temporary_path = config_path + ".tmp"
+        with open(temporary_path, 'w') as json_file:
+            json.dump(data, json_file, indent=4)
+            json_file.flush()
+            os.fsync(json_file.fileno())
+        os.replace(temporary_path, config_path)
 
     _trace_event(
         "plot.configuration.saved", currentPlot,
@@ -1182,11 +1210,14 @@ def setConfig(url, body):
         for name in _CONFIG_UPDATE_FIELDS if hasattr(plot, name)
     }
     config_path = plot_manager.getCurrentConfig()
-    try:
-        with open(config_path, "rb") as handle:
-            previous_config = handle.read()
-    except FileNotFoundError:
-        previous_config = None
+    if configured_database_path() is not None:
+        previous_config = get_app_state_store().load_plot_config(plot.stable_id)
+    else:
+        try:
+            with open(config_path, "rb") as handle:
+                previous_config = handle.read()
+        except FileNotFoundError:
+            previous_config = None
 
     def restore():
         for name, value in snapshot.items():
@@ -1200,7 +1231,13 @@ def setConfig(url, body):
         except (OSError, KeyError, ValueError):
             logging.getLogger(__name__).exception(
                 "Failed to restore plot registry after settings rollback")
-        if previous_config is not None:
+        if configured_database_path() is not None:
+            if previous_config is None:
+                get_app_state_store().delete_plot_config(plot.stable_id)
+            else:
+                get_app_state_store().save_plot_config(
+                    plot.stable_id, previous_config)
+        elif previous_config is not None:
             rollback_path = config_path + ".rollback"
             with open(rollback_path, "wb") as handle:
                 handle.write(previous_config)
@@ -1231,144 +1268,8 @@ usock.routerPOST("/api/setConfig", setConfig)
 
 
 def getConfigsFromAllFiles():
-    # Get plots
-    plots = plot_manager.getPlots()
-
-    for i in range(1, len(plots)+1, 1):
-        config = plots[i].configPath
-        if os.path.exists(config):
-            with open(config, 'r') as file:
-                # Parse JSON from the file
-                data = json.load(file)
-            if plots[i].load_data_from_csv:
-                with open(plots[i].data_from_csv, "r") as file:
-                    # Perform operations on the file
-                    debug_csv = pd.read_csv(file, header=0)
-
-                plots[i].device_and_sensor_ids_moisture = []
-                plots[i].device_and_sensor_ids_temp = []
-                plots[i].device_and_sensor_ids_flow = []
-                plots[i].device_and_sensor_ids_flow_confirmation = []
-
-                # create array with sensors strings
-                for col in debug_csv.columns:
-                    if (
-                        col.startswith("tension")
-                        or col.startswith("vwc")
-                        or col.startswith("volumetric")
-                        or col.startswith("capacitive")
-                    ):
-                        plots[i].device_and_sensor_ids_moisture.append(col)
-                    elif col.startswith("soil_temp"):
-                        plots[i].device_and_sensor_ids_temp.append(col)
-                    # This is not implemented
-                    elif col.startswith("flow"):
-                        plots[i].device_and_sensor_ids_flow.append(col)
-            else:
-                # Get choosen sensors
-                # print("Before assignment:",  plot_manager.Plots[i].device_and_sensor_ids_moisture)
-                plots[i].device_and_sensor_ids_moisture = data.get(
-                    'DeviceAndSensorIdsMoisture', [])
-                # print("After assignment:",  plot_manager.Plots[i].device_and_sensor_ids_moisture)
-                plots[i].device_and_sensor_ids_temp = data.get(
-                    'DeviceAndSensorIdsTemp', [])
-                plots[i].device_and_sensor_ids_flow = data.get(
-                    'DeviceAndSensorIdsFlow', [])
-                confirmation = data.get(
-                    'DeviceAndSensorIdsFlowConfirmation', [])
-                plots[i].device_and_sensor_ids_flow_confirmation = (
-                    confirmation if isinstance(confirmation, list) else [])
-
-            # Get data from forms
-            plots[i].user_given_name = data.get('Name', [])
-            plots[i].owner = data.get('Owner', getattr(plots[i], 'owner', ''))
-            plots[i].configuration_source = data.get(
-                'Configuration_source', getattr(plots[i], 'configuration_source', 'legacy'))
-            plots[i].timezone = data.get(
-                'Timezone', getattr(plots[i], 'timezone', 'UTC')) or 'UTC'
-            plots[i].zone_name = data.get(
-                'Zone_name', plots[i].user_given_name)
-            plots[i].sensor_kind = data.get('Sensor_kind', [])
-            gps_info = data.get('Gps_info', {})
-            if isinstance(gps_info, dict):
-                lat = gps_info.get('latitude', gps_info.get('lattitude', 0))
-                lon = gps_info.get('longitude', 0)
-                plots[i].gps_info = {
-                    "latitude": lat,
-                    "longitude": lon,
-                    "lattitude": lat,
-                }
-            else:
-                plots[i].gps_info = gps_info
-            plots[i].enable_experimental_ndre_kc = bool(
-                data.get('Enable_experimental_ndre_kc', False))
-            plots[i].slope = float(data.get('Slope', []))
-            plots[i].threshold = float(data.get('Threshold', []))
-            plots[i].threshold_static = float(
-                data.get('Threshold', plots[i].threshold))
-            plots[i].threshold_mode = str(data.get(
-                'Threshold_mode',
-                'dynamic' if data.get('Use_dynamic_threshold', False) else 'static',
-            )).strip().lower()
-            plots[i].field_capacity_vwc = data.get('Field_capacity_vwc')
-            plots[i].wilting_point_vwc = data.get('Wilting_point_vwc')
-            plots[i].root_depth_m = data.get('Root_depth_m')
-            plots[i].sensor_depth_m = data.get('Sensor_depth_m')
-            plots[i].depletion_fraction = data.get('Depletion_fraction')
-            plots[i].stage_depletion_fractions = data.get(
-                'Stage_depletion_fractions', {}) or {}
-            plots[i].stage_thresholds_cbar = data.get(
-                'Stage_thresholds_cbar', {}) or {}
-            plots[i].threshold_hysteresis_cbar = float(data.get(
-                'Threshold_hysteresis_cbar', 0.0) or 0.0)
-            plots[i].application_efficiency = float(
-                data.get('Application_efficiency', 0.85))
-            plots[i].effective_rainfall_fraction = float(
-                data.get('Effective_rainfall_fraction', 0.80))
-            plots[i].plot_area_m2 = float(data.get('Plot_area_m2', 0))
-            plots[i].irrigation_type = data.get(
-                'Irrigation_type', 'unknown') or 'unknown'
-            plots[i].irrigation_mode = data.get(
-                'Irrigation_mode', getattr(plots[i], 'irrigation_mode', '')) or ''
-            plots[i].flow_confirmation_mode = str(data.get(
-                'Flow_confirmation_mode',
-                getattr(plots[i], 'flow_confirmation_mode', 'event'))
-            ).strip().lower()
-            plots[i].look_ahead_time = float(data.get('Look_ahead_time', []))
-            plots[i].start_date = data.get('Start_date', [])
-            plots[i].period = int(data.get('Period', []))
-            plots[i].soil_type = data.get('Soil_type', [])
-            plots[i].soil_texture_class = data.get('Soil_texture_class', None)
-            plots[i].soil_calibration = data.get('Soil_calibration', {}) or {}
-            plots[i].permanent_wilting_point = float(
-                data.get('PermanentWiltingPoint', []))
-            plots[i].field_capacity_upper = float(
-                data.get('FieldCapacityUpper', []))
-            plots[i].field_capacity_lower = float(
-                data.get('FieldCapacityLower', []))
-            plots[i].saturation = float(data.get('Saturation', []))
-
-            # Get soil water retention curve -> currently not needed here
-            plots[i].soil_water_retention_curve = data.get(
-                'Soil_water_retention_curve', [])
-
-            # Phenology configuration
-            plots[i].crop_type = data.get('Crop_type', '')
-            plots[i].planting_date = data.get('Planting_date', '')
-            plots[i].harvest_date = data.get('Harvest_date')
-            try:
-                plots[i].initial_gdd = float(data.get('Initial_gdd', 0.0))
-            except (TypeError, ValueError):
-                plots[i].initial_gdd = 0.0
-            plots[i].farm_data_bundle = data.get('Farm_data_bundle', None)
-
-            # Sensor kind
-            if plots[i].sensor_kind in ("tension", "both"):
-                plots[i].sensor_unit = "Moisture in cbar (Soil Tension)"
-            elif plots[i].sensor_kind == "capacitive":
-                plots[i].sensor_unit = "Moisture in % (Volumetric Water Content)"
-            else:
-                plots[i].sensor_unit = "Unit is unknown"
+    for plot in plot_manager.getPlots().values():
+        plot.getConfigFromFile()
 
 # Get the config from backend to disply it in frontend settings.html
 
@@ -1494,8 +1395,12 @@ usock.routerGET("/api/returnConfig", returnConfig)
 
 
 def checkConfigPresent(url, body):
-    if os.path.exists(plot_manager.ConfigPath):  # solve multiple calls with dirty bit
-        currentPlot = plot_manager.getCurrentPlot()
+    currentPlot = plot_manager.getCurrentPlot()
+    config_exists = (get_app_state_store().load_plot_config(
+        currentPlot.stable_id) is not None
+        if configured_database_path() is not None
+        else os.path.exists(plot_manager.ConfigPath))
+    if config_exists:  # solve multiple calls with dirty bit
         currentPlot.getConfigFromFile()
         response_data = {"config_present": True}
         status_code = 200
@@ -1519,9 +1424,15 @@ usock.routerGET("/api/checkConfigPresent", checkConfigPresent)
 def checkActiveIrrigation(url, body):
     currentPlot = plot_manager.getCurrentPlot()
     config_present = bool(currentPlot.getConfigFromFile())
+    plot_id = str(getattr(currentPlot, "stable_id", getattr(currentPlot, "id", "")))
+    operation = (get_operations_store().latest_for_plot(
+        plot_id, statuses={"active"}) if config_present else None)
     response_data = {
-        "activeIrrigation": bool(
-            config_present and currentPlot.device_and_sensor_ids_flow),
+        "activeIrrigation": operation is not None,
+        "actuatorConfigured": bool(
+            config_present and actuation._has_actuator_support(currentPlot)),
+        "mode": actuation.resolve_irrigation_mode(currentPlot),
+        "operation": operation,
     }
     status_code = 200
 
@@ -1697,51 +1608,152 @@ def extract_and_format_csv(data, key):
     return final
 
 
-def irrigateManually(url, body):
+def pumpControl(url, body):
     request_values = parse_qs(body.decode('utf-8'))
     currentPlot = plot_manager.getCurrentPlot()
     mode = actuation.resolve_irrigation_mode(currentPlot)
-    if mode == "advisory_only" or not actuation._has_actuator_support(currentPlot):
-        return 400, bytes(json.dumps({"status": "error", "message": "Manual irrigation is disabled for advisory-only plots or plots without an actuator."}), "utf8"), []
-    recommendation = actuation.get_irrigation_recommendation(currentPlot)
-    if not (recommendation.get("action") or {}).get("should_irrigate", False):
-        return 409, bytes(json.dumps({
-            "status": "not_required",
-            "message": "The current crop-water recommendation does not require irrigation."
+    state = request_values.get("state", [""])[0].strip().lower()
+    if state not in {"on", "off"}:
+        return 400, bytes(json.dumps({
+            "status": "error", "message": "state must be 'on' or 'off'."
         }), "utf8"), []
-    amount = (recommendation.get("water") or {}).get(
+    if not actuation._has_actuator_support(currentPlot):
+        return 400, bytes(json.dumps({
+            "status": "error", "message": "No pump or valve actuator is configured."
+        }), "utf8"), []
+    plot_id = str(getattr(
+        currentPlot, "stable_id", getattr(currentPlot, "id", "")))
+    store = get_operations_store()
+    active = store.latest_for_plot(plot_id, statuses={"active"})
+
+    # OFF is always available as a fail-safe, including while Full-auto runs.
+    if state == "off":
+        if not actuation.set_pump_state(currentPlot, False):
+            return 502, bytes(json.dumps({
+                "status": "error", "message": "The pump OFF command failed."
+            }), "utf8"), []
+        delivered = None
+        if active is not None:
+            context = (active.get("recommendation") or {}).get("flow_control")
+            detail = {"command": "pump_off"}
+            if isinstance(context, dict):
+                try:
+                    delivered, evidence = actuation._measured_delivery(
+                        currentPlot, context)
+                    detail.update(evidence)
+                    if delivered > 0:
+                        store.update_operation(
+                            active["operation_id"], amount_m3=delivered)
+                except (requests.exceptions.RequestException, RuntimeError,
+                        ValueError, TypeError, KeyError) as exc:
+                    detail["meter_error"] = str(exc)
+            active = store.get_operation(active["operation_id"])
+            if delivered is not None:
+                destination = "verified"
+            elif active.get("mode") == "automatic":
+                destination = "failed"
+                detail["error"] = "manual_stop_without_meter_evidence"
+            else:
+                destination = "completed"
+            try:
+                store.transition(active["operation_id"], destination, detail)
+            except ValueError:
+                # A metering thread may have completed the operation between
+                # the OFF request and this transition.
+                pass
+        return 200, bytes(json.dumps({
+            "status": "success", "pump": "off", "delivered_m3": delivered,
+        }), "utf8"), []
+
+    if mode not in {"manual", "approval_required"}:
+        return 409, bytes(json.dumps({
+            "status": "error",
+            "message": "Pump ON is available only in Semi-auto mode."
+        }), "utf8"), []
+    if active is not None:
+        return 200, bytes(json.dumps({
+            "status": "already_on", "pump": "on", "operation": active,
+        }), "utf8"), []
+
+    recommendation = actuation.get_irrigation_recommendation(currentPlot)
+    recommended = (recommendation.get("water") or {}).get(
         "recommended_volume_m3")
     try:
-        amount = float(amount)
+        recommended = float(recommended)
+        if not np.isfinite(recommended) or recommended <= 0:
+            recommended = None
     except (TypeError, ValueError):
-        amount = 0.0
-    if not np.isfinite(amount) or amount <= 0:
-        return 400, bytes(json.dumps({
-            "status": "error",
-            "message": (
-                "Calculated irrigation volume is unavailable or zero. "
-                "Check plot area, ET0, rainfall, and demand settings.")
-        }), "utf8"), []
-
+        recommended = None
+    context = None
+    sensor_reference = actuation._confirmation_sensor_reference(
+        currentPlot, currentPlot.device_and_sensor_ids_flow)
+    if sensor_reference:
+        try:
+            context = {
+                "sensor_reference": sensor_reference,
+                "baseline": actuation._read_flow_confirmation(sensor_reference),
+                "command_time": pd.Timestamp.now(tz="UTC").isoformat(),
+            }
+        except (requests.exceptions.RequestException, RuntimeError, ValueError,
+                TypeError, KeyError):
+            context = None
     request_key = request_values.get('idempotency_key', [None])[0]
     if not request_key:
-        request_key = f"manual:{currentPlot.stable_id}:{amount}:{pd.Timestamp.now(tz='UTC').floor('min').isoformat()}"
-    initial_status = "pending_approval" if mode == "approval_required" else "approved"
-    operation, created = get_operations_store().create_operation(
-        idempotency_key=request_key, plot_id=currentPlot.stable_id,
-        farm_id=currentPlot.farm_id, plot_name=currentPlot.user_given_name,
-        source="manual", mode=mode, status=initial_status, amount_m3=amount)
+        request_key = (f"pump-on:{plot_id}:"
+                       f"{pd.Timestamp.now(tz='UTC').floor('min').isoformat()}")
+    with actuation._irrigation_lock:
+        active = store.latest_for_plot(plot_id, statuses={"active"})
+        if active is not None:
+            return 200, bytes(json.dumps({
+                "status": "already_on", "pump": "on", "operation": active,
+            }), "utf8"), []
+        operation, created = store.create_operation(
+            idempotency_key=request_key, plot_id=plot_id,
+            farm_id=currentPlot.farm_id, plot_name=currentPlot.user_given_name,
+            source="manual", mode="manual", status="approved", amount_m3=None,
+            recommendation={
+                "recommended_volume_m3": recommended,
+                "flow_control": context,
+            })
+        if created:
+            try:
+                operation, _ = store.transition(
+                    operation["operation_id"], "active",
+                    {"command": "pump_on"})
+            except ValueError:
+                store.transition(operation["operation_id"], "failed", {
+                    "error": "prior_irrigation_active"})
+                active = store.latest_for_plot(plot_id, statuses={"active"})
+                return 200, bytes(json.dumps({
+                    "status": "already_on", "pump": "on",
+                    "operation": active,
+                }), "utf8"), []
     if not created:
         return 200, bytes(json.dumps({"status": "duplicate", "operation": operation}), "utf8"), []
-    if mode == "approval_required":
-        return 202, bytes(json.dumps({"status": "pending_approval", "operation": operation}), "utf8"), []
+    if not actuation.set_pump_state(currentPlot, True):
+        # Best-effort OFF protects against an uncertain ON response.
+        actuation.set_pump_state(currentPlot, False)
+        operation, _ = store.transition(operation["operation_id"], "failed", {
+            "error": "pump_on_command_failed"})
+        return 502, bytes(json.dumps({
+            "status": "error", "message": "The pump ON command failed.",
+            "operation": operation,
+        }), "utf8"), []
+    return 200, bytes(json.dumps({
+        "status": "success", "pump": "on", "operation": operation,
+    }), "utf8"), []
 
-    response = actuation.execute_operation_command(currentPlot, operation)
-    updated = get_operations_store().get_operation(operation["operation_id"])
-    if not response:
-        return 400, bytes(json.dumps({"status": "error", "message": "Irrigation command failed.", "operation": updated}), "utf8"), []
-    return 200, bytes(json.dumps({"status": "success", "amount": amount,
-                                 "operation": updated}), "utf8"), []
+
+usock.routerPOST("/api/pumpControl", pumpControl)
+
+
+def irrigateManually(url, body):
+    """Backward-compatible route; manual irrigation now means pump ON."""
+    values = parse_qs(body.decode("utf-8"))
+    values["state"] = ["on"]
+    encoded = "&".join(
+        f"{key}={value}" for key, items in values.items() for value in items)
+    return pumpControl(url, encoded.encode("utf-8"))
 
 
 usock.routerPOST("/api/irrigateManually", irrigateManually)
@@ -2549,6 +2561,19 @@ def _weather_icon_from_rain(rain_mm):
 
 def getWeatherForecast(url, body):
     currentPlot = plot_manager.getCurrentPlot()
+    config_path = getattr(currentPlot, "configPath", None)
+    configured = (get_app_state_store().load_plot_config(
+        currentPlot.stable_id) is not None
+        if configured_database_path() is not None
+        else bool(config_path and os.path.isfile(config_path)))
+    if not configured:
+        _trace_event("weather.forecast.skipped", currentPlot,
+                     reason="configuration_required")
+        return 200, bytes(json.dumps({
+            "available": False,
+            "reason": "configuration_required",
+            "days": [],
+        }), "utf8"), []
     farm, lat, lon = _farm_weather_location(currentPlot)
     if lat is None or lon is None:
         _trace_event("weather.forecast.skipped", currentPlot,
@@ -3037,6 +3062,8 @@ usock.routerGET("/api/getPipelineState", getPipelineState)
 
 def getAlertStatus(url, body):
     currentPlot = plot_manager.getCurrentPlot()
+    sqlite_store = (get_app_state_store()
+                    if configured_database_path() is not None else None)
     alert_path = os.path.join(
         "data",
         "alerts",
@@ -3047,7 +3074,22 @@ def getAlertStatus(url, body):
         "alerts",
         f"plot_{currentPlot.id}.notify.json",
     )
-    if not os.path.exists(alert_path):
+    sqlite_alert = (sqlite_store.load_latest_alert(currentPlot.id)
+                    if sqlite_store is not None else None)
+    alert_scope = f"latest_alert:{currentPlot.id}"
+    if (sqlite_store is not None and sqlite_alert is None
+            and not sqlite_store.legacy_import_complete(alert_scope)):
+        if os.path.exists(alert_path):
+            try:
+                with open(alert_path, "r") as handle:
+                    sqlite_alert = json.load(handle)
+                sqlite_store.append_alert(currentPlot.id, sqlite_alert)
+            except (OSError, ValueError, TypeError):
+                logging.getLogger(__name__).exception(
+                    "Unable to import legacy alert: %s", alert_path)
+        sqlite_store.mark_legacy_import_complete(alert_scope)
+    if (sqlite_alert is None and (sqlite_store is not None
+                                  or not os.path.exists(alert_path))):
         return 200, bytes(json.dumps({"available": False}), "utf8"), []
 
     def _parse_utc(ts_value):
@@ -3064,6 +3106,21 @@ def getAlertStatus(url, body):
             return None
 
     def _load_notify_state():
+        if sqlite_store is not None:
+            state_key = f"alert_notification:{currentPlot.id}"
+            state = sqlite_store.load_runtime_state(state_key)
+            scope = f"{state_key}:legacy"
+            if state is not None or sqlite_store.legacy_import_complete(scope):
+                return state or {}
+            if os.path.exists(notify_path):
+                try:
+                    with open(notify_path, "r") as handle:
+                        state = json.load(handle)
+                    sqlite_store.save_runtime_state(state_key, state)
+                except (OSError, ValueError, TypeError):
+                    state = {}
+            sqlite_store.mark_legacy_import_complete(scope)
+            return state or {}
         if not os.path.exists(notify_path):
             return {}
         try:
@@ -3073,13 +3130,20 @@ def getAlertStatus(url, body):
             return {}
 
     def _save_notify_state(state):
+        if sqlite_store is not None:
+            sqlite_store.save_runtime_state(
+                f"alert_notification:{currentPlot.id}", state)
+            return
         os.makedirs(os.path.dirname(notify_path), exist_ok=True)
         with open(notify_path, "w") as handle:
             json.dump(state, handle, indent=2)
 
     try:
-        with open(alert_path, "r") as handle:
-            payload = json.load(handle)
+        if sqlite_alert is not None:
+            payload = sqlite_alert
+        else:
+            with open(alert_path, "r") as handle:
+                payload = json.load(handle)
         payload["available"] = True
 
         urgency = str(payload.get("urgency", "")).lower()
