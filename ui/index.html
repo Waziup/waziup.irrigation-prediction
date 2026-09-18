@@ -104,8 +104,16 @@
 
         }
 
-        // Pump card status indicators
-        if (active && active.data && active.data.activeIrrigation) {
+        const pumpActive = active?.data?.activeIrrigation === true;
+        const pumpMode = active?.data?.mode;
+        const pumpCard = document.getElementById('plot-pump-control');
+        if (pumpCard) {
+          pumpCard.hidden = !active?.data?.actuatorConfigured
+            || !['manual', 'approval_required', 'automatic'].includes(pumpMode);
+          pumpCard.dataset.mode = pumpMode || '';
+        }
+        // Pump status and Semi-auto controls.
+        if (pumpActive) {
           const on = document.getElementById('pump-status-on');
           const off = document.getElementById('pump-status-off');
           if (on) on.style.display = 'inline-block';
@@ -115,6 +123,17 @@
           const off = document.getElementById('pump-status-off');
           if (on) on.style.display = 'none';
           if (off) off.style.display = 'inline-block';
+        }
+        const pumpOnButton = document.getElementById('pump-on-button');
+        const pumpOffButton = document.getElementById('pump-off-button');
+        const semiAuto = ['manual', 'approval_required'].includes(pumpMode);
+        if (pumpOnButton) {
+          pumpOnButton.hidden = !semiAuto;
+          pumpOnButton.disabled = pumpActive;
+        }
+        if (pumpOffButton) {
+          pumpOffButton.hidden = !semiAuto;
+          pumpOffButton.disabled = !pumpActive;
         }
 
         // Alert status
@@ -987,10 +1006,10 @@
               ? "The soil has reached the irrigation trigger."
               : "The soil is expected to become too dry.";
             const modeDetails = {
-              automatic: ["Automatic", "The system starts irrigation"],
-              approval_required: ["Approval required", "Farmer approval is needed"],
-              manual: ["Manual", "The farmer starts irrigation"],
-              advisory_only: ["Advisory only", "The system will not start irrigation"],
+              automatic: ["Full-auto", "The system starts and stops irrigation"],
+              approval_required: ["Semi-auto", "You turn irrigation on and off"],
+              manual: ["Semi-auto", "You turn irrigation on and off"],
+              advisory_only: ["Off", "No hardware commands"],
             };
             const configuredMode = modeDetails[action.mode]
               || ["Not configured", "Choose a mode in Settings"];
@@ -1020,7 +1039,12 @@
             if (actionTitle) actionTitle.textContent = actionHeading;
             if (cropMeta) cropMeta.textContent = crop.crop_name || crop.crop_type || "--";
             if (stageMeta) stageMeta.textContent = growthStage || "--";
-            setPumpActuatorVisibility(actuatorBased);
+            setPumpActuatorVisibility(actuatorBased, action.mode);
+            const pumpRecommended = document.getElementById('pump-recommended-amount');
+            if (pumpRecommended) pumpRecommended.textContent =
+              Number.isFinite(volumeM3) && volumeM3 > 0
+                ? `${volumeM3.toFixed(2)} m³`
+                : '--';
             if (scheduleButton) {
               scheduleButton.textContent = action.mode === "approval_required"
                 ? "Request Irrigation Approval"
@@ -1151,7 +1175,15 @@
         console.info('[IRRIGATION_TRACE] weather forecast: request completed', forecast);
         if (generation !== weatherRefreshGeneration) return null;
         const container = document.getElementById('weather-forecast-grid');
+        const panel = document.getElementById('farm-weather-forecast');
         if (!container) return;
+
+        if (forecast?.reason === 'configuration_required') {
+          container.replaceChildren();
+          if (panel) panel.hidden = false;
+          return forecast;
+        }
+        if (panel) panel.hidden = false;
 
         if (!forecast || !Array.isArray(forecast.days)) {
           container.innerHTML = '<div class="weather-empty">No forecast data.</div>';
@@ -1224,53 +1256,50 @@
         // Placeholder for future schedule state sync.
       }
 
-      function setPumpActuatorVisibility(actuatorBased) {
-        const card = document.querySelector('.pump-card');
+      function setPumpActuatorVisibility(actuatorBased, mode) {
+        const card = document.getElementById('plot-pump-control');
         const amount = document.getElementById('irrigation_value_form');
         const schedule = document.getElementById('schedule_irrigation');
-        if (card) card.classList.toggle('advisory-only', !actuatorBased);
+        if (card) card.hidden = !actuatorBased || mode === 'advisory_only';
         if (amount) amount.disabled = !actuatorBased;
         if (schedule) schedule.disabled = !actuatorBased;
       }
 
       let manualIrrigationRequestKey = null;
 
-      function irrigateManually() {
-        const button = document.getElementById("schedule_irrigation");
+      async function setPumpState(state) {
+        const onButton = document.getElementById('pump-on-button');
+        const offButton = document.getElementById('pump-off-button');
         if (!manualIrrigationRequestKey) {
           manualIrrigationRequestKey = (window.crypto?.randomUUID?.() ||
-            `manual-${Date.now()}`);
+            `pump-${state}-${Date.now()}`);
         }
-        if (button) button.disabled = true;
-        return fetch('../api/irrigateManually', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: new URLSearchParams({idempotency_key: manualIrrigationRequestKey}).toString()
-        })
-            .then((response) => response.text())
-            .then((data) => {
-              const dataObject = JSON.parse(data);
-              if (dataObject.status == "success") {
-                alert(
-                  "Irrigation command accepted and recorded."
-                );
-              } else if (dataObject.status == "pending_approval") {
-                alert("Irrigation request recorded and waiting for approval.");
-              } else if (dataObject.status == "duplicate") {
-                alert("This irrigation request was already recorded; no duplicate command was sent.");
-              } else {
-                alert(dataObject.message || "Cannot schedule irrigation.");
-              }
-              console.log(data);
-            })
-            .catch((error) => {
-              console.error("Error:", error);
-              alert("An error occurred during the request. Please try again.");
-            })
-            .finally(() => {
-              manualIrrigationRequestKey = null;
-              if (button && currentIrrigationActuatorBased) button.disabled = false;
-            });
+        if (onButton) onButton.disabled = true;
+        if (offButton) offButton.disabled = true;
+        try {
+          const response = await fetch('../api/pumpControl', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: new URLSearchParams({
+              state,
+              idempotency_key: manualIrrigationRequestKey,
+            }).toString(),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.message || `Pump ${state} failed`);
+          await updateMetrics();
+          return data;
+        } catch (error) {
+          console.error('Pump control failed:', error);
+          alert(error.message || 'The pump command failed.');
+          return null;
+        } finally {
+          manualIrrigationRequestKey = null;
+        }
+      }
+
+      function irrigateManually() {
+        return setPumpState('on');
       }
 
       function startTraining() {
@@ -1524,7 +1553,7 @@
         <div class="farm-operations-grid">
           <div class="card farm-plots-panel"><div class="panel-title">Plot status</div><div id="farm-plot-list" class="farm-plot-list"><div class="dashboard-empty">Loading plots…</div></div></div>
         </div>
-        <div class="card dashboard-weather-forecast">
+        <div id="farm-weather-forecast" class="card dashboard-weather-forecast">
           <div class="weather-heading"><div class="weather-title">Farm weather forecast</div></div>
           <div id="weather-forecast-grid" class="weather-grid"></div>
         </div>
@@ -1562,6 +1591,14 @@
               <div class="plot-water-item plot-water-amount"><span>Calculated water to apply</span><strong id="advice-volume">--</strong><small id="advice-volume-basis">ETc, effective rain, and application efficiency are included</small></div>
               <div class="plot-water-item"><span>When to irrigate</span><strong id="advice-time">--</strong><small id="advice-time-basis">Before the soil becomes too dry</small></div>
               <div class="plot-water-item"><span>Irrigation mode</span><strong id="advice-mode">--</strong><small id="advice-mode-basis">Configured by the farmer</small></div>
+            </div>
+            <div id="plot-pump-control" class="plot-pump-control" hidden>
+              <div><span>Pump</span><strong id="pump-status-on" class="status-on" style="display:none">ON</strong><strong id="pump-status-off" class="status-off">OFF</strong></div>
+              <div><span>Recommended</span><strong id="pump-recommended-amount">--</strong></div>
+              <div class="plot-pump-actions">
+                <button id="pump-on-button" type="button" onclick="setPumpState('on')">Turn ON</button>
+                <button id="pump-off-button" type="button" onclick="setPumpState('off')" disabled>Turn OFF</button>
+              </div>
             </div>
           </section>
 

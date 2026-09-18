@@ -85,7 +85,6 @@
         moisture: [],
         temperature: [],
         flow: [],
-        flowConfirmation: [],
       };
 
       function escapeHtml(value) {
@@ -158,7 +157,6 @@
               textBox.disabled = false; // Enable the textbox
               textBox.style.backgroundColor = ""; // Remove the grey-out effect
             }
-            selectMatchingFlowConfirmationSensor(true);
             updateIrrigationModeNote();
           });
 
@@ -281,9 +279,11 @@
       }
 
       function setIrrigationModeChoice(mode) {
-        const supportedMode = ["manual", "approval_required", "automatic"].includes(mode)
-          ? mode
-          : "manual";
+        const supportedMode = mode === "automatic"
+          ? "automatic"
+          : mode === "advisory_only"
+            ? "advisory_only"
+            : "manual";
         const select = document.getElementById("actuator_mode_form");
         if (select) select.value = supportedMode;
         const radio = document.querySelector(`input[name="irrigation_mode_choice"][value="${supportedMode}"]`);
@@ -296,26 +296,12 @@
         const hasActuator = (document.getElementById("actuator_list_flow")?.selectedOptions?.length || 0) > 0;
         const note = document.getElementById("irrigation-mode-note");
         if (!note) return;
-        note.textContent = mode !== "manual" && !hasActuator
+        note.textContent = mode !== "advisory_only" && !hasActuator
           ? "Select a pump or valve actuator above before saving this mode."
-          : mode === "manual"
+          : mode === "advisory_only"
             ? " "
             : "The selected actuator will follow this control mode.";
-        note.classList.toggle("needs-actuator", mode !== "manual" && !hasActuator);
-      }
-
-      function selectMatchingFlowConfirmationSensor(force = false) {
-        const actuator = document.getElementById("actuator_list_flow")
-          ?.selectedOptions?.[0]?.value;
-        const confirmation = document.getElementById(
-          "sensor_list_flow_confirmation");
-        if (!actuator || !confirmation) return;
-        const deviceId = actuator.split("/", 1)[0];
-        const match = Array.from(confirmation.options).find(
-          (option) => option.value.split("/", 1)[0] === deviceId);
-        if (match && (force || configuredSensorSelections.flowConfirmation.length === 0)) {
-          confirmation.value = match.value;
-        }
+        note.classList.toggle("needs-actuator", mode !== "advisory_only" && !hasActuator);
       }
 
       function sleep(ms) {
@@ -552,8 +538,7 @@
         document.getElementById("use_dynamic_threshold_form").checked = false;
         document.getElementById("flow_confirmation_mode_form").value = "event";
         document.getElementById("soil_type_select").value = "Sandy_Soil";
-        ["sensor_list_moisture", "sensor_list_temp", "actuator_list_flow",
-          "sensor_list_flow_confirmation"].forEach((id) => {
+        ["sensor_list_moisture", "sensor_list_temp", "actuator_list_flow"].forEach((id) => {
           Array.from(document.getElementById(id)?.options || []).forEach((option) => { option.selected = false; });
         });
         setIrrigationModeChoice("manual");
@@ -678,10 +663,6 @@
           document.getElementById("actuator_list_flow"),
           configuredSensorSelections.flow
         );
-        highlightElement(
-          document.getElementById("sensor_list_flow_confirmation"),
-          configuredSensorSelections.flowConfirmation
-        );
       }
 
       // Get formerly saved config from backend
@@ -699,7 +680,6 @@
                 moisture: response_data.DeviceAndSensorIdsMoisture || [],
                 temperature: response_data.DeviceAndSensorIdsTemp || [],
                 flow: response_data.DeviceAndSensorIdsFlow || [],
-                flowConfirmation: response_data.DeviceAndSensorIdsFlowConfirmation || [],
               };
 
               // Assignment for Moisture
@@ -718,10 +698,6 @@
               highlightElement(
                 document.getElementById("actuator_list_flow"),
                 configuredSensorSelections.flow
-              );
-              highlightElement(
-                document.getElementById("sensor_list_flow_confirmation"),
-                configuredSensorSelections.flowConfirmation
               );
 
               // Assignment for Sensor_kind
@@ -1227,14 +1203,12 @@
         selectedOptionsMoisture = evalSelected("sensor_list_moisture");
         selectedOptionsTemp = evalSelected("sensor_list_temp");
         selectedOptionsFlow = evalSelected("actuator_list_flow");
-        const selectedOptionsFlowConfirmation = evalSelected(
-          "sensor_list_flow_confirmation");
 
         const irrigationMode = document.querySelector(
           'input[name="irrigation_mode_choice"]:checked'
         )?.value || "manual";
-        if (irrigationMode !== "manual" && selectedOptionsFlow.length === 0) {
-          alert("Select a pump or valve actuator for approval or automatic mode, or choose Manual.");
+        if (irrigationMode !== "advisory_only" && selectedOptionsFlow.length === 0) {
+          alert("Select a pump or valve actuator for Full-auto or Semi-auto, or choose Off.");
           return;
         }
 
@@ -1257,9 +1231,6 @@
         const queryParamsFlow = selectedOptionsFlow.join(
           "&selectedOptionsFlow="
         );
-        const queryParamsFlowConfirmation = selectedOptionsFlowConfirmation.join(
-          "&selectedOptionsFlowConfirmation="
-        );
         const queryForms = parseForms();
         const queryRetention = parseSoilWaterRetention();
         if (queryRetention === null) {
@@ -1272,7 +1243,7 @@
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
           },
-          body: `selectedOptionsMoisture=${queryParamsMoisture}&selectedOptionsTemp=${queryParamsTemp}&selectedOptionsFlow=${queryParamsFlow}&selectedOptionsFlowConfirmation=${queryParamsFlowConfirmation}&${queryForms}&ret=${encodeURIComponent(
+          body: `selectedOptionsMoisture=${queryParamsMoisture}&selectedOptionsTemp=${queryParamsTemp}&selectedOptionsFlow=${queryParamsFlow}&${queryForms}&ret=${encodeURIComponent(
             queryRetention
           )}`,
         })
@@ -1341,13 +1312,10 @@
         const sensor_list_temp = document.getElementById("sensor_list_temp");
         const actuator_list_flow =
           document.getElementById("actuator_list_flow");
-        const sensor_list_flow_confirmation = document.getElementById(
-          "sensor_list_flow_confirmation");
 
         showElements();
 
-        [sensor_list_moisture, sensor_list_temp, actuator_list_flow,
-          sensor_list_flow_confirmation].forEach((select) => {
+        [sensor_list_moisture, sensor_list_temp, actuator_list_flow].forEach((select) => {
           if (select) select.replaceChildren();
         });
 
@@ -1373,13 +1341,8 @@
           if (sensor.isActuator) {
             appendOption(actuator_list_flow, sensor);
           }
-          const xlppChannel = sensor.meta?.xlppChan ?? sensor.meta?.xlppchan;
-          if (!sensor.isActuator && Number(xlppChannel) === 5) {
-            appendOption(sensor_list_flow_confirmation, sensor);
-          }
         });
         applyConfiguredSensorSelections();
-        selectMatchingFlowConfirmationSensor();
       }
 
       // Creates List of sensors
@@ -1458,7 +1421,7 @@
           console.warn("Device discovery unavailable; using saved data sources:", error);
           applyConfiguredSensorSelections();
           const hasOptions = ["sensor_list_moisture", "sensor_list_temp",
-            "actuator_list_flow", "sensor_list_flow_confirmation"]
+            "actuator_list_flow"]
             .some((id) => document.getElementById(id)?.options.length > 0);
           if (!hasOptions) {
             ["sensor_list_moisture", "sensor_list_temp"].forEach((id) => {
@@ -1751,7 +1714,7 @@
             </div>
 
             <div class="form-group">
-              <label for="actuator_list_flow">Pump, valve, or flow device</label>
+              <label for="actuator_list_flow">Pump or valve actuator</label>
 
               <select
                 id="actuator_list_flow"
@@ -1762,33 +1725,22 @@
             </div>
 
             <div class="form-group">
-              <label for="sensor_list_flow_confirmation">Flow confirmation sensor</label>
-              <select
-                id="sensor_list_flow_confirmation"
-                class="form-control"
-                size="3"
-              ></select>
-              <p class="form-hint">Required for automatic irrigation. WaziGate xlpp channel 5 sensors are selected or detected automatically.</p>
-            </div>
-
-            <div class="form-group">
               <label for="flow_confirmation_mode_form">Flow meter reading type</label>
               <select id="flow_confirmation_mode_form" class="form-control">
-                <option value="event">Latest irrigation volume</option>
-                <option value="cumulative">Cumulative meter total</option>
+                <option value="event">Latest irrigation volume (per event)</option>
+                <option value="cumulative">Cumulative meter total (running total)</option>
               </select>
-              <p class="form-hint">Choose cumulative only when the meter value continually increases; delivered volume is then calculated from before/after readings.</p>
             </div>
 
             <div class="form-group irrigation-mode-group">
               <label>Irrigation mode</label>
               <div class="mode-options">
-                <label class="mode-option"><input type="radio" name="irrigation_mode_choice" value="manual" checked /><span><strong>Manual</strong><small>The app calculates whether, when, and how much to irrigate; you operate the system yourself.</small></span></label>
-                <label class="mode-option"><input type="radio" name="irrigation_mode_choice" value="approval_required" /><span><strong>Approval required</strong><small>The app prepares the action, but the actuator runs only after your approval.</small></span></label>
-                <label class="mode-option"><input type="radio" name="irrigation_mode_choice" value="automatic" /><span><strong>Automatic</strong><small>The app may operate the selected actuator without asking for each irrigation.</small></span></label>
+                <label class="mode-option"><input type="radio" name="irrigation_mode_choice" value="automatic" /><span><strong>Full-auto</strong><small>The app starts irrigation and stops at the calculated amount.</small></span></label>
+                <label class="mode-option"><input type="radio" name="irrigation_mode_choice" value="manual" checked /><span><strong>Semi-auto</strong><small>You turn the configured pump or valve on and off.</small></span></label>
+                <label class="mode-option"><input type="radio" name="irrigation_mode_choice" value="advisory_only" /><span><strong>Off</strong><small>The app gives advice but does not operate irrigation hardware.</small></span></label>
               </div>
               <p id="irrigation-mode-note" class="mode-note" role="status"></p>
-              <select id="actuator_mode_form" class="compatibility-control" aria-hidden="true" tabindex="-1"><option value="manual">Manual</option><option value="approval_required">Approval required</option><option value="automatic">Automatic</option></select>
+              <select id="actuator_mode_form" class="compatibility-control" aria-hidden="true" tabindex="-1"><option value="automatic">Full-auto</option><option value="manual">Semi-auto</option><option value="advisory_only">Off</option></select>
             </div>
           </div>
           <div class="form-actions settings-step-actions">

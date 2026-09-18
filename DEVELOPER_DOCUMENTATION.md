@@ -188,10 +188,14 @@ values are based on the rice values in [FAO-56](https://www.fao.org/4/x0490e/x04
 **Returns**: CSV string  
 **Location**: Lines 669-705
 
+#### `pumpControl(url, body)`
+**Purpose**: Turn the configured pump or valve ON or OFF in Semi-auto mode
+**Parameters**: `state=on|off` and an optional idempotency key
+**Hardware contract**: Sends JSON boolean `true` or `false` to the WaziGate actuator. The calculated volume is displayed as advice and is not sent as an actuator value.
+**Safety**: OFF remains available as a fail-safe. Metered delivery is stored when a flow reading is available.
+
 #### `irrigateManually(url, body)`
-**Purpose**: Manually trigger irrigation for a plot  
-**Parameters**: the calculated recommendation supplies the irrigation volume
-**Location**: Lines 706-723
+**Purpose**: Backward-compatible alias for `pumpControl(state=on)`
 
 #### `getValuesForDashboard(url, body)`
 **Purpose**: Get current sensor values and predictions for UI dashboard  

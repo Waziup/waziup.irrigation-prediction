@@ -980,6 +980,30 @@ body {
 .schedule-btn { min-width: 0; max-width: 100%; justify-content: center; white-space: normal; text-align: center; }
 .pump-card.advisory-only { opacity: .82; }
 
+.plot-pump-control {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--gray-200);
+}
+.plot-pump-control[hidden] { display: none; }
+.plot-pump-control > div { display: flex; align-items: center; gap: 8px; }
+.plot-pump-control span { color: var(--gray-700); font-size: .84rem; }
+.plot-pump-actions { margin-left: auto; }
+.plot-pump-actions button {
+  border: 1px solid #1f7a4d;
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: #fff;
+  color: #17643e;
+  font-weight: 700;
+  cursor: pointer;
+}
+.plot-pump-actions button:last-child { border-color: #b42318; color: #b42318; }
+.plot-pump-actions button:disabled { opacity: .45; cursor: not-allowed; }
+
 @media (max-width: 1050px) {
   .dashboard-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .irrigation-advice { grid-column: 1 / -1; }
@@ -997,6 +1021,8 @@ body {
   .weather-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .pump-card .status-row { display: grid; grid-template-columns: 1fr; }
   .pump-status-section, .schedule-btn { width: 100%; }
+  .plot-pump-control { align-items: flex-start; flex-wrap: wrap; }
+  .plot-pump-actions { width: 100%; margin-left: 0; }
   .forecast-chart-frame { height: 280px; }
   .page-switcher .nav-item { min-width: 0; padding: 10px 8px; font-size: .78rem; }
 }
