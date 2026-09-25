@@ -20,6 +20,7 @@ services:
       WAZIGATE_PASSWORD: ${WAZIGATE_PASSWORD:-}
       # Requests arrive through the WaziGate Unix-socket app proxy.
       TRUST_WAZIGATE_PROXY_HEADERS: "true"
+      TRUSTED_BROWSER_ORIGINS: ${TRUSTED_BROWSER_ORIGINS-http://wazigate-dashboard-stable.staging.waziup.io}
       LOAD_DATA_FROM_CSV: ${LOAD_DATA_FROM_CSV:-False}
       SKIP_DATA_PREPROCESSING: ${SKIP_DATA_PREPROCESSING:-False}
       SKIP_TRAINING: ${SKIP_TRAINING:-False}
