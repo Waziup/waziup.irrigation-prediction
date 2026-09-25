@@ -141,9 +141,8 @@ pipeline {
                 catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
                     script {
                         def service_name = "wazi-app"
-                        // Make sure this matches the filename you renamed 'unittest.py' to!
-                        def test_filename = "unittest_irrigation.py" 
-                        
+                        def test_filename = "unittest_irrigation_prediction_app.py"
+
                         echo "Preparing and running tests on locally deployed Docker image..."
 
                         withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
@@ -152,12 +151,12 @@ pipeline {
                                 script: """
                                     sshpass -p "$SSH_PASSWORD_WAZIGATE" ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} "
                                         cd /var/lib/wazigate/apps/${APP_NAME} && \
-                                        
+
                                         # 1. Setup: Ensure tests folder and __init__.py exist inside the container
                                         docker-compose exec -T ${service_name} sh -c 'mkdir -p tests && touch tests/__init__.py' && \
-                                        
-                                        # 2. Execution: Run the specific test file so XMLTestRunner is used
-                                        docker-compose exec -T ${service_name} python3 tests/${test_filename}
+
+                                        # 2. Execution: Run the root-level test file so XMLTestRunner is used
+                                        docker-compose exec -T ${service_name} python3 ${test_filename}
                                     "
                                 """,
                                 returnStatus: true

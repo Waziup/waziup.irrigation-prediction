@@ -1,24 +1,16 @@
 # WaziUps WaziApp: irrigation-prediction
 This application (WaziApp) for the WaziGate predicts irrigation times with help of soil sensors and a weather API (open-meteo). A non-technical user guide with general instructions can be obtained from [here](help/user_guide.md).
 
-The field-aware Earth-observation configuration, quality outputs, conservative
-Kc policy, and deliberate scope exclusions are documented in
-[EO_IMPLEMENTATION.md](EO_IMPLEMENTATION.md).
-
-The measurements, calibration and hardware contracts required before a
-capability is operational are documented in
-[OPERATIONAL_DATA_REQUIREMENTS.md](OPERATIONAL_DATA_REQUIREMENTS.md).
-
 ## How to install
 
-Visit the WaziGates UI and open the App section. Press the plus button and click install custom app. Type into the textbox "waziup/irrigation-prediction:latest" to download/install the application from dockerhub. 
+Visit the WaziGates UI and open the App section. Press the plus button and click install custom app. Type into the textbox "waziup/irrigation-prediction:latest" to download/install the application from dockerhub.
 
 ## How to change run configuration
 
 For debugging there are 3 run configurations possible:
 
 - **Production mode:** run as WaziApp in a docker container on the WaziGate
-- **Local debugging environment:** Debug in Visual Studio with wazigate-edge and wazigate-dashboard running locally 
+- **Local debugging environment:** Debug in Visual Studio with wazigate-edge and wazigate-dashboard running locally
 - **Local debugging environment against local gateway:** Debug in Visual Studio with wazigate-edge and wazigate-dashboard running locally, using the API of a WaziGate that has its API exposed (e.g. local network).
 
 Local debug settings use `API_URL` in [`.env`](.env). Production Compose uses
@@ -36,7 +28,7 @@ inside the persistent WaziApp mount. On first startup, existing JSON settings
 and the former `data/operations.sqlite3` database are imported once; afterward,
 SQLite is authoritative and the legacy files are left untouched as backups.
 
-## How to build 
+## How to build
 
 ### Just clone the git and run the following cmd in the root folder:
 
@@ -45,7 +37,7 @@ SQLite is authoritative and the legacy files are left untouched as backups.
 ### Push to dockerhub:
 
 Issue the following cmd to push to dockerhub (you have to be logged in):
-    
+
     docker push waziup/irrigation-prediction:latest
 
 ### Copy image to local Raspberry Pi:
@@ -55,6 +47,6 @@ Create a folder with the name of the app at the following path: "/var/lib/waziga
 Issue the following cmd to push to dockerhub (you have to be logged in):
 
     docker save {id of image} | gzip | pv | ssh pi@{ip of rpi} docker load
-    
+
     # Example:
     docker save my-docker-image | gzip | pv | ssh pi@192.168.0.10 docker load
