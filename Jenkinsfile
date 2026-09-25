@@ -4,7 +4,7 @@ pipeline {
         booleanParam(name: 'perform_push_duckerhub', defaultValue: false, description: 'Set true to push to dockerhub.')
     }
     options {
-        timeout(time: 1, unit: 'HOURS')
+        timeout(time: 3, unit: 'HOURS')
     }
     environment {
         DOCKER_IMAGE_NAME = 'waziup/irrigation-prediction'
@@ -132,6 +132,17 @@ pipeline {
                             echo "Successfully deployed ${dockerImage} to local gateway and cleaned up."
                         }
                     }
+                }
+            }
+        }
+
+        stage('Inspect App Startup') {
+            steps {
+                withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSHPASS')]) {
+                    sh '''
+                        sshpass -e ssh -o StrictHostKeyChecking=no "pi@$LOCAL_WAZIGATE_IP" \
+                            'docker ps -a --filter name=waziup.irrigation-prediction; docker logs --tail 100 waziup.irrigation-prediction 2>&1'
+                    '''
                 }
             }
         }
