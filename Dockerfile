@@ -47,8 +47,7 @@ RUN \
         joblib==1.3 \
         xmlrunner \
         psutil \
-        gevent \
-        rasterio==1.3.11
+        gevent
         
 # keras tuner check usage, also xmlrunner for unittests, does not need to be included in the image
 
