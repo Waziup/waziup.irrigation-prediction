@@ -12,7 +12,7 @@ services:
     privileged: false
     environment:
       # Keep production routing independent from the developer API_URL in .env.
-      API_URL: ${WAZIGATE_API_URL:-http://wazigate:8080/}
+      API_URL: ${WAZIGATE_API_URL:-http://wazigate:80/}
       Proxy_URL: /var/lib/waziapp/proxy.sock
       # All application-owned structured state shares one persistent database.
       APP_STATE_DB: /var/lib/waziapp/data/wazifarm.sqlite3
