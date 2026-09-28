@@ -1,0 +1,80 @@
+.demo-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.demo-mode-banner button {
+  min-height: 38px;
+  padding: 8px 13px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+
+.demo-mode-banner {
+  position: fixed;
+  z-index: 1001;
+  inset: 0 0 auto;
+  min-height: 44px;
+  padding: 7px 18px;
+  border-bottom: 1px solid #f59e0b;
+  background: #fffbeb;
+  color: #78350f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  font-size: .82rem;
+}
+
+.demo-mode-banner[hidden] {
+  display: none;
+}
+
+.demo-mode-banner button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid #d97706;
+  background: #fff;
+  color: #92400e;
+}
+
+body.demo-mode .topbar {
+  top: 44px;
+}
+
+body.demo-mode .main-content {
+  padding-top: 44px;
+}
+
+/* Keep the temporary demo focused on dashboard and plot data. */
+body.demo-mode .app-sidebar .nav-item[data-page="settings"],
+body.demo-mode .page-switcher .nav-item[data-page="settings"] {
+  display: none;
+}
+
+body.demo-mode .page-switcher {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (max-width: 600px) {
+  .demo-mode-banner {
+    min-height: 82px;
+    padding: 7px 12px;
+    flex-direction: column;
+    gap: 5px;
+    text-align: center;
+  }
+
+  body.demo-mode .topbar {
+    top: 82px;
+  }
+
+  body.demo-mode .main-content {
+    padding-top: 82px;
+  }
+}

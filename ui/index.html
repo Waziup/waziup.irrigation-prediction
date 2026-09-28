@@ -9,8 +9,12 @@
 
     <link rel="stylesheet" href="styles.css?v=20260825-3" type="text/css" />
     <link rel="stylesheet" href="responsive.css?v=20260825-6" type="text/css" />
+    <link rel="stylesheet" href="demo.css?v=20260928-3" type="text/css" />
+    <link rel="stylesheet" href="eo-panel.css?v=20260928-2" type="text/css" />
     <script src="libs/chart.umd.min.js"></script>
     <script src="ui-icons.js"></script>
+    <script src="demo-data.js?v=20260928-3"></script>
+    <script src="eo-panel.js?v=20260928-2"></script>
 
     <script type="text/javascript">
       // This script adapts the mock UI to call the app backend endpoints.
@@ -25,6 +29,7 @@
       let farmDashboardRefreshGeneration = 0;
       let weatherRefreshGeneration = 0;
       let phenologyRefreshGeneration = 0;
+      let eoRefreshGeneration = 0;
       let currentIrrigationActuatorBased = null;
       let currentTensionUnit = "cbar";
       function tensionUnitLabel(value) {
@@ -34,9 +39,15 @@
       let activeTrainingPlotId = null;
       const TrainingReadyCheck = 10000;
 
+      function appFetch(path, options) {
+        return window.WaziFarmDemo?.active
+          ? window.WaziFarmDemo.fetch(path, options)
+          : fetch(path, options);
+      }
+
       async function safeFetchJson(path) {
         try {
-          const res = await fetch(path);
+          const res = await appFetch(path);
           if (!res.ok) return null;
           return await res.json();
         } catch (e) {
@@ -355,11 +366,11 @@
               : 'Threshold margin unavailable';
             const urgency = String(plot.urgency || 'unknown').toLowerCase();
             return `<button type="button" class="farm-plot-card urgency-${escapeHtml(urgency)}" onclick="switchDashboardPlot('${escapeHtml(plot.plot_id)}')">
-              <div class="farm-plot-main"><strong>${escapeHtml(plotName)}</strong><span>Farm: ${escapeHtml(farmName)}</span><span>${escapeHtml(plot.crop_type || '--')} · ${escapeHtml(plot.growth_stage || '--')}</span></div>
+              <div class="farm-plot-main"><strong>${escapeHtml(plotName)}</strong><span>${escapeHtml(plot.crop_type || '--')} · ${escapeHtml(plot.growth_stage || '--')}</span></div>
               <div class="farm-plot-condition"><strong>${escapeHtml(plot.next_action || '')}</strong><span>${escapeHtml(marginText)} · ${escapeHtml(formatDashboardTime(plot.next_action_time))}</span></div>
               <div class="farm-plot-meta"><span class="status-chip ${escapeHtml(urgency)}">${escapeHtml(urgency)}</span><span class="plot-open-hint">View plot →</span></div>
             </button>`;
-          }).join('') : '<div class="dashboard-empty">No plots are configured for this farm.</div>';
+          }).join("") : '<div class="dashboard-empty">No plots are configured for this farm.</div>';
         }
 
         const alerts = Array.isArray(data?.active_alerts) ? data.active_alerts : [];
@@ -384,7 +395,7 @@
 
       async function switchDashboardPlot(plotId) {
         try {
-          const response = await fetch('../api/setPlot', {method: 'POST', headers: {
+          const response = await appFetch('../api/setPlot', {method: 'POST', headers: {
             'Content-Type': 'application/x-www-form-urlencoded'},
             body: `plot_id=${encodeURIComponent(plotId)}`});
           if (!response.ok) throw new Error('Could not open this plot.');
@@ -393,6 +404,20 @@
         } catch (error) {
           alert(error.message || 'Could not open this plot.');
         }
+      }
+
+      function openDemoFarm() {
+        const url = new URL(window.location.href);
+        url.searchParams.set('demo', 'true');
+        url.hash = 'dashboard';
+        window.location.href = url.toString();
+      }
+
+      function exitDemo(destination) {
+        const url = new URL(destination === 'settings' ? 'settings.html' : 'index.html', window.location.href);
+        url.searchParams.delete('demo');
+        if (destination !== 'settings') url.hash = 'dashboard';
+        window.location.href = url.toString();
       }
 
       function formatRange(start, end, digits = 0) {
@@ -811,6 +836,7 @@
       // Navigation and UI wiring
       function navigateTo(page, el) {
         if (page === 'settings') {
+          if (window.WaziFarmDemo?.active) { exitDemo('settings'); return; }
           window.location.href = `settings.html${window.location.search}`;
           return;
         }
@@ -836,7 +862,7 @@
           Promise.allSettled([loadFarmDashboard(), loadWeatherForecast()]);
         }, 0);
         if (page === 'plot') setTimeout(() => {
-          Promise.allSettled([updateMetrics(), fetchIrrigationRecommendation(), loadCharts(), fetchThreshold(), loadEOObservationTrace()]);
+          Promise.allSettled([updateMetrics(), fetchIrrigationRecommendation(), loadCharts(), fetchThreshold()]);
         }, 0);
         if (page === 'phenology') setTimeout(() => {
           Promise.allSettled([loadPhenologySummary(), fetchIrrigationRecommendation(), loadEOObservationTrace()]);
@@ -845,7 +871,7 @@
 
       function fetchThreshold() {
         const generation = ++thresholdRefreshGeneration;
-        return fetch("../api/getThreshold")
+        return appFetch("../api/getThreshold")
           .then((response) => {
             if (!response.ok) throw new Error('Threshold request failed');
             return response.json();
@@ -885,7 +911,7 @@
 
       function fetchIrrigationRecommendation() {
         const generation = ++recommendationRefreshGeneration;
-        return fetch("../api/getIrrigationRecommendation")
+        return appFetch("../api/getIrrigationRecommendation")
           .then((response) => response.json())
           .then((data) => {
             // The recommendation is a single UI snapshot. A response superseded
@@ -1011,7 +1037,8 @@
               manual: ["Semi-auto", "You turn irrigation on and off"],
               advisory_only: ["Off", "No hardware commands"],
             };
-            const configuredMode = modeDetails[action.mode]
+            const demoModeDetails = { automatic: ["Auto", "Irrigation runs automatically"], approval_required: ["Semi-auto", "Irrigation starts after approval"], manual: ["Manual", "Irrigation is applied manually"] };
+            const configuredMode = (window.WaziFarmDemo?.active ? demoModeDetails[action.mode] : modeDetails[action.mode])
               || ["Not configured", "Choose a mode in Settings"];
             const formatIrrigationTime = (value) => {
               const parsed = new Date(value);
@@ -1051,7 +1078,10 @@
                 : "Schedule Irrigation";
             }
 
-            if (actuatorBased) {
+            if (window.WaziFarmDemo?.active) {
+              if (scheduleButton) scheduleButton.disabled = true;
+              note.textContent = irrigationNeeded ? farmerReason : "No irrigation is needed today. Rain and soil moisture are sufficient.";
+            } else if (actuatorBased) {
               if (scheduleButton) scheduleButton.disabled = false;
               if (pumpInput && !Number.isNaN(volumeM3) && volumeM3 > 0) {
                 pumpInput.value = volumeM3.toFixed(2);
@@ -1113,7 +1143,9 @@
                 : "Amount unavailable";
             }
             if (adviceVolumeBasis) {
-              if (!irrigationNeeded && Number.isFinite(volumeM3)) {
+              if (window.WaziFarmDemo?.active) {
+                adviceVolumeBasis.textContent = irrigationNeeded ? "Based on crop demand, rain and plot area." : "No water needed now.";
+              } else if (!irrigationNeeded && Number.isFinite(volumeM3)) {
                 adviceVolumeBasis.textContent = (
                   Number.isFinite(appliedSinceCalculationM3)
                   && appliedSinceCalculationM3 > 0
@@ -1142,7 +1174,7 @@
               adviceTime.textContent = irrigationNeeded ? (recommendedTime || "Today") : "Not needed";
             }
             if (adviceTimeBasis) {
-              adviceTimeBasis.textContent = irrigationNeeded
+              adviceTimeBasis.textContent = window.WaziFarmDemo?.active ? (irrigationNeeded ? "Based on current readings and forecast." : "No irrigation is recommended today") : irrigationNeeded
                 ? (recommendedTime ? "Irrigate before the soil becomes too dry" : "Exact time is not available")
                 : "No irrigation is recommended today";
             }
@@ -1221,8 +1253,11 @@
       }
 
       async function loadEOObservationTrace() {
+        const generation = ++eoRefreshGeneration;
         console.info('[IRRIGATION_TRACE] EO observation: request started');
         const observation = await safeFetchJson('../api/getEOObservation');
+        if (generation !== eoRefreshGeneration) return null;
+        window.renderEOObservation(observation);
         console.info('[IRRIGATION_TRACE] EO observation: request completed', observation);
         return observation;
       }
@@ -1277,7 +1312,7 @@
         if (onButton) onButton.disabled = true;
         if (offButton) offButton.disabled = true;
         try {
-          const response = await fetch('../api/pumpControl', {
+          const response = await appFetch('../api/pumpControl', {
             method: 'POST',
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
             body: new URLSearchParams({
@@ -1316,7 +1351,7 @@
 
         const plotQuery = activeTrainingPlotId
           ? `?plot_id=${encodeURIComponent(activeTrainingPlotId)}` : '';
-        fetch(`../api/startTraining${plotQuery}`)
+        appFetch(`../api/startTraining${plotQuery}`)
           .then(async (response) => ({
             ok: response.ok,
             payload: await response.json().catch(() => ({})),
@@ -1389,7 +1424,7 @@
         console.log("Starting dashboard data load...");
         const currentPage = document.body.dataset.page || 'dashboard';
         const pageLoaders = currentPage === 'plot'
-          ? [updateMetrics(), fetchIrrigationRecommendation(), loadCharts(), fetchThreshold(), loadEOObservationTrace()]
+          ? [updateMetrics(), fetchIrrigationRecommendation(), loadCharts(), fetchThreshold()]
           : currentPage === 'phenology'
             ? [loadPhenologySummary(), fetchIrrigationRecommendation(), loadEOObservationTrace()]
             : [loadFarmDashboard(), loadWeatherForecast()];
@@ -1450,6 +1485,11 @@
       window.setTimeout(hideLoadingIndicator, 2000);
 
       window.addEventListener('load', async () => {
+        if (window.WaziFarmDemo?.active) {
+          document.body.classList.add('demo-mode');
+          const banner = document.getElementById('demo-mode-banner');
+          if (banner) banner.hidden = false;
+        }
         const initialPage = (window.location.hash || '').replace('#', '').trim();
         if (initialPage === 'dashboard' || initialPage === 'plot' || initialPage === 'phenology') {
           document.body.dataset.page = initialPage;
@@ -1483,11 +1523,14 @@
   </head>
 
   <body>
+    <div id="demo-mode-banner" class="demo-mode-banner" role="status" hidden><span><strong>Demo farm</strong></span><span class="demo-banner-actions"><button type="button" onclick="exitDemo()">Exit demo</button></span></div>
     <aside class="app-sidebar" aria-label="Primary navigation">
       <div class="sidebar-logo"><span aria-hidden="true">🌱</span><strong>WaziFarm</strong></div>
       <nav class="sidebar-links">
         <button class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard', this)"><span aria-hidden="true">▦</span><span>Dashboard</span></button>
         <button class="nav-item" data-page="settings" onclick="navigateTo('settings', this)"><span aria-hidden="true">⚙</span><span>Farm settings</span></button>
+        <!-- Temporary stakeholder demo link; remove after the presentation. -->
+        <button class="nav-item demo-nav-button" type="button" onclick="openDemoFarm()"><span aria-hidden="true">◇</span><span>Demo farm</span></button>
       </nav>
     </aside>
     <!-- Tab container for plot selection + controls -->
@@ -1672,6 +1715,12 @@
             <div class="metric-subtext">Cumulative heat units</div>
           </div>
         </div>
+
+        <section class="eo-summary-panel" aria-labelledby="eo-summary-title">
+          <div class="plot-content-heading"><div><h2 id="eo-summary-title">Earth observation</h2><p>Satellite vegetation indices for this plot.</p></div></div>
+          <div class="eo-summary-grid"><div><span>NDVI</span><strong id="eo-ndvi">--</strong></div><div><span>NDRE</span><strong id="eo-ndre">--</strong></div><div><span>Vegetation trend</span><strong id="eo-trend">--</strong></div></div>
+          <p id="eo-details" class="eo-details" role="status">Loading EO observations…</p>
+        </section>
 
         <div class="card phenology-timeline">
           <div class="growth-title">Phenology timeline</div>
