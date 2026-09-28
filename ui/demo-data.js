@@ -13,6 +13,11 @@
   const isoAt = (hours) => new Date(Date.now() + hours * 3600000).toISOString();
   const dateAt = (days) => { const value = new Date(); value.setDate(value.getDate() + days); return value.toISOString().slice(0, 10); };
   const clone = (value) => JSON.parse(JSON.stringify(value));
+  const apiPath = (path) => {
+    const pathname = new URL(path, window.location.href).pathname;
+    const apiIndex = pathname.lastIndexOf("/api/");
+    return apiIndex < 0 ? pathname : pathname.slice(apiIndex);
+  };
   const plotRecords = () => plotIds.map((id, index) => ({plot_id: id, farm_id: "demo-farm", name: plotProfiles[id].name, area: plotProfiles[id].area, area_unit: "m2", ordinal: index + 1}));
 
   function farmDashboard() {
@@ -49,7 +54,7 @@
   }
 
   function fixture(path) {
-    const pathname = new URL(path, window.location.href).pathname; const p = profile();
+    const pathname = apiPath(path); const p = profile();
     return ({
       "/api/getPlots": {tabnames: plotIds.map((id) => plotProfiles[id].name), currentPlot: plotIds.indexOf(selectedPlotId) + 1, current_plot_id: selectedPlotId, current_farm_id: "demo-farm", plots: plotRecords()},
       "/api/getFarmRegistry": {current_farm_id: "demo-farm", current_plot_id: selectedPlotId, farms: [{farm_id: "demo-farm", name: "Sunrise Demo Farm", size: 5000, area_unit: "m2", timezone: "Africa/Nairobi", plot_ids: plotIds}], plots: plotRecords()},
@@ -68,7 +73,7 @@
 
   const response = (payload, status = 200) => new Response(JSON.stringify(payload), {status, headers: {"Content-Type": "application/json"}});
   window.WaziFarmDemo = {active, get selectedPlotId() { return selectedPlotId; }, async fetch(path, options) {
-    const method = String(options?.method || "GET").toUpperCase(); const pathname = new URL(path, window.location.href).pathname;
+    const method = String(options?.method || "GET").toUpperCase(); const pathname = apiPath(path);
     if (method === "POST" && pathname === "/api/setPlot") { const requested = new URLSearchParams(options?.body || "").get("plot_id"); if (!plotProfiles[requested]) return response({error: "Unknown demo plot"}, 404); selectedPlotId = requested; return response({status: "ok", plot_id: requested, currentPlot: plotIds.indexOf(requested) + 1}); }
     if (method !== "GET") return response({error: "Demo mode is read-only"}, 405);
     const payload = fixture(path); return payload === undefined ? response({error: "No demo fixture for this request"}, 404) : response(clone(payload));
