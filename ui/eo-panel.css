@@ -1,0 +1,48 @@
+.eo-summary-panel {
+  margin-bottom: 12px;
+  padding: 18px 20px;
+  border: 1px solid #dde3ea;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(23, 36, 52, .05);
+}
+
+.eo-summary-panel .plot-content-heading {
+  margin-bottom: 12px;
+}
+
+.eo-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.eo-summary-grid > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f3f7f2;
+}
+
+.eo-summary-grid span,
+.eo-details {
+  color: #607086;
+  font-size: .75rem;
+}
+
+.eo-summary-grid strong {
+  color: #182332;
+  font-size: 1.1rem;
+}
+
+.eo-details {
+  margin: 11px 3px 0;
+}
+
+@media (max-width: 600px) {
+  .eo-summary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

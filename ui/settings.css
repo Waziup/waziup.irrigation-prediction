@@ -1237,6 +1237,10 @@ body.show-advanced .advanced-field.form-group {
   text-transform: uppercase;
 }
 
+.workspace-status[hidden] {
+  display: none;
+}
+
 .workspace-status::before {
   content: "";
   width: 7px;

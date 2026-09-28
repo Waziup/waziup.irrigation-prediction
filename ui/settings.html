@@ -7,7 +7,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
 
-    <link rel="stylesheet" href="settings.css?v=20260825-6" type="text/css" />
+    <link rel="stylesheet" href="settings.css?v=20260928-1" type="text/css" />
+    <link rel="stylesheet" href="demo.css?v=20260928-3" type="text/css" />
     <script type="text/javascript" src="libs/jquery-3.2.1.min.js"></script>
     <script type="text/javascript" src="ui-icons.js"></script>
     <script type="text/javascript">
@@ -261,6 +262,14 @@
       }
 
       function openAppPage(page) {
+        if (page === "demo") {
+          const url = new URL("index.html", window.location.href);
+          url.search = window.location.search;
+          url.searchParams.set("demo", "true");
+          url.hash = "dashboard";
+          window.location.href = url.toString();
+          return;
+        }
         if (page === "settings") {
           window.location.href = "settings.html";
           return;
@@ -451,7 +460,8 @@
             ? 'Could not load plots. <button type="button" onclick="initializeSettings()">Retry</button>'
             : "No plots registered.";
           updateActiveFarmLabel("");
-          document.getElementById("selected-plot-settings-name").textContent = "No plot selected";
+          document.getElementById("plot-details-heading").textContent = "No plot selected";
+          document.querySelector(".plot-workspace-header .workspace-status").hidden = true;
           document.getElementById("selected-plot-context").textContent = "";
           return;
         }
@@ -505,8 +515,10 @@
         const record = plotRecords.find(plot => plot.plot_id === currentPlotId);
         const farm = farmRecords.find(farm => farm.farm_id === record?.farm_id);
         const name = plotDisplayName((plotName || document.getElementById("name_form")?.value || "Unnamed plot").trim(), farm?.name);
-        const heading = document.getElementById("selected-plot-settings-name");
-        if (heading) heading.textContent = name;
+        const heading = document.getElementById("plot-details-heading");
+        if (heading) heading.textContent = `${name} settings`;
+        const status = document.querySelector(".plot-workspace-header .workspace-status");
+        if (status) status.hidden = false;
         const saveName = document.getElementById("save-plot-name");
         if (saveName) saveName.textContent = "plot settings";
         const removeName = document.getElementById("remove-plot-name");
@@ -1497,6 +1509,8 @@
       <nav class="settings-sidebar-links">
         <button type="button" onclick="openAppPage('dashboard')"><span aria-hidden="true">▦</span><span>Dashboard</span></button>
         <button type="button" class="active" onclick="openAppPage('settings')"><span aria-hidden="true">⚙</span><span>Farm settings</span></button>
+        <!-- Temporary stakeholder demo link; remove after the presentation. -->
+        <button type="button" class="demo-nav-button" onclick="openAppPage(&quot;demo&quot;)"><span aria-hidden="true">◇</span><span>Demo farm</span></button>
       </nav>
     </aside>
     <div class="app-container">
@@ -1593,8 +1607,8 @@
 
       <section class="plot-settings-workspace" aria-labelledby="plot-details-heading">
         <header class="plot-workspace-header">
-          <div><span class="workspace-eyebrow">Editing plot</span><h2 id="plot-details-heading"><span id="selected-plot-settings-name">Selected plot</span> settings</h2><p id="selected-plot-context">Selected plot</p></div>
-          <span class="workspace-status">Selected</span>
+          <div><span class="workspace-eyebrow">Plot settings</span><h2 id="plot-details-heading">No plot selected</h2><p id="selected-plot-context"></p></div>
+          <span class="workspace-status" hidden>Selected</span>
         </header>
         <nav class="settings-tabs plot-settings-tabs" aria-label="Selected plot settings sections">
           <button type="button" class="tab-button active" data-tab="plot-tab">Plot &amp; crop</button>
