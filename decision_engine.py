@@ -173,7 +173,7 @@ def evaluate_forecast(
     Decide whether to irrigate based on the current tension and a forecast.
 
     advise_horizon_hours and watch_horizon_hours should come from
-    FarmConfig (which reads them from farms.yaml) so sensitive crops at
+    FarmConfig so sensitive crops at
     critical stages get tighter horizons without hardcoding.
 
     Args:
@@ -393,7 +393,7 @@ def build_threshold_series_for_eval(
     if "Temperature" not in df_test.columns:
         log.warning(
             "  [%s] build_threshold_series_for_eval: no Temperature column — cannot compute GDD-based thresholds",
-            farm.farm_id,
+            farm.name,
         )
         return None
 
@@ -404,7 +404,7 @@ def build_threshold_series_for_eval(
         if "Et0_evapotranspiration" not in df_test:
             log.warning(
                 "  [%s] dynamic evaluation needs Et0_evapotranspiration",
-                farm.farm_id)
+                farm.name)
             return None
         daily_et0 = pd.to_numeric(
             df_test["Et0_evapotranspiration"], errors="coerce").resample(
@@ -470,7 +470,7 @@ def evaluate_training_results(
         return {}
 
     print(f"\n{'─'*60}")
-    print(f"  DECISION ENGINE EVALUATION  [{farm.farm_id}]")
+    print(f"  DECISION ENGINE EVALUATION  [{farm.name}]")
     print(f"  crop={farm.crop_type}  planted={farm.planting_date}")
     print(f"  F-beta: beta={f_beta} (recall-weighted)")
     print(f"{'─'*60}")

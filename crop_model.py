@@ -592,6 +592,8 @@ def build_forecast_thresholds(
     tension_forecast: dict,
     forecast_weather: pd.DataFrame,
     current_timestamp,
+    *,
+    horizon_timestamps=None,
 ) -> dict:
     """Build a threshold for every tension-forecast horizon.
 
@@ -631,7 +633,18 @@ def build_forecast_thresholds(
         if not match:
             raise ValueError(f"Cannot build threshold for horizon {label!r}")
         horizons[label] = float(match.group(1))
-    last_target = now + pd.Timedelta(hours=max(horizons.values()))
+    # Rounded display labels must not move exact model timestamps.
+    targets = {}
+    for label, hours in horizons.items():
+        target = (pd.Timestamp(horizon_timestamps[label])
+                  if horizon_timestamps is not None
+                  else now + pd.Timedelta(hours=hours))
+        target = (target.tz_localize(timezone_name) if target.tzinfo is None
+                  else target.tz_convert(timezone_name))
+        if target <= now:
+            raise ValueError("Forecast targets must be after the current timestamp")
+        targets[label] = target
+    last_target = max(targets.values())
     if weather.empty or weather.index.max() < last_target:
         raise ValueError(
             "forecast weather does not cover the complete tension-forecast horizon")
@@ -652,7 +665,7 @@ def build_forecast_thresholds(
         if params.is_perennial else None
     )
     for label in sorted(horizons, key=horizons.get):
-        target = now + pd.Timedelta(hours=horizons[label])
+        target = targets[label]
         interval_start = now
         projected_base_gdd = float(current_gdd)
         if params.is_perennial:
@@ -738,7 +751,7 @@ def compute_phenology_features(
         log.error(
             "  Farm '%s': no temperature data found — need 'Temperature' or 'Tmax_daily'/'Tmin_daily'. "
             "Phenology columns set to zero/NaN defaults.",
-            farm.farm_id,
+            farm.name,
         )
         df["gdd_cumulative"] = 0.0
         df["growth_stage"] = STAGE_PRE_EMERGENCE
@@ -751,7 +764,7 @@ def compute_phenology_features(
 
     log.info(
         "  [%s] GDD: crop=%s, T_base=%.1f°C, T_ceil=%.1f°C, planting=%s",
-        farm.farm_id,
+        farm.name,
         crop_type,
         params.t_base,
         params.t_ceiling,

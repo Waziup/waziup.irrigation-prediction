@@ -241,9 +241,18 @@ def build_water_outlook(forecast_timestamps, tension_forecast, forecast_weather,
             continue
         ordered_tensions.append((hours, tension))
     ordered_tensions.sort(key=lambda item: item[0])
+    # Preserve each prediction's tension while dropping elapsed forecast points.
+    # An elapsed point otherwise produces an empty first weather interval and
+    # incorrectly makes every demand total unavailable as the screen ages.
+    future_points = [
+        (pd.Timestamp(timestamp), ordered_tensions[index][1]
+         if index < len(ordered_tensions) else None)
+        for index, timestamp in enumerate(timestamps)
+        if pd.Timestamp(timestamp) > now
+    ]
+    timestamps = [timestamp for timestamp, _ in future_points]
     points, previous = [], now
-    for index, timestamp in enumerate(timestamps):
-        timestamp = pd.Timestamp(timestamp)
+    for timestamp, tension in future_points:
         interval = weather[(weather.index > previous) & (weather.index <= timestamp)] if not weather.empty else pd.DataFrame()
         et0 = _interval_total(interval, "Et0_evapotranspiration")
         rain = _interval_total(interval, "Rain")
@@ -260,7 +269,6 @@ def build_water_outlook(forecast_timestamps, tension_forecast, forecast_weather,
             None if etc is None or effective_rain is None
             else max(0.0, etc - effective_rain)
         )
-        tension = ordered_tensions[index][1] if index < len(ordered_tensions) else None
         points.append({"timestamp": timestamp.isoformat(),
                        "tension_cbar": None if tension is None else round(tension, 3),
                        "et0_mm": None if et0 is None else round(et0, 3),
@@ -292,14 +300,28 @@ def build_water_outlook(forecast_timestamps, tension_forecast, forecast_weather,
     try:
         demand_horizon = max(0.0, float(demand_horizon_hours))
         cutoff = now + pd.Timedelta(hours=demand_horizon)
-        demand_points = [
-            point for point in points
-            if pd.Timestamp(point["timestamp"]) <= cutoff
-        ]
-        coverage_endpoint = (
-            pd.Timestamp(demand_points[-1]["timestamp"])
-            if demand_points else None
-        )
+        # Clip the final hourly interval at the requested cutoff instead of
+        # requiring a model point at exactly now + 24h. Prorate its totals
+        # assuming uniform demand/rainfall within that forecast interval.
+        demand_points = []
+        interval_start = now
+        coverage_endpoint = None
+        for point in points:
+            endpoint = pd.Timestamp(point["timestamp"])
+            clipped_endpoint = min(endpoint, cutoff)
+            if clipped_endpoint <= interval_start:
+                break
+            fraction = ((clipped_endpoint - interval_start).total_seconds()
+                        / (endpoint - interval_start).total_seconds())
+            clipped = dict(point)
+            for field in ("etc_mm", "rainfall_mm"):
+                if clipped[field] is not None:
+                    clipped[field] *= fraction
+            demand_points.append(clipped)
+            coverage_endpoint = clipped_endpoint
+            if endpoint >= cutoff:
+                break
+            interval_start = endpoint
         covered_hours = (
             max(0.0, (coverage_endpoint - now).total_seconds() / 3600.0)
             if coverage_endpoint is not None else 0.0
@@ -458,16 +480,16 @@ def compose_recommendation(*, plot, base, decision, pipeline, forecast_weather=N
                      "watch": "Monitor closely", "none": "No irrigation needed",
                      "error": "Recommendation unavailable", "unknown": "Awaiting forecast"}
     satellite = satellite_verdict(base.get("satellite_validation"), base.get("sat_data_age_hours"))
-    if (requirement.get("complete")
-            and remaining_volume_m3 is not None
-            and remaining_volume_m3 <= 0):
-        should_irrigate = False
-        urgency = "none"
     recommended_volume_m3 = (
         remaining_volume_m3 if should_irrigate and available else
         (0.0 if remaining_volume_m3 is not None else None)
     )
     limitations = []
+    if should_irrigate and available and remaining_volume_m3 is not None and remaining_volume_m3 <= 0:
+        limitations.append(
+            "Soil tension indicates irrigation is needed, but the water balance "
+            "calculates no additional water after rainfall and recorded irrigation. "
+            "Check soil readings and recent watering before applying more water.")
     if base.get("data_stale"):
         limitations.append("Stale inputs: " + ", ".join(base.get("data_stale_sources", [])))
     if not outlook["points"]:
@@ -483,10 +505,12 @@ def compose_recommendation(*, plot, base, decision, pipeline, forecast_weather=N
         "schema_version": SCHEMA_VERSION, "generated_at": generated_at.isoformat(),
         "available": available,
         "plot": {"plot_id": getattr(plot, "stable_id", getattr(plot, "id", None)),
-                 "farm_id": getattr(plot, "farm_id", None), "name": getattr(plot, "user_given_name", "")},
+                 "name": getattr(plot, "user_given_name", "")},
         "action": {"should_irrigate": should_irrigate if available else False,
                    "urgency": urgency if available else "unknown",
-                   "label": (action_labels.get(urgency, action_labels["unknown"])
+                   "label": (("Check soil tension before watering"
+                              if should_irrigate and remaining_volume_m3 is not None and remaining_volume_m3 <= 0
+                              else action_labels.get(urgency, action_labels["unknown"]))
                              if available else action_labels["error"]),
                    "mode": base.get("irrigation_mode"),
                    "advisory_only": not bool(base.get("actuator_based", False)),
