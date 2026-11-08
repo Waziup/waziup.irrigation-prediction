@@ -5,6 +5,20 @@ Extracted from the legacy create_model.py to eliminate unnecessary imports.
 """
 
 from dataclasses import dataclass
+import time
+
+
+def wait_for_wall_clock(stop_event, seconds, *, clock=None, check_seconds=30):
+    """Wake overdue work promptly after host suspend or wall-clock changes."""
+    clock = clock or time.time
+    deadline = clock() + max(0, seconds)
+    while not stop_event.is_set():
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return False
+        if stop_event.wait(timeout=min(remaining, check_seconds)):
+            return True
+    return True
 
 # Backoff time used after thread errors before retrying work.
 Resource_wait_time_seconds = 1800

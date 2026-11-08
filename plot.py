@@ -17,7 +17,7 @@ from state_store import configured_database_path, get_app_state_store
 
 class Plot:
     # Class init, called when created in UI
-    def __init__(self, tab_number, configPath, stable_id=None, farm_id=None):
+    def __init__(self, tab_number, configPath, stable_id=None):
         # Fundamental
         # Int to enumerate plots/tabs
         self.tab_number = tab_number
@@ -28,16 +28,15 @@ class Plot:
         self.stable_id = stable_id or f"plot-legacy-{self.id}"
         # User given name is preset, but can be changed later
         self.user_given_name = "Plot " + str(self.id)
-        # Links this compatibility Plot object to its authoritative YAML record.
-        self.farm_id = farm_id
         # Farm-level environmental context. Weather uses this location for all
         # plots in the farm; EO continues to use this plot's own gps_info.
         self.farm_gps_info = {}
         self.farm_name = ""
         self.farm_timezone = "UTC"
         self.area_unit = "m2"
-        # Installation/settings values win over optional manual YAML values.
+        # Settings are persisted in the local SQLite database.
         self.configuration_source = "legacy"
+        self.settings_configured = False
         self.timezone = "UTC"
 
         # Variables that were global before, now plot-specific
@@ -208,6 +207,7 @@ class Plot:
                 # Parse JSON from the file
                 data = json.load(file)
         if data is not None:
+            self.settings_configured = True
             if self.load_data_from_csv:
                 debug_csv = pd.read_csv(self.data_from_csv, header=0)
                 self.device_and_sensor_ids_moisture = []
@@ -238,8 +238,7 @@ class Plot:
             # Get data from forms
             self.user_given_name = data.get('Name', [])
             self.owner = data.get('Owner', getattr(self, 'owner', ''))
-            # Older JSON configurations may omit this during YAML migration.
-            self.farm_id = data.get('Farm_id', self.farm_id)
+            # Legacy settings may omit area units.
             self.area_unit = data.get('Plot_area_unit', self.area_unit)
             self.configuration_source = data.get(
                 'Configuration_source', self.configuration_source)
@@ -291,8 +290,7 @@ class Plot:
                 'Flow_confirmation_mode', self.flow_confirmation_mode)
             ).strip().lower()
             self.look_ahead_time = float(data.get('Look_ahead_time', []))
-            # Retain JSON timing reads for backward compatibility; startup YAML
-            # application overwrites them with authoritative farm values.
+            # Resolve timing from the persisted plot settings.
             self.predict_period_hours = float(
                 data.get('Predict_period_hours', self.predict_period_hours))
             self.forecast_interval_minutes = int(data.get(
@@ -660,7 +658,7 @@ class Plot:
         ):
             print("Prediction thread not alive, restarting...")
             import prediction_thread
-            prediction_thread.start(self)
+            prediction_thread.ensure_running(self)
 
     # Data
 

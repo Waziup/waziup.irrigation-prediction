@@ -1,18 +1,20 @@
 """Runtime plot objects backed by persistent, stable farm/plot identities."""
 
+from plot_location import plot_reference_location
 from pathlib import Path
+from copy import deepcopy
 import threading
 
 from farm_registry import FarmRegistry
 from plot import Plot
-from removal_recovery import record_removal, recover_removals, clear_journal
-from state_store import configured_database_path, get_app_state_store
+from removal_recovery import recover_removals
+from state_store import RegistryConflictError
 
 Plots = {}
-CurrentPlotId = 1
-CurrentPlotTab = 1
+CurrentPlotId = None
+CurrentPlotTab = None
 Config_folder_path = "config/"
-ConfigPath = "config/current_config_plot1.json"
+ConfigPath = None
 Threads = []
 ThreadId = 0
 _lock = threading.RLock()
@@ -29,12 +31,47 @@ def _attach_farm_context(plot, farm):
     return plot
 
 
-def _area_in_square_metres(area, area_unit):
-    """Convert creation input; persisted plot areas are already square metres."""
-    factors = {"m2": 1.0, "ha": 10000.0, "acre": 4046.8564224}
-    if area_unit not in factors:
-        raise ValueError(f"Unsupported area unit: {area_unit}")
-    return float(area) * factors[area_unit]
+class SpatialSetupConflict(ValueError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+def _new_runtime_plot(tab, record, farm):
+    """Construct before commit so constructor failures cannot leave saved ghosts."""
+    path = str(Path(Config_folder_path) / record['config_file'])
+    plot = Plot(tab, path, stable_id=record['plot_id'])
+    plot.configuration_source = 'spatial_setup'
+    plot.timezone = farm['timezone']
+    _apply_spatial_record(plot, tab, record, farm)
+    return plot
+
+
+def _apply_spatial_record(plot, tab, record, farm):
+    _attach_farm_context(plot, farm)
+    plot.tab_number = tab
+    plot.user_given_name = record['name']
+    plot.plot_area_m2 = record['area_m2']
+    plot.area_unit = record['area_unit']
+    plot.crop_type = record['crop_type']
+    plot.geometry = deepcopy(record['geometry'])
+    plot.geometry_version = record['geometry_version']
+
+
+def _prepare_runtime(data):
+    existing = {plot.stable_id: plot for plot in Plots.values()}
+    return {tab: existing.get(record['plot_id']) or _new_runtime_plot(tab, record, data['farm'])
+            for tab, record in enumerate(data['plots'], start=1)}
+
+
+def _publish_runtime(prepared, data):
+    global Plots, CurrentPlotId, CurrentPlotTab, ConfigPath
+    for tab, record in enumerate(data['plots'], start=1):
+        _apply_spatial_record(prepared[tab], tab, record, data['farm'])
+    Plots = prepared
+    CurrentPlotTab = next(tab for tab, plot in prepared.items() if plot.stable_id == data['current_plot_id'])
+    current = prepared[CurrentPlotTab]
+    CurrentPlotId, ConfigPath = current.id, current.configPath
 
 
 def _resolve_key(identifier):
@@ -71,7 +108,7 @@ def setPlot(identifier):
 
 
 def loadPlots(registry_path=None, config_folder=None):
-    """Load the registry, migrating legacy config files on first use."""
+    """Load spatial records; a fresh installation has no scaffold plot."""
     global Plots, CurrentPlotId, CurrentPlotTab, ConfigPath
     global Config_folder_path, _registry
     with _lock:
@@ -80,171 +117,133 @@ def loadPlots(registry_path=None, config_folder=None):
         registry_file = registry_path or Path(Config_folder_path) / "farm_registry.json"
         _registry = FarmRegistry(registry_file, Config_folder_path)
         data = _registry.load_or_migrate()
-        farms_by_id = {farm["farm_id"]: farm for farm in data["farms"]}
         recover_removals(Config_folder_path, data)
         Plots = {}
         records = sorted(data["plots"], key=lambda item: (item.get("position", 0), item["legacy_id"]))
         for tab, record in enumerate(records, start=1):
-            path = str(Path(Config_folder_path) / record["config_file"])
-            plot = Plot(tab, path, stable_id=record["plot_id"], farm_id=record["farm_id"])
-            _attach_farm_context(plot, farms_by_id[record["farm_id"]])
-            plot.user_given_name = record["name"]
-            plot.plot_area_m2 = float(record.get("area", 0.0) or 0.0)
-            plot.area_unit = record.get("area_unit", "m2")
-            Plots[tab] = plot
+            Plots[tab] = _new_runtime_plot(tab, record, data['farm'])
+        if not Plots:
+            CurrentPlotId, CurrentPlotTab, ConfigPath = None, None, None
+            return 0
         CurrentPlotTab = next(key for key, plot in Plots.items() if plot.stable_id == data["current_plot_id"])
         current = Plots[CurrentPlotTab]
         CurrentPlotId, ConfigPath = current.id, current.configPath
         return len(Plots)
 
 
-def addPlot(tabNumber=None, farm_id=None, name="", area=0.0, area_unit="m2"):
-    global Plots
+def _create_spatial_record(*, registry_revision, farm_fields=None, plot_fields=None):
+    """Prepare runtime objects inside the DB transaction, publish after commit."""
     with _lock:
-        farm_id = farm_id or _registry.snapshot()["current_farm_id"]
-        record = _registry.add_plot(farm_id, name, _area_in_square_metres(area, area_unit), area_unit)
-        tab = len(Plots) + 1
-        path = str(Path(Config_folder_path) / record["config_file"])
-        plot = Plot(tab, path, stable_id=record["plot_id"], farm_id=farm_id)
-        _attach_farm_context(plot, _registry.get_farm(farm_id))
+        if type(registry_revision) is not int or registry_revision < 0:
+            raise ValueError('A nonnegative registry_revision is required')
+        _registry.snapshot()  # initialize this installation's store
+        store = _registry._state_store
+        try:
+            with store.transaction():
+                current = _registry.reload()
+                if registry_revision != current['registry_revision']:
+                    raise RegistryConflictError('Farm layout changed; reload before saving')
+                if farm_fields is not None:
+                    if current['farm'] is not None:
+                        raise SpatialSetupConflict('farm_exists', 'This installation already has a farm.')
+                    _registry.create_farm(**farm_fields)
+                else:
+                    if current['farm'] is None:
+                        raise SpatialSetupConflict('setup_required', 'Create the farm and first plot together before adding plots.')
+                    _registry.add_plot(**plot_fields)
+                saved = _registry.snapshot()
+                prepared = _prepare_runtime(saved)
+                # Retain the exact acknowledged resource/snapshot, not a later
+                # selection or another process's subsequent registry write.
+                plot = next(p for p in saved['plots'] if p['plot_id'] == saved['current_plot_id'])
+                response = dict(status='created', farm=saved['farm'], plot=plot,
+                    current_plot_id=saved['current_plot_id'], registry_revision=saved['registry_revision'])
+        except BaseException:
+            _registry.reload()
+            raise
+        _publish_runtime(prepared, saved)
+        return response
+
+
+def createFarm(*, name, geometry, first_plot, registry_revision, area_unit='m2',
+               timezone_name='UTC', owner='', latitude=None, longitude=None):
+    return _create_spatial_record(registry_revision=registry_revision,
+        farm_fields=dict(name=name, geometry=geometry, first_plot=first_plot,
+            area_unit=area_unit, timezone_name=timezone_name, owner=owner,
+            latitude=latitude, longitude=longitude))
+
+
+def addPlot(*, name, crop_type, geometry, registry_revision, area_unit='m2'):
+    return _create_spatial_record(registry_revision=registry_revision,
+        plot_fields=dict(name=name, crop_type=crop_type, geometry=geometry, area_unit=area_unit))
+
+
+def updateFarm(**fields):
+    with _lock:
+        farm = _registry.update_farm(**fields)
+        for plot in Plots.values():
+            _attach_farm_context(plot, farm)
+        return farm
+
+
+def getPlotByStableId(plot_id):
+    """Strict resource lookup: never interpret a stable ID as a tab/index."""
+    with _lock:
+        return next((plot for plot in Plots.values()
+                     if plot.stable_id == plot_id), None)
+
+
+def updatePlotMetadata(plot_id, name=None, area=None, area_unit=None):
+    with _lock:
+        plot = getPlotByStableId(plot_id)
+        if plot is None:
+            raise KeyError(f"Unknown plot_id: {plot_id}")
+        fields = {key: value for key, value in {"name": name, "area": area,
+                  "area_unit": area_unit}.items() if value is not None}
+        record = _registry.update_plot(plot.stable_id, **fields)
         plot.user_given_name, plot.plot_area_m2 = record["name"], record["area"]
         plot.area_unit = record["area_unit"]
-        Plots[tab] = plot
-        setPlot(record["plot_id"])
-        return record["plot_id"], path
-
-
-def createFarm(name, latitude=0, longitude=0, size=0, area_unit="m2", timezone_name="UTC", owner="", plot_name="", gateway_id=None):
-    global CurrentPlotId, CurrentPlotTab, ConfigPath
-    with _lock:
-        # Registry identity, ownership, area and selection commit together.
-        # Runtime objects are not changed until the registry publish succeeds.
-        with _registry.transaction():
-            snapshot = _registry.snapshot()
-            desired_plot_name = str(plot_name or "Plot 1").strip()
-            if _is_pristine_install_scaffold(snapshot):
-                farm_record, plot_record = snapshot["farms"][0], snapshot["plots"][0]
-                farm = _registry.update_farm(
-                    farm_record["farm_id"], name=name, latitude=latitude,
-                    longitude=longitude, size=size, area_unit=area_unit,
-                    timezone=timezone_name, owner=owner, gateway_id=gateway_id)
-                plot = _registry.update_plot(
-                    plot_record["plot_id"], name=desired_plot_name,
-                    area=_area_in_square_metres(size, area_unit), area_unit=area_unit)
-                tab = _resolve_key(plot["plot_id"])
-                runtime_plot = Plots[tab]
-            else:
-                farm = _registry.create_farm(name, latitude, longitude, size, area_unit, timezone_name, owner, gateway_id=gateway_id)
-                plot = _registry.add_plot(farm["farm_id"], desired_plot_name,
-                                          _area_in_square_metres(size, area_unit), area_unit)
-                tab = len(Plots) + 1
-                path = str(Path(Config_folder_path) / plot["config_file"])
-                runtime_plot = Plot(tab, path, stable_id=plot["plot_id"], farm_id=farm["farm_id"])
-            _registry.set_current_plot(plot["plot_id"])
-            farm = _registry.get_farm(farm["farm_id"])
-        runtime_plot.user_given_name = plot["name"]
-        _attach_farm_context(runtime_plot, farm)
-        runtime_plot.plot_area_m2 = plot["area"]
-        runtime_plot.area_unit = plot["area_unit"]
-        Plots[tab] = runtime_plot
-        CurrentPlotId, CurrentPlotTab, ConfigPath = runtime_plot.id, tab, runtime_plot.configPath
-        return farm, plot
-
-
-def _is_pristine_install_scaffold(snapshot):
-    farms = snapshot.get("farms", [])
-    plots = snapshot.get("plots", [])
-    if len(farms) != 1 or len(plots) != 1:
-        return False
-    farm, plot = farms[0], plots[0]
-    config_path = Path(Config_folder_path) / plot.get("config_file", "")
-    has_config = (get_app_state_store().load_plot_config(plot["plot_id"])
-                  is not None if configured_database_path() is not None
-                  else config_path.exists())
-    return (
-        farm.get("name") == "My Farm"
-        and not str(farm.get("owner") or "").strip()
-        and float(farm.get("latitude", 0) or 0) == 0
-        and float(farm.get("longitude", 0) or 0) == 0
-        and float(farm.get("size", 0) or 0) == 0
-        and plot.get("name") == "Plot 1"
-        and float(plot.get("area", 0) or 0) == 0
-        and not has_config
-    )
-
-
-def updateFarm(farm_id, **fields):
-    farm = _registry.update_farm(farm_id, **fields)
-    for plot in Plots.values():
-        if plot.farm_id == farm_id:
-            _attach_farm_context(plot, farm)
-    return farm
+        return record
 
 
 def updateCurrentPlotMetadata(name=None, area=None, area_unit=None):
-    plot = getCurrentPlot()
-    fields = {key: value for key, value in {"name": name, "area": area, "area_unit": area_unit}.items() if value is not None}
-    record = _registry.update_plot(plot.stable_id, **fields)
-    plot.user_given_name, plot.plot_area_m2 = record["name"], record["area"]
-    plot.area_unit = record["area_unit"]
-    return record
+    with _lock:
+        return updatePlotMetadata(getCurrentPlot().stable_id, name, area, area_unit)
 
 
 def removePlot(identifier):
-    """Remove the exact stable target and archive, rather than delete, its config."""
+    """Remove plot identity and settings together in SQLite."""
     global Plots, CurrentPlotId, CurrentPlotTab, ConfigPath
     with _lock:
         key = _resolve_key(identifier)
         plot = Plots[key]
         config_path = Path(plot.configPath)
-        archive = None
-        journal = None
-        archived = False
-        try:
-            with _registry.transaction():
-                removed = _registry.remove_plot(plot.stable_id)
-                if config_path.exists():
-                    archive = config_path.with_suffix(config_path.suffix + ".removed")
-                    counter = 1
-                    while archive.exists():
-                        archive = config_path.with_suffix(config_path.suffix + f".removed.{counter}")
-                        counter += 1
-                    journal = record_removal(config_path, archive, plot.stable_id)
-                    config_path.rename(archive)
-                    archived = True
-        except BaseException:
-            # Failed registry publication rolls memory back. Restore the file
-            # moved by this attempt as well; never overwrite a replacement file.
-            if archived:
-                if config_path.exists():
-                    raise RuntimeError(f'Removal rollback blocked; archived config retained at {archive}')
-                archive.rename(config_path)
-            clear_journal(journal)
-            raise
+        removed = _registry.remove_plot(plot.stable_id)
         del Plots[key]
-        if configured_database_path() is not None:
-            get_app_state_store().delete_plot_config(plot.stable_id)
         Plots = {index: item for index, item in enumerate(Plots.values(), start=1)}
         for tab, item in Plots.items():
             item.tab_number = tab
         CurrentPlotTab = _resolve_key(_registry.snapshot()["current_plot_id"])
         current = Plots[CurrentPlotTab]
         CurrentPlotId, ConfigPath = current.id, current.configPath
-        clear_journal(journal)
         return removed["plot_id"], str(config_path)
 
 
 def registrySnapshot():
-    data = _registry.snapshot()
-    runtime = {plot.stable_id: plot for plot in Plots.values()}
-    for record in data["plots"]:
-        plot = runtime.get(record["plot_id"])
-        if plot:
-            record.update({"tab_number": plot.tab_number, "name": plot.user_given_name,
-                           "area": float(getattr(plot, "plot_area_m2", 0.0) or 0.0),
-                           "area_unit": getattr(plot, "area_unit", "m2")})
-    return data
-
+    with _lock:
+        data = _registry.snapshot()
+        runtime = {plot.stable_id: plot for plot in Plots.values()}
+        for record in data["plots"]:
+            plot = runtime.get(record["plot_id"])
+            if plot:
+                latitude, longitude = plot_reference_location(plot)
+                record['reference_location'] = (
+                    {'latitude': latitude, 'longitude': longitude}
+                    if latitude is not None else None)
+                record.update({"tab_number": plot.tab_number, "name": plot.user_given_name,
+                               "area": float(getattr(plot, "plot_area_m2", 0.0) or 0.0),
+                               "area_unit": getattr(plot, "area_unit", "m2")})
+        return data
 
 def getPlots():
     return Plots
@@ -281,3 +280,25 @@ def setCurrentConfig(path):
     global ConfigPath
     getCurrentPlot().configPath = path
     ConfigPath = path
+
+
+def replaceBoundary(**request):
+    """Publish new geometry/area on existing workers only after a confirmed commit."""
+    from spatial_editing import replace_boundary
+    with _lock:
+        _registry.snapshot()
+        saved, prepared = replace_boundary(_registry._state_store, request, _prepare_runtime)
+        # Publish the exact committed snapshot. A later process's commit must not
+        # be mixed with runtime objects prepared for this acknowledged revision.
+        with _registry._lock:
+            _registry.data = deepcopy(saved)
+            _registry._committed_data = deepcopy(saved)
+        _publish_runtime(prepared, saved)
+        for record in saved['plots']:
+            runtime = next(p for p in prepared.values() if p.stable_id == record['plot_id'])
+            if isinstance(getattr(runtime, 'config', None), dict):
+                runtime.config = dict(runtime.config, Plot_area_m2=record['area_m2'])
+        record = saved['farm'] if request['entity'] == 'farm' else next(
+            p for p in saved['plots'] if p['plot_id'] == request['plot_id'])
+        return dict(status='saved', entity=request['entity'], plot_id=request['plot_id'],
+                    registry_revision=saved['registry_revision'], boundary=record)
