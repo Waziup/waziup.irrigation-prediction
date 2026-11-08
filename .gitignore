@@ -165,7 +165,7 @@ catboost_info/
 # tensorflow models
 *.h5
 
-# logs 
+# logs
 *.log
 
 # tuning records
@@ -205,3 +205,17 @@ models/**/**/**/*.csv
 
 # Exclude tmp models
 tmp/*
+
+# Public frontend deployment defaults (no secrets).
+!frontend/.env.production
+!frontend/.env.development
+
+
+# Untracked frontend documentation and generated output
+/ui/**/README.md
+/frontend/**/README.md
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.next/
+/frontend/.vite/
+/frontend/coverage/
