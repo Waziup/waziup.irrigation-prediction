@@ -39,6 +39,14 @@ class TrainingThread(threading.Thread):
                 threshold_timestamp,
                 predictions,
             )
+            # Persistence failure must not invalidate a usable live forecast.
+            try:
+                from runtime_recovery import save_model_state
+                save_model_state(plot)
+            except Exception as exc:
+                plot.runtime_recovery_reason = "model_state_save_failed"
+                print(f"Model recovery snapshot could not be saved: {exc}")
+            plot.runtime_recovery_status = "live"
             plot.pipeline_cache_status = "saved"
             plot.pipeline_cache_reason = None
             return current_tension, threshold_timestamp, predictions
@@ -188,3 +196,12 @@ def start(currentPlot):
         currentPlot, True, name="TrainingThread_" + str(currentPlot.user_given_name))
     currentPlot.training_thread.start()
     print("Training thread started for plot:", currentPlot.user_given_name)
+
+
+def resume(currentPlot):
+    """Resume a restored fitted model; fitting waits for its normal schedule."""
+    prediction_thread.start(currentPlot)
+    if currentPlot.training_thread is None or not currentPlot.training_thread.is_alive():
+        currentPlot.training_thread = TrainingThread(currentPlot, False,
+            name="TrainingThread_" + str(currentPlot.user_given_name))
+        currentPlot.training_thread.start()

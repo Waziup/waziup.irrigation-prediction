@@ -7,6 +7,8 @@ import actuation
 import create_model
 import pipeline_cache
 
+_START_LOCK = threading.RLock()
+
 
 class PredictionThread(threading.Thread):
     def __init__(self, plot, name=None):
@@ -79,6 +81,8 @@ class PredictionThread(threading.Thread):
                     )
                     break
                 currentSoilTension, self.currentPlot.threshold_timestamp, self.currentPlot.predictions = cycle
+                self.currentPlot.runtime_recovery_status = "live"
+                self.currentPlot.runtime_recovery_reason = None
 
                 end_time = datetime.now().replace(microsecond=0)
                 duration = end_time - start_time
@@ -111,7 +115,7 @@ class PredictionThread(threading.Thread):
                     prediction_interval_hours)
                 print(
                     f"Waiting {time_to_sleep // 3600:.0f} hours {time_to_sleep % 3600 // 60:.0f} minutes until conducting next prediction...")
-                if self.stop_event.wait(timeout=time_to_sleep):
+                if runtime_config.wait_for_wall_clock(self.stop_event, time_to_sleep):
                     break
             except Exception as e:
                 self.currentPlot.pipeline_cache_status = "error"
@@ -119,7 +123,7 @@ class PredictionThread(threading.Thread):
                 print(
                     f"[{self.currentPlot.user_given_name}] Prediction thread error: {e}. "
                     f"Retrying after {runtime_config.get_timing_config(self.currentPlot).error_retry_seconds / 60} minutes.")
-                if self.stop_event.wait(timeout=runtime_config.get_timing_config(
+                if runtime_config.wait_for_wall_clock(self.stop_event, runtime_config.get_timing_config(
                         self.currentPlot).error_retry_seconds):
                     break
 
@@ -135,6 +139,24 @@ class PredictionThread(threading.Thread):
 
 
 def start(currentPlot):
+    with _START_LOCK:
+        _start_unlocked(currentPlot)
+
+
+def ensure_running(plot):
+    """Recover a missing inference worker without fitting or replacing a live worker."""
+    with _START_LOCK:
+        if (getattr(plot, 'currently_training', False)
+                or getattr(plot, 'best_model', None) is None):
+            return False
+        worker = getattr(plot, 'prediction_thread', None)
+        if worker is not None and worker.is_alive():
+            return False
+        start(plot)
+        return True
+
+
+def _start_unlocked(currentPlot):
     # Do not start prediction if currently training
     if not currentPlot.currently_training:
         # Stop previous prediction thread if it exists and is running
