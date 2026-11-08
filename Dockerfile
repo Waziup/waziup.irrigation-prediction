@@ -1,3 +1,10 @@
+FROM node:24.22.0-bookworm-slim AS frontend-build
+WORKDIR /build/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --include=dev
+COPY frontend/ ./
+RUN npm run build
+
 FROM python:3.9-slim-bookworm
 
 #later alpine to save even more filesize of container, but is it worth it? (Alpine uses musl instead of glibc)
@@ -47,11 +54,14 @@ RUN \
         joblib==1.3 \
         xmlrunner \
         psutil \
-        gevent
+        gevent \
+        shapely==2.0.7 \
+        geographiclib==2.1
         
 # keras tuner check usage, also xmlrunner for unittests, does not need to be included in the image
 
 COPY . /root/src/
+COPY --from=frontend-build /build/frontend/dist/ /root/src/frontend/dist/
 
 RUN mkdir -p /root/src/data
 

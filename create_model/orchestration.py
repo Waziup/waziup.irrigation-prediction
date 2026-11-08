@@ -104,6 +104,9 @@ class PipelineCycleResult:
 
 
 def _predict_with_updated_data_unlocked(plot):
+    reader = getattr(plot, 'read_config', None)
+    if callable(reader):
+        plot.config = reader()
     timezone_name = TimeUtils.for_plot(plot)
     # Run data pipeline to obtain latest data. training=False: reuse the scaler the frozen
     # model was trained under instead of refitting it on the newly accumulated data.
@@ -639,6 +642,18 @@ def run_complete_cycle(plot, training: bool = False) -> PipelineCycleResult:
                     forecast,
                     getattr(runtime_state, "weather_forecast_frame", None),
                     decision_now,
+                    # Labels are rounded for display; thresholds must use the
+                    # exact timestamps already supplied by the tension model.
+                    horizon_timestamps={
+                        label: min(
+                            (pd.Timestamp(value) for value in forecast_timestamps),
+                            key=lambda stamp: abs((stamp - (
+                                decision_now + pd.Timedelta(hours=float(
+                                    str(label).lower().removesuffix("h")))
+                            )).total_seconds()),
+                        )
+                        for label in forecast
+                    },
                 )
                 ordered_labels = sorted(
                     threshold_forecast,

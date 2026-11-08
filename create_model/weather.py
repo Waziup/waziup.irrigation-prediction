@@ -10,17 +10,26 @@ from __future__ import annotations
 
 import pandas as pd
 
-from spaceiotbox_client import LEGACY_WEATHER_COLUMNS, fetch_weather_frame
+from spaceiotbox_client import LEGACY_WEATHER_COLUMNS
+from farm_weather import fetch_farm_weather_frame as fetch_weather_frame
 from utils import TimeUtils
+from plot_location import plot_reference_location
 
 
 def _plot_coordinates(plot):
-    gps = getattr(plot, "gps_info", {}) or {}
-    latitude = gps.get("latitude", gps.get("lattitude"))
-    longitude = gps.get("longitude")
+    gps = getattr(plot, 'farm_gps_info', None)
+    if isinstance(gps, dict):
+        try:
+            latitude = float(gps.get('latitude', gps.get('lattitude')))
+            longitude = float(gps.get('longitude'))
+            if -90 <= latitude <= 90 and -180 <= longitude <= 180:
+                return latitude, longitude
+        except (TypeError, ValueError):
+            pass
+    latitude, longitude = plot_reference_location(plot)
     if latitude is None or longitude is None:
         raise ValueError("Plot coordinates are required for weather data")
-    return float(latitude), float(longitude)
+    return latitude, longitude
 
 
 def _local_timestamp(value, timezone_name):

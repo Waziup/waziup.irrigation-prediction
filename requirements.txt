@@ -20,3 +20,7 @@ keras-tuner
 xmlrunner
 psutil
 gevent
+shapely==2.0.7
+geographiclib==2.1
+
+cloudpickle

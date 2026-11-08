@@ -12,7 +12,7 @@ pipeline {
         DOCKER_PLATFORM = 'linux/arm64/v8'
         FORMER_IMAGES_DOCKER_ID = ''
         APP_NAME = 'waziup.irrigation-prediction'
-        LOCAL_WAZIGATE_IP = 'wazigate.local'
+        LOCAL_WAZIGATE_IP = '172.16.11.104'
     }
 
     stages {
@@ -89,7 +89,10 @@ pipeline {
                         def dockerImage = "${DOCKER_IMAGE_NAME}:${DOCKER_TAG_NAME}"
                         echo "Pushing Docker image to local gateway..."
 
-                        withCredentials([string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE')]) {
+                        withCredentials([
+                            string(credentialsId: 'SSH_PASSWORD_WAZIGATE', variable: 'SSH_PASSWORD_WAZIGATE'),
+                            string(credentialsId: 'SPACEIOTBOX_API_KEY', variable: 'SPACEIOTBOX_API_KEY')
+                        ]) {
 
                             // Push image
                             sh """
@@ -104,12 +107,26 @@ pipeline {
                             sh """
                                 sshpass -p "$SSH_PASSWORD_WAZIGATE" scp -o StrictHostKeyChecking=no docker-compose.yml pi@${LOCAL_WAZIGATE_IP}:/tmp/docker-compose.yml
                                 sshpass -p "$SSH_PASSWORD_WAZIGATE" scp -o StrictHostKeyChecking=no package.json pi@${LOCAL_WAZIGATE_IP}:/tmp/package.json
+                            """
 
+                            sh '''
+                                set +x
+                                test -n "$SPACEIOTBOX_API_KEY"
+                                printf '%s\n' "$SPACEIOTBOX_API_KEY" | \
+                                    sshpass -p "$SSH_PASSWORD_WAZIGATE" ssh -o StrictHostKeyChecking=no "pi@$LOCAL_WAZIGATE_IP" \
+                                        'umask 077; tee /home/pi/.irrigation-prediction-spaceiotbox-key >/dev/null'
+                            '''
+
+                            sh """
                                 sshpass -p "$SSH_PASSWORD_WAZIGATE" ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
                                     echo "$SSH_PASSWORD_WAZIGATE" | sudo -S sh -e -c "
                                         mkdir -p /var/lib/wazigate/apps/${APP_NAME};
                                         mv /tmp/docker-compose.yml /var/lib/wazigate/apps/${APP_NAME}/docker-compose.yml;
                                         mv /tmp/package.json /var/lib/wazigate/apps/${APP_NAME}/package.json;
+                                        mkdir -p /var/lib/wazigate/secrets/${APP_NAME};
+                                        chmod 700 /var/lib/wazigate/secrets/${APP_NAME};
+                                        mv /home/pi/.irrigation-prediction-spaceiotbox-key /var/lib/wazigate/secrets/${APP_NAME}/spaceiotbox_api_key;
+                                        chmod 600 /var/lib/wazigate/secrets/${APP_NAME}/spaceiotbox_api_key;
                                     "
                                 '
                             """
@@ -121,6 +138,9 @@ pipeline {
                                 sshpass -p "$SSH_PASSWORD_WAZIGATE" ssh -o StrictHostKeyChecking=no pi@${LOCAL_WAZIGATE_IP} '
                                     cd /var/lib/wazigate/apps/${APP_NAME} &&
                                     echo "$SSH_PASSWORD_WAZIGATE" | sudo -S sh -e -c "
+                                        test -s /var/lib/wazigate/secrets/${APP_NAME}/spaceiotbox_api_key;
+                                        IFS= read -r SPACEIOTBOX_API_KEY < /var/lib/wazigate/secrets/${APP_NAME}/spaceiotbox_api_key;
+                                        export SPACEIOTBOX_API_KEY;
                                         docker-compose stop;
                                         docker-compose rm -f;
                                         docker-compose up -d;

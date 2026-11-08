@@ -226,7 +226,7 @@ def compute_gdd_series(
     Args:
         tmax_series:   Daily maximum temperature series (DatetimeIndex, °C).
         tmin_series:   Daily minimum temperature series (matching index).
-        planting_date: Actual planting date from farms.yaml. Must be
+        planting_date: Actual planting date from plot settings. Must be
                        provided explicitly — never inferred from data.
         crop_type:     Key into CROP_PARAMS.
         initial_gdd:   GDD already accumulated between planting_date and
@@ -271,7 +271,7 @@ def compute_gdd_series(
     data_start = tmax_series.index.min()
     if planting_ts > tmax_series.index.max():
         log.warning(
-            "  planting_date %s is after end of data — GDD will be all zeros. Check farms.yaml.",
+            "  planting_date %s is after end of data — GDD will be all zeros. Check plot settings.",
             planting_ts.date(),
         )
         return pd.Series(0.0, index=tmax_series.index, dtype=float)

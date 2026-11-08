@@ -5,10 +5,9 @@
     <title>WAZIUP Irrigation Settings</title>
     <meta name="description" content="WAZIUP Irrigation Prediction Settings" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="wazifarm-logo.svg" type="image/svg+xml" />
 
     <link rel="stylesheet" href="settings.css?v=20260928-1" type="text/css" />
-    <link rel="stylesheet" href="demo.css?v=20260928-3" type="text/css" />
     <script type="text/javascript" src="libs/jquery-3.2.1.min.js"></script>
     <script type="text/javascript" src="ui-icons.js"></script>
     <script type="text/javascript">
@@ -82,6 +81,8 @@
       var waitForTraining = false;
       var TrainingReadyCheck = 10000;
       var settingsHydrating = false;
+      var settingsResource = null;
+      var settingsSavePending = false;
       var configuredSensorSelections = {
         moisture: [],
         temperature: [],
@@ -209,6 +210,15 @@
 
       // handle menu button
       function openRegisterFarmPage() {
+        const form = document.querySelector('#farm-dialog form');
+        for (const key of ['name', 'size', 'area_unit', 'latitude', 'longitude']) {
+          if (form?.elements[key]) form.elements[key].value = farmRecord[key] ?? '';
+        }
+        const firstPlot = form?.elements.plot_name;
+        if (firstPlot) {
+          firstPlot.disabled = !!farmRecord.configured;
+          firstPlot.closest('.form-group').hidden = !!farmRecord.configured;
+        }
         document.getElementById("farm-dialog")?.showModal();
       }
 
@@ -237,9 +247,10 @@
           plot_name: form.elements.plot_name.value.trim(),
           latitude: form.elements.latitude.value,
           longitude: form.elements.longitude.value,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"});
+          timezone: farmRecord.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"});
+        if (farmRecord.configured) body.delete("plot_name");
         try {
-          const response = await fetch("../api/farms", {method: "POST", headers: {
+          const response = await fetch(farmRecord.configured ? "../api/updateFarm" : "../api/farms", {method: "POST", headers: {
             "Content-Type": "application/x-www-form-urlencoded"}, body: body.toString()});
           const responseText = await response.text();
           let payload = {};
@@ -248,13 +259,11 @@
           if (!response.ok) {
             throw new Error(payload.error || responseText || "Farm creation failed");
           }
-          if (!payload.plot?.plot_id) {
-            throw new Error("Farm was created but the server response did not include its plot.");
-          }
+
           closeFarmDialog();
           form.reset();
           await loadPlotList();
-          await setActivePlot(payload.plot.plot_id);
+          if (payload.plot?.plot_id) await setActivePlot(payload.plot.plot_id);
         } catch (error) {
           const errorNode = document.getElementById("farm-dialog-error");
           if (errorNode) errorNode.textContent = error.message;
@@ -262,14 +271,6 @@
       }
 
       function openAppPage(page) {
-        if (page === "demo") {
-          const url = new URL("index.html", window.location.href);
-          url.search = window.location.search;
-          url.searchParams.set("demo", "true");
-          url.hash = "dashboard";
-          window.location.href = url.toString();
-          return;
-        }
         if (page === "settings") {
           window.location.href = "settings.html";
           return;
@@ -397,7 +398,7 @@
       let currentPlotId = null;
       let currentPlotIndex = 1;
       let activeFarmName = "";
-      let farmRecords = [];
+      let farmRecord = {};
       let plotListError = "";
 
       function plotDisplayName(name, farmName) {
@@ -422,9 +423,8 @@
           plotNames = plotRecords.map(plot => plot.name || "Unnamed plot");
           plotListError = "";
           currentPlotId = data.current_plot_id || null;
-          const farms = Array.isArray(data.farms) ? data.farms : [];
-          farmRecords = farms;
-          const activeFarm = farms.find((farm) => Array.isArray(farm.plot_ids) && farm.plot_ids.includes(currentPlotId));
+          farmRecord = data.farm || {};
+          const activeFarm = farmRecord;
           activeFarmName = activeFarm?.name || "";
           const currentPlot = plotRecords.findIndex(plot => plot.plot_id === currentPlotId) + 1;
           if (Number.isFinite(currentPlot) && currentPlot > 0) {
@@ -473,7 +473,7 @@
           const record = plotRecords[index] || {};
           const stableId = record.plot_id || String(plotNumber);
           const isActive = stableId === currentPlotId || plotNumber === currentPlotIndex;
-          const farm = farmRecords.find(farm => farm.farm_id === record.farm_id);
+          const farm = farmRecord;
           const label = plotDisplayName(name || "Unnamed plot", farm?.name);
           const area = Number(record.area || 0);
           const areaUnit = record.area_unit || "m2";
@@ -506,14 +506,14 @@
         const label = document.getElementById("activeFarmLabel");
         if (!label) return;
         const record = plotRecords.find(plot => plot.plot_id === currentPlotId);
-        activeFarmName = farmRecords.find(farm => farm.farm_id === record?.farm_id)?.name || "";
+        activeFarmName = farmRecord?.name || "";
         const plotName = plotDisplayName(farmName || document.getElementById("name_form")?.value || "", activeFarmName);
         label.textContent = activeFarmName && plotName ? `${activeFarmName} · ${plotName}` : (activeFarmName || plotName);
       }
 
       function updateSelectedPlotHeading(plotName) {
         const record = plotRecords.find(plot => plot.plot_id === currentPlotId);
-        const farm = farmRecords.find(farm => farm.farm_id === record?.farm_id);
+        const farm = farmRecord;
         const name = plotDisplayName((plotName || document.getElementById("name_form")?.value || "Unnamed plot").trim(), farm?.name);
         const heading = document.getElementById("plot-details-heading");
         if (heading) heading.textContent = `${name} settings`;
@@ -559,6 +559,7 @@
       }
 
       async function setActivePlot(plotId) {
+        settingsResource = null;
         const workspace = document.querySelector(".plot-settings-workspace");
         workspace?.classList.add("is-loading");
         workspace?.setAttribute("aria-busy", "true");
@@ -576,6 +577,7 @@
           currentPlotIndex = Math.max(1, plotRecords.findIndex(plot => plot.plot_id === plotId) + 1);
           renderPlotList();
           const configLoaded = await getFormerConfig();
+          if (currentPlotId !== plotId) return;
           if (!configLoaded) {
             resetPlotForm(plotRecords.find(plot => plot.plot_id === plotId) || {});
             renderPlotList();
@@ -679,9 +681,20 @@
 
       // Get formerly saved config from backend
       function getFormerConfig() {
-        return fetch(`../api/returnConfig`)
-          .then((response) => response.json())
-          .then((data) => {
+        const requestedPlotId = currentPlotId;
+        settingsResource = null;
+        if (!requestedPlotId) return Promise.resolve(false);
+        return fetch(`../api/returnConfig?plot_id=${encodeURIComponent(requestedPlotId)}`)
+          .then(async (response) => {
+            const data = await response.json();
+            if (requestedPlotId !== currentPlotId) return false;
+            if (data.plot_id !== requestedPlotId || typeof data.config_version !== "string" || !data.config_version) {
+              throw new Error("The backend did not confirm this plot's settings. Reload after updating the backend.");
+            }
+            const unconfigured = response.status === 400 && data.error === "No config data present. Perform configuration.";
+            if (!response.ok && !unconfigured) throw new Error(data.message || data.error || "Settings could not be loaded");
+            if (data.status_code === 200 && data.data?.Plot_id !== requestedPlotId) throw new Error("Settings returned for a different plot");
+            settingsResource = {plotId: requestedPlotId, configVersion: data.config_version};
             if (data.status_code == 200) {
               // Create a reference
               const response_data = data.data;
@@ -888,6 +901,7 @@
             }
           })
           .catch((error) => {
+            if (settingsResource?.plotId === requestedPlotId) settingsResource = null;
             console.warn("Could not load the selected plot configuration:", error);
             return false;
           });
@@ -1212,6 +1226,12 @@
 
       // Call backend to sync past values
       function setConfig() {
+        if (settingsSavePending) return;
+        const resource = settingsResource;
+        if (!resource || resource.plotId !== currentPlotId) {
+          alert("Reload this plot's saved settings before saving. The plot ID and configuration version must be confirmed.");
+          return;
+        }
         selectedOptionsMoisture = evalSelected("sensor_list_moisture");
         selectedOptionsTemp = evalSelected("sensor_list_temp");
         selectedOptionsFlow = evalSelected("actuator_list_flow");
@@ -1249,13 +1269,14 @@
           return;
         }
 
-        // Make a GET request to Python backend
-        fetch(`../api/setConfig`, {
+        // Pin the resource/version from the settings read; never rely on shared selection.
+        settingsSavePending = true;
+        return fetch(`../api/setConfig`, {
           method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
           },
-          body: `selectedOptionsMoisture=${queryParamsMoisture}&selectedOptionsTemp=${queryParamsTemp}&selectedOptionsFlow=${queryParamsFlow}&${queryForms}&ret=${encodeURIComponent(
+          body: `plot_id=${encodeURIComponent(resource.plotId)}&config_version=${encodeURIComponent(resource.configVersion)}&selectedOptionsMoisture=${queryParamsMoisture}&selectedOptionsTemp=${queryParamsTemp}&selectedOptionsFlow=${queryParamsFlow}&${queryForms}&ret=${encodeURIComponent(
             queryRetention
           )}`,
         })
@@ -1269,17 +1290,31 @@
             }
 
             if (!response.ok && payload && payload.status === "error") {
+              if (payload.conflict === "config_version" || response.status === 428) {
+                if (settingsResource === resource) {
+                  settingsResource = null;
+                  setTrainingAvailability(false, "Reload saved settings before saving or training again.");
+                }
+                throw new Error(payload.message || "Settings changed. Reload before saving again.");
+              }
               const errors = payload.errors || {};
               const messages = Object.keys(errors)
                 .map((key) => `${key}: ${errors[key]}`)
                 .join("\n");
-              alert(`Validation failed:\n${messages}`);
+              alert(`Save rejected: ${messages || payload.message || "Invalid settings"}`);
               return;
             }
 
             if (!response.ok && (!payload || payload.status !== "pending")) {
               throw new Error(payload?.message || text || "Configuration could not be saved");
             }
+
+            if (payload?.plot_id !== resource.plotId || typeof payload?.config_version !== "string" || !payload.config_version) {
+              throw new Error("The save acknowledgement could not be verified. Reload saved settings before retrying.");
+            }
+            // A switch in this browser must not install the previous plot's token/status.
+            if (currentPlotId !== resource.plotId || settingsResource !== resource) return;
+            settingsResource = {plotId: resource.plotId, configVersion: payload.config_version};
 
             if (payload && payload.status === "pending") {
               setTrainingAvailability(
@@ -1304,9 +1339,14 @@
             setTrainingAvailability(true, "Settings saved. This plot is ready to start training.");
           })
           .catch((error) => {
+            if (settingsResource === resource) {
+              settingsResource = null;
+              setTrainingAvailability(false, "Reload saved settings before saving or training again.");
+            }
             console.error("Error:", error);
             alert(`Failed to save configuration: ${error.message || "unknown error"}`);
-          });
+          })
+          .finally(() => { settingsSavePending = false; });
       }
 
       // JavaScript function to toggle visibility
@@ -1505,12 +1545,10 @@
 
   <body>
     <aside class="settings-sidebar" aria-label="Primary navigation">
-      <div class="settings-sidebar-logo"><span aria-hidden="true">🌱</span><strong>WaziFarm</strong></div>
+      <div class="settings-sidebar-logo"><img src="wazifarm-logo.svg" alt="" width="34" height="34" /><strong>WaziFarm</strong></div>
       <nav class="settings-sidebar-links">
         <button type="button" onclick="openAppPage('dashboard')"><span aria-hidden="true">▦</span><span>Dashboard</span></button>
         <button type="button" class="active" onclick="openAppPage('settings')"><span aria-hidden="true">⚙</span><span>Farm settings</span></button>
-        <!-- Temporary stakeholder demo link; remove after the presentation. -->
-        <button type="button" class="demo-nav-button" onclick="openAppPage(&quot;demo&quot;)"><span aria-hidden="true">◇</span><span>Demo farm</span></button>
       </nav>
     </aside>
     <div class="app-container">
@@ -1518,7 +1556,7 @@
         <form onsubmit="createFarmFromDialog(event)">
           <div class="dialog-heading">
             <div>
-              <h2 id="farm-dialog-title">Add a farm</h2>
+              <h2 id="farm-dialog-title">Farm details</h2>
             </div>
             <button type="button" class="dialog-close" onclick="closeFarmDialog()" aria-label="Close">×</button>
           </div>
@@ -1553,7 +1591,7 @@
           <p id="farm-dialog-error" class="dialog-error" role="alert"></p>
           <div class="dialog-actions">
             <button type="button" class="btn-secondary" onclick="closeFarmDialog()">Cancel</button>
-            <button type="submit" class="btn-primary">Create farm</button>
+            <button type="submit" class="btn-primary">Save farm</button>
           </div>
         </form>
       </dialog>
@@ -1597,7 +1635,7 @@
               Add plot
             </button>
             <button type="button" class="btn-secondary add-farm-btn" onclick="openRegisterFarmPage()">
-              Add farm
+              Farm details
             </button>
           </div>
         </div>

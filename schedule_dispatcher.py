@@ -49,8 +49,7 @@ class ScheduleDispatcher(threading.Thread):
         plots = list(self.get_plots().values())
         plot = next((plot for plot in plots if str(getattr(plot, 'stable_id', ''))
                      == str(operation['plot_id'])), None)
-        if (plot is None or getattr(plot, 'farm_id', None) != operation['farm_id']
-                or not actuation._has_actuator_support(plot)):
+        if (plot is None or not actuation._has_actuator_support(plot)):
             self._review(operation, 'plot_or_actuator_unavailable')
             return
         mode = actuation.resolve_irrigation_mode(plot)

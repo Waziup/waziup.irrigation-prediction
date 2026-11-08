@@ -1,6 +1,7 @@
 """Pure farm-dashboard composition from stable application contracts."""
 
 from datetime import datetime, timezone
+from irrigation_plan import irrigation_plan, planned_water_total
 
 
 def _operation_for_plot(operations, plot_id):
@@ -12,6 +13,7 @@ def build_farm_dashboard(*, farm, plot_records, runtime_plots, recommendations,
                          alerts, operations, generated_at=None):
     generated_at = generated_at or datetime.now(
         timezone.utc).replace(microsecond=0).isoformat()
+    operations = irrigation_plan(operations)
     alert_by_plot = {item["plot_id"]: item for item in alerts}
     cards = []
     equipment_configured = 0
@@ -41,13 +43,34 @@ def build_farm_dashboard(*, farm, plot_records, runtime_plots, recommendations,
             equipment_state = "advisory_only"
         else:
             equipment_state = "ready"
+        sources = [source for source in freshness.get("stale_sources", [])
+                   if str(source).lower() not in {"satellite", "eo"}]
+        # Optional EO refinement cannot invalidate otherwise usable GDD advice.
+        essential_stale = bool(sources) or (
+            bool(freshness.get("stale")) and not freshness.get("stale_sources"))
         data_state = "unavailable" if not recommendation.get("available") else (
-            "stale" if freshness.get("stale") else "fresh")
+            "stale" if essential_stale else "fresh")
+        crop_type = crop.get("type") or getattr(runtime, "crop_type", None)
+        missing_sensors = (
+            runtime is not None
+            and not getattr(runtime, "load_data_from_csv", False)
+            and any(getattr(runtime, field, None) == [] for field in (
+                "device_and_sensor_ids_moisture", "device_and_sensor_ids_temp")))
+        setup_state = (
+            "settings_required" if getattr(runtime, "settings_configured", None) is False or missing_sensors
+            else "unplanted" if runtime is not None and not crop_type
+            else "complete")
         stale_count += int(data_state != "fresh")
+        reason = recommendation.get("reason") if isinstance(recommendation.get("reason"), str) else None
+        if data_state == "stale" and sources:
+            descriptions = {"model": "The forecast needs updating.", "weather": "Weather data is out of date.",
+                            "sensors": "Sensor readings are out of date."}
+            reason = " ".join(descriptions.get(source, "Irrigation inputs need updating.") for source in sources)
         cards.append({
-            "plot_id": plot_id, "farm_id": record.get("farm_id"),
+            "plot_id": plot_id,
             "name": record.get("name") or getattr(runtime, "user_given_name", ""),
-            "crop_type": crop.get("type") or getattr(runtime, "crop_type", None),
+            "crop_type": crop_type,
+            "setup_state": setup_state,
             "growth_stage": crop.get("current_stage"),
             "current_tension_cbar": condition.get("current_tension_cbar"),
             "threshold_cbar": condition.get("threshold_cbar"),
@@ -64,17 +87,16 @@ def build_farm_dashboard(*, farm, plot_records, runtime_plots, recommendations,
                            "status": operation.get("status"),
                            "amount_m3": operation.get("amount_m3")} if operation else None),
             "data_state": data_state,
+            "data_sources": sources,
+            "data_reason": reason,
         })
 
     urgency_counts = {name: sum(1 for alert in alerts if alert.get("urgency") == name)
                       for name in ("watch", "advise", "critical")}
-    included = [item for item in operations if item.get("status") not in {
-        "declined", "failed"}]
-    planned_water = round(sum(float(item.get("amount_m3") or 0)
-                          for item in included), 3)
+    planned_water = planned_water_total(operations)
     return {
         "schema_version": "1.0", "generated_at": generated_at,
-        "farm": {"farm_id": farm.get("farm_id"), "name": farm.get("name"),
+        "farm": {"name": farm.get("name"),
                  "gateway_id": farm.get("gateway_id"),
                  "size": farm.get("size"), "area_unit": farm.get("area_unit"),
                  "timezone": farm.get("timezone")},

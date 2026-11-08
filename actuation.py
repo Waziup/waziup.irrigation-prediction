@@ -18,6 +18,8 @@ from utils import NetworkUtils, TimeUtils
 import threading
 import runtime_config
 from recommendation_contract import compose_recommendation, threshold_condition
+from plot_location import plot_reference_location
+from planting_date import validate_planting_date
 from operations_store import get_operations_store, MODES
 from sensor_quality import SENSOR_STALE_HOURS, evaluate_tension_sensor_safety
 from state_store import configured_database_path, get_app_state_store
@@ -35,9 +37,8 @@ else:
     _spaceiotbox_client = import_module("spaceiotbox_client")
     _spaceiotbox_satellite = import_module("spaceiotbox_satellite")
 
-fetch_weather_frame = _spaceiotbox_client.fetch_weather_frame
-fetch_satellite_snapshot = _spaceiotbox_satellite.fetch_satellite_snapshot
-fetch_satellite_history = _spaceiotbox_satellite.fetch_satellite_history
+from farm_weather import fetch_farm_weather_frame as fetch_weather_frame
+from plot_satellite import fetch_satellite_snapshot, fetch_satellite_history
 WEATHER_FIELDS = tuple(_spaceiotbox_client.LEGACY_WEATHER_COLUMNS)
 SATELLITE_FIELDS = tuple(_spaceiotbox_satellite.SATELLITE_COLUMNS)
 
@@ -130,6 +131,7 @@ def _build_runtime_farm_config(plot):
     initial_gdd = getattr(plot, 'initial_gdd', 0.0)
     depletion_fraction = getattr(plot, 'depletion_fraction', None)
     return SimpleNamespace(
+        name=getattr(plot, "user_given_name", "Plot"),
         crop_type=getattr(plot, 'crop_type', ''),
         soil_texture_class=getattr(plot, 'soil_texture_class', None),
         planting_date=getattr(plot, 'planting_date', ''),
@@ -190,10 +192,9 @@ def _resolve_irrigation_type(plot):
 
 
 def _has_actuator_support(plot):
-    irrigation_type = _resolve_irrigation_type(plot)
-    if irrigation_type in NON_ACTUATOR_IRRIGATION_TYPES:
-        return False
-
+    # Hardware assignment and operating mode determine control capability.
+    # A legacy irrigation-method label such as "manual" must not hide a
+    # deliberately selected controller from Semi-Auto controls.
     flow_ids = getattr(plot, 'device_and_sensor_ids_flow', []) or []
     return len(flow_ids) > 0
 
@@ -212,6 +213,8 @@ def _recommendation_operation(plot, pipeline_result, recommendation, runtime_sta
     stable_id = getattr(plot, "stable_id", None)
     if not stable_id:
         return None, True
+    if getattr(pipeline_result, "inference_source", "live") != "live":
+        return None, False
     forecast_timestamps = list(getattr(pipeline_result, "forecast_timestamps", []) or [])
     anchor = forecast_timestamps[0] if forecast_timestamps else getattr(
         recommendation, "first_breach_timestamp", None)
@@ -240,32 +243,50 @@ def _recommendation_operation(plot, pipeline_result, recommendation, runtime_sta
         "threshold_cbar": threshold,
         "satellite_validation": satellite_validation,
     }
+    evaluated_at = getattr(pipeline_result, "calculated_at", None)
     key_material = _json_for_key({"plot": stable_id, "anchor": anchor,
+                                  "evaluation": evaluated_at,
                                   "urgency": decision["urgency"], "amount": amount})
     key = "recommendation:" + hashlib.sha256(key_material.encode()).hexdigest()[:32]
     store = get_operations_store()
+    if evaluated_at is not None:
+        store.supersede_recommendations(stable_id, evaluated_at, except_key=key)
 
     # An unavailable evaluation must clear any older active warning without
     # creating a misleading planned irrigation operation.
-    if decision["urgency"] in {"error", "unknown"}:
+    start = getattr(recommendation, "first_breach_timestamp", None)
+    if decision["urgency"] == "critical" and should_irrigate:
+        start = pd.Timestamp.now(tz="UTC")
+    if start is not None:
+        try:
+            start = pd.Timestamp(start)
+            if pd.isna(start):
+                start = None
+            elif start.tzinfo is None:
+                start = start.tz_localize(TimeUtils.for_plot(plot))
+        except (TypeError, ValueError):
+            start = None
+    # Evaluation/monitoring is not a scheduled watering event. Persist its
+    # alert lifecycle even when no executable operation can be created.
+    if (not should_irrigate or decision["urgency"] in {"error", "unknown"}
+            or amount is None or start is None):
         _, created = store.record_alert(
             idempotency_key=f"alert:{key}", operation_id=None,
-            farm_id=getattr(plot, "farm_id", None), plot_id=stable_id,
+            plot_id=stable_id,
             urgency=decision["urgency"], payload=decision)
         return None, created
 
     operation, created = store.create_operation(
-        idempotency_key=key, plot_id=stable_id, farm_id=getattr(plot, "farm_id", None),
+        idempotency_key=key, plot_id=stable_id,
         plot_name=getattr(plot, "user_given_name", ""), source="recommendation",
-        mode=mode, status=status, amount_m3=amount, planned_start=(
-            getattr(recommendation, "first_breach_timestamp", None).isoformat()
-            if hasattr(getattr(recommendation, "first_breach_timestamp", None), "isoformat") else None),
+        mode=mode, status=status, amount_m3=amount,
+        planned_start=pd.Timestamp(start).isoformat(),
         recommendation=decision)
     urgency = decision["urgency"]
     alert_key = f"alert:{key}"
     store.record_alert(
         idempotency_key=alert_key, operation_id=operation["operation_id"],
-        farm_id=getattr(plot, "farm_id", None), plot_id=stable_id,
+        plot_id=stable_id,
         urgency=urgency, payload=decision)
     return operation, created
 
@@ -582,16 +603,11 @@ def _summarize_data_frame(frame: pd.DataFrame, expected_fields):
 
 
 def _parse_plot_coordinates(plot):
-    """Parse GPS values from dict."""
-    gps_info = getattr(plot, 'gps_info', {})
-    if isinstance(gps_info, dict):
-        lat = gps_info.get('latitude', gps_info.get('lattitude'))
-        lon = gps_info.get('longitude')
-        if lat is None or lon is None:
-            raise ValueError('Missing plot coordinates')
-        return float(lat), float(lon)
-
-    raise ValueError('Cannot parse plot coordinates')
+    """Use saved plot GPS, falling back to a point inside its boundary."""
+    latitude, longitude = plot_reference_location(plot)
+    if latitude is None or longitude is None:
+        raise ValueError('Missing plot coordinates')
+    return latitude, longitude
 
 
 def _parse_weather_coordinates(plot):
@@ -608,66 +624,15 @@ def _parse_weather_coordinates(plot):
 
 
 def _resolve_phenology_reference(plot, crop_type, plot_lat, plot_lon):
-    """Resolve an explicit planting date or a quality-gated EO emergence date.
-
-    EO does not reveal the literal sowing date. When a crop is known but its
-    planting date is not, a sustained green-up interval can anchor GDD at the
-    crop's emergence requirement without changing the saved farmer input.
-    """
-    explicit = str(getattr(plot, "planting_date", "") or "").strip()
-    if explicit:
-        return {
-            "date": explicit,
-            "source": "farmer_reported_planting_date",
-            "anchor_gdd": 0.0,
-            "confidence": "reported",
-            "interval": None,
-        }
+    """Use only the farmer-entered planting date; never infer it from EO."""
     if not crop_type:
         return None
-
-    _trace_event(
-        "decision.phenology_reference.started", plot, scope="plot",
-        method="eo_greening", latitude=plot_lat, longitude=plot_lon)
     try:
-        history = fetch_satellite_history(
-            plot_lat, plot_lon, lookback_days=365, limit=100,
-            include_ndre=False)
-        observation = analyse_vegetation_history(history)
-        greening = observation.get("greening") or {}
-        confidence = greening.get("confidence")
-        reference_date = greening.get("estimated_end")
-        accepted = (
-            bool(greening.get("detected"))
-            and confidence in {"moderate", "high"}
-            and bool(reference_date)
-        )
-        _trace_event(
-            "decision.phenology_reference.completed", plot, scope="plot",
-            accepted=accepted, method="eo_estimated_emergence",
-            confidence=confidence,
-            estimated_start=greening.get("estimated_start"),
-            estimated_end=reference_date,
-            observations=observation.get("valid_observations", 0),
-            status=greening.get("status"),
-        )
-        if not accepted:
-            return None
-        return {
-            "date": reference_date,
-            "source": "eo_estimated_emergence",
-            "anchor_gdd": float(get_crop_params(crop_type).gdd_emergence),
-            "confidence": confidence,
-            "interval": {
-                "start": greening.get("estimated_start"),
-                "end": reference_date,
-            },
-        }
-    except Exception as exc:
-        _trace_event(
-            "decision.phenology_reference.failed", plot, scope="plot",
-            method="eo_greening", error=str(exc))
+        explicit = validate_planting_date(crop_type, getattr(plot, 'planting_date', ''))
+    except ValueError:
         return None
+    return {'date': explicit, 'source': 'farmer_reported_planting_date',
+            'anchor_gdd': 0.0, 'confidence': 'reported', 'interval': None}
 
 
 def _compute_satellite_validation(plot, runtime_state, current_tension, tension_forecast):
@@ -733,6 +698,8 @@ def _compute_runtime_crop_state(plot):
         return _runtime_state_fail(plot, 'crop_model_not_available')
 
     crop_type = getattr(plot, 'crop_type', '')
+    if not crop_type:
+        return _runtime_state_fail(plot, 'missing_crop')
 
     try:
         evaluation_at = pd.Timestamp.now(tz="UTC")
@@ -742,7 +709,7 @@ def _compute_runtime_crop_state(plot):
             plot, crop_type, plot_lat, plot_lon)
         if reference is None:
             reason = ('missing_crop' if not crop_type
-                      else 'missing_planting_date_and_no_reliable_eo_emergence')
+                      else 'missing_planting_date')
             return _runtime_state_fail(plot, reason)
         planting_date_str = reference["date"]
         planting_date = pd.Timestamp(planting_date_str)
@@ -826,7 +793,7 @@ def _compute_runtime_crop_state(plot):
         end_str = today.strftime("%Y-%m-%d")
         _trace_event(
             "decision.weather.started", plot, scope="farm",
-            farm_id=getattr(plot, "farm_id", None), latitude=weather_lat,
+            latitude=weather_lat,
             longitude=weather_lon, start=start_str, end=end_str)
         weather = fetch_weather_frame(
             weather_lat, weather_lon, start_date=start_str, end_date=end_str)
@@ -976,6 +943,8 @@ def _compute_runtime_crop_state(plot):
         state.weather_provider = weather.attrs.get("provider", "unknown")
         state.satellite_provider = satellite.attrs.get(
             "provider", "unavailable")
+        state.weather_history_frame = weather.copy(deep=True)
+        state.satellite_snapshot_frame = satellite.copy(deep=True)
         state.weather_data_summary = weather_summary
         state.satellite_data_summary = satellite_summary
         try:
@@ -1188,19 +1157,28 @@ def get_irrigation_recommendation(plot):
     # the API is called before the first pipeline cycle.
     pipeline_result = getattr(plot, "pipeline_result", None)
     runtime_state = getattr(pipeline_result, "crop_state", None)
+    if (not getattr(plot, 'crop_type', '') or not getattr(plot, 'planting_date', '')
+            or getattr(runtime_state, 'phenology_reference_source', None) == 'eo_estimated_emergence'
+            or getattr(runtime_state, 'phenology_reference_date', getattr(plot, 'planting_date', '')) != getattr(plot, 'planting_date', '')):
+        runtime_state = None
     if runtime_state is None:
         runtime_state = _compute_runtime_crop_state(plot)
     if runtime_state is None:
         threshold = getattr(
             plot, "threshold_static", getattr(plot, "threshold", None))
+        # Zero is the constructor placeholder, not a configured stress trigger.
+        try:
+            threshold = float(threshold)
+            if (not np.isfinite(threshold) or threshold <= 0
+                    or getattr(plot, "settings_configured", True) is False):
+                threshold = None
+        except (TypeError, ValueError):
+            threshold = None
         reason_code = getattr(
             plot, "runtime_crop_state_error", "crop_state_unavailable")
         reason = (
-            "Planting date is not available and EO did not establish a "
-            "reliable emergence reference. Tension observations and model "
-            "forecasts can still be shown, but crop-stage irrigation advice "
-            "is intentionally disabled."
-            if reason_code == "missing_planting_date_and_no_reliable_eo_emergence"
+            "Enter the planting date in Plot settings to enable crop-stage advice."
+            if reason_code == "missing_planting_date"
             else (
                 "Dynamic threshold calibration is invalid or incomplete: "
                 + reason_code.split(":", 1)[1]
@@ -1209,6 +1187,8 @@ def get_irrigation_recommendation(plot):
                 else f"Crop state could not be computed: {reason_code}."
             )
         )
+        if reason_code == "missing_crop":
+            reason = "No crop selected. Choose a crop in Plot settings when you plant."
         return {
             "available": False,
             "reason": reason,
@@ -1241,15 +1221,23 @@ def get_irrigation_recommendation(plot):
         pipeline_result is not None
         and pipeline_error is None
         and pipeline_recommendation is not None
+        and getattr(pipeline_recommendation, "urgency", "error") not in {"error", "unknown"}
     )
     if pipeline_result is None:
         availability_reason = (
-            "No completed model forecast is available. Train this plot to create one."
+            "The saved model is refreshing its forecast."
+            if getattr(plot, "best_model", None) is not None else
+            ("The saved model does not match this plot's current settings. "
+             "Train this plot once for these settings; regular prediction updates do not retrain it."
+             if getattr(plot, "runtime_recovery_reason", None) == "model_state_incompatible" else
+             "No completed model forecast is available. Train this plot to create one.")
         )
     elif pipeline_error is not None:
         availability_reason = f"The latest model cycle failed: {pipeline_error}"
     elif pipeline_recommendation is None:
         availability_reason = "The latest model cycle did not produce a recommendation."
+    elif getattr(pipeline_recommendation, "urgency", "error") in {"error", "unknown"}:
+        availability_reason = getattr(pipeline_recommendation, "error_message", None) or "The latest model evaluation could not produce irrigation advice."
     else:
         availability_reason = None
 
@@ -1280,6 +1268,21 @@ def get_irrigation_recommendation(plot):
         stale_sources.append("weather")
     if sat_stale:
         stale_sources.append("satellite")
+    # Snapshot freshness must age with the clock, including after a restart.
+    # Restoring display data never turns yesterday's observations into live data.
+    try:
+        calculated = pd.Timestamp(getattr(pipeline_result, "calculated_at", None))
+        if pd.isna(calculated):
+            raise ValueError("Missing forecast timestamp")
+        calculated = calculated.tz_localize("UTC") if calculated.tzinfo is None else calculated.tz_convert("UTC")
+        model_age = (pd.Timestamp.now(tz="UTC") - calculated).total_seconds() / 3600
+        forecast_end = pd.to_datetime(getattr(pipeline_result, "forecast_timestamps", []), utc=True).max()
+        if (model_age < 0 or model_age > float(getattr(plot, "predict_period_hours", 3))
+                or pd.isna(forecast_end) or forecast_end <= pd.Timestamp.now(tz="UTC")):
+            stale_sources.append("model")
+    except (TypeError, ValueError):
+        if pipeline_result is not None:
+            stale_sources.append("model")
 
     area_m2 = _resolve_plot_area_m2(plot)
     irrigation_type = _resolve_irrigation_type(plot)
@@ -1501,18 +1504,7 @@ def _persist_alert_record(
             "inference_source": getattr(plot, "_inference_source", "live"),
         }
 
-        if configured_database_path() is not None:
-            get_app_state_store().append_alert(plot_id, payload)
-        else:
-            jsonl_path, latest_path = _alert_paths(plot_id)
-            os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)
-
-            with open(jsonl_path, "a") as handle:
-                handle.write(json.dumps(payload))
-                handle.write("\n")
-
-            with open(latest_path, "w") as handle:
-                json.dump(payload, handle, indent=2)
+        get_app_state_store().append_alert(plot_id, payload)
     except Exception as exc:
         log.warning("Failed to persist alert record: %s", exc)
 
@@ -1549,27 +1541,14 @@ def read_data_from_file(filename):
 
 
 def save_data_to_file(filename, data):
-    if configured_database_path() is not None:
-        match = re.search(r'irrigations_plot_(.+)\.json$', filename)
-        if match:
-            store = get_app_state_store()
-            plot_id = match.group(1)
-            store.save_irrigation_history(
-                plot_id, data.get("irrigations", []))
-            store.mark_legacy_import_complete(f"irrigation_history:{plot_id}")
-            return
-    if not os.path.exists(filename):
-        print(f"{filename} does not exist, creating a new one.")
-    parent = os.path.dirname(filename)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-
-    temporary = filename + ".tmp"
-    with open(temporary, 'w') as json_file:
-        json.dump(data, json_file, indent=4)
-        json_file.flush()
-        os.fsync(json_file.fileno())
-    os.replace(temporary, filename)
+    """Persist irrigation history in SQLite; filename identifies a legacy plot."""
+    match = re.search(r'irrigations_plot_(.+)\.json$', filename)
+    if not match:
+        raise ValueError('Irrigation history requires a plot-specific identity')
+    store = get_app_state_store()
+    plot_id = match.group(1)
+    store.save_irrigation_history(plot_id, data.get('irrigations', []))
+    store.mark_legacy_import_complete(f'irrigation_history:{plot_id}')
 
 # Function to add a new record
 
@@ -2450,7 +2429,7 @@ def main(
             plot, pipeline_result, recommendation, runtime_state,
             current_value, threshold, satellite_validation)
         if not operation_created:
-            log.info("Duplicate recommendation operation suppressed for plot %s",
+            log.info("Duplicate or display-only evaluation suppressed for plot %s",
                      getattr(plot, "stable_id", getattr(plot, "id", "?")))
             return 0
 

@@ -34,7 +34,6 @@ def validate_soil_calibration(curve, fc, wp, saturation=0, metadata=None):
         raise ValueError('Require saturation < field capacity < wilting tension')
     if points[0][0] > saturation or points[-1][0] < wp:
         raise ValueError('Curve must cover saturation through wilting tension')
-    if wp != 1500 and not (source in {'laboratory', 'field'} and
-                           str(metadata.get('reference', '')).strip() and metadata.get('date')):
-        raise ValueError('Nonstandard PWP requires a measurement source, reference and date; use 1500 cbar for estimates')
+    if wp != 1500 and source not in {'laboratory', 'field'}:
+        raise ValueError('Nonstandard PWP requires a field or laboratory source; use 1500 cbar for estimates')
     return points

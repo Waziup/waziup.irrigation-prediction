@@ -34,3 +34,12 @@ notes.txt
 /help
 models/**/**/**/*
 /reports
+
+# Build React inside the image, never copy host dependencies or stale assets.
+frontend/node_modules
+frontend/dist
+frontend/.env*
+!frontend/.env.production
+docker-compose.local.yml
+
+

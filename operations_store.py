@@ -12,7 +12,7 @@ import sqlite3
 import uuid
 from zoneinfo import ZoneInfo
 
-from state_store import configured_database_path
+from state_store import configured_database_path, get_app_state_store
 
 
 MODES = {"automatic", "approval_required", "manual", "advisory_only"}
@@ -64,7 +64,6 @@ class OperationsStore:
                 CREATE TABLE IF NOT EXISTS operations (
                     operation_id TEXT PRIMARY KEY,
                     idempotency_key TEXT NOT NULL UNIQUE,
-                    farm_id TEXT,
                     plot_id TEXT NOT NULL,
                     plot_name TEXT,
                     source TEXT NOT NULL,
@@ -80,8 +79,7 @@ class OperationsStore:
                 );
                 CREATE INDEX IF NOT EXISTS operations_plot_status
                     ON operations(plot_id, status, updated_at);
-                CREATE INDEX IF NOT EXISTS operations_farm_time
-                    ON operations(farm_id, created_at);
+
                 CREATE TABLE IF NOT EXISTS operation_events (
                     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     operation_id TEXT NOT NULL REFERENCES operations(operation_id),
@@ -95,7 +93,6 @@ class OperationsStore:
                     alert_id TEXT PRIMARY KEY,
                     idempotency_key TEXT NOT NULL UNIQUE,
                     operation_id TEXT REFERENCES operations(operation_id),
-                    farm_id TEXT,
                     plot_id TEXT NOT NULL,
                     urgency TEXT NOT NULL,
                     active INTEGER NOT NULL,
@@ -103,9 +100,15 @@ class OperationsStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
-                CREATE INDEX IF NOT EXISTS alerts_active_farm
-                    ON alerts(active, farm_id, urgency, updated_at);
+
             """)
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("DROP INDEX IF EXISTS operations_farm_time")
+            db.execute("DROP INDEX IF EXISTS alerts_active_farm")
+            for table in ('operations', 'alerts'):
+                if 'farm_id' in {r[1] for r in db.execute(f'PRAGMA table_info({table})')}:
+                    db.execute(f'ALTER TABLE {table} DROP COLUMN farm_id')
+            db.commit()
 
     def import_legacy_database(self, legacy_path):
         """Copy pre-unification operations once without overwriting new rows."""
@@ -123,12 +126,10 @@ class OperationsStore:
                 if "operations" not in tables:
                     return 0
                 db.execute("BEGIN IMMEDIATE")
-                db.execute("INSERT OR IGNORE INTO operations SELECT * FROM legacy.operations")
-                if "operation_events" in tables:
-                    db.execute("""INSERT OR IGNORE INTO operation_events
-                        SELECT * FROM legacy.operation_events""")
-                if "alerts" in tables:
-                    db.execute("INSERT OR IGNORE INTO alerts SELECT * FROM legacy.alerts")
+                for table in ('operations', 'operation_events', 'alerts'):
+                    if table in tables:
+                        columns = ','.join(r[1] for r in db.execute(f'PRAGMA table_info({table})'))
+                        db.execute(f'INSERT OR IGNORE INTO {table} ({columns}) SELECT {columns} FROM legacy.{table}')
                 count = db.execute("SELECT COUNT(*) FROM operations").fetchone()[0]
                 db.commit()
                 return int(count)
@@ -150,7 +151,7 @@ class OperationsStore:
         item["payload"] = json.loads(item.pop("payload_json") or "{}")
         return item
 
-    def create_operation(self, *, idempotency_key, plot_id, farm_id=None,
+    def create_operation(self, *, idempotency_key, plot_id,
                          plot_name="", source="recommendation", mode="manual",
                          status="planned", amount_m3=None, planned_start=None,
                          planned_end=None, recommendation=None):
@@ -172,11 +173,11 @@ class OperationsStore:
                 db.commit()
                 return self._operation(existing), False
             db.execute("""
-                INSERT INTO operations(operation_id,idempotency_key,farm_id,plot_id,plot_name,
+                INSERT INTO operations(operation_id,idempotency_key,plot_id,plot_name,
                     source,mode,status,amount_m3,planned_start,planned_end,recommendation_json,
                     created_at,updated_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, (operation_id, idempotency_key, farm_id, str(plot_id), plot_name,
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (operation_id, idempotency_key, str(plot_id), plot_name,
                   source, mode, status, amount_m3, planned_start, planned_end,
                   _json(recommendation), timestamp, timestamp))
             db.execute("""INSERT INTO operation_events
@@ -268,11 +269,9 @@ class OperationsStore:
         with self._connect() as db:
             return self._operation(db.execute(query, values).fetchone())
 
-    def list_operations(self, *, farm_id=None, plot_id=None, status=None,
+    def list_operations(self, *, plot_id=None, status=None,
                         search=None, limit=100, today=None, timezone_name="UTC"):
         clauses, values = [], []
-        if farm_id:
-            clauses.append("farm_id=?"); values.append(farm_id)
         if plot_id:
             clauses.append("plot_id=?"); values.append(str(plot_id))
         if status:
@@ -418,8 +417,40 @@ class OperationsStore:
             "until": end,
         }
 
+    def supersede_recommendations(self, plot_id, evaluated_at, *, except_key):
+        """Retire unapproved advice superseded by a newer live evaluation.
+
+        Explicit schedules, owner approvals and delivered/active operations are
+        untouched. Older/replayed evaluations cannot cancel newer operations.
+        """
+        timestamp = _now()
+        evaluated = datetime.fromisoformat(str(evaluated_at).replace('Z', '+00:00'))
+        evaluated = evaluated.replace(tzinfo=timezone.utc) if evaluated.tzinfo is None else evaluated.astimezone(timezone.utc)
+        changed = 0
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute("""SELECT * FROM operations WHERE plot_id=?
+                AND source='recommendation' AND status IN ('planned','pending_approval')
+                AND idempotency_key<>?""", (str(plot_id), except_key)).fetchall()
+            for row in rows:
+                created = datetime.fromisoformat(row['created_at'].replace('Z', '+00:00'))
+                created = created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created.astimezone(timezone.utc)
+                if created >= evaluated:
+                    continue
+                changed += 1
+                decision = json.loads(row['recommendation_json'] or '{}')
+                decision['superseded'] = True
+                db.execute("UPDATE operations SET status='declined',recommendation_json=?,updated_at=? WHERE operation_id=?",
+                           (_json(decision), timestamp, row['operation_id']))
+                db.execute("""INSERT INTO operation_events
+                    (operation_id,event_type,from_status,to_status,detail_json,timestamp)
+                    VALUES(?,?,?,?,?,?)""", (row['operation_id'], 'transition', row['status'], 'declined',
+                    _json({'actor':'model_evaluation','reason':'superseded_recommendation'}), timestamp))
+            db.commit()
+        return changed
+
     def record_alert(self, *, idempotency_key, plot_id, urgency, payload,
-                     farm_id=None, operation_id=None):
+                     operation_id=None):
         if urgency not in {"none", "watch", "advise", "critical", "error", "unknown"}:
             raise ValueError(f"Unsupported alert urgency: {urgency}")
         timestamp = _now(); active = int(urgency in ACTIVE_ALERT_URGENCIES)
@@ -433,20 +464,18 @@ class OperationsStore:
             # plot; older Watch/Advise/Critical alerts become history.
             db.execute("UPDATE alerts SET active=0,updated_at=? WHERE plot_id=? AND active=1",
                        (timestamp, str(plot_id)))
-            db.execute("""INSERT INTO alerts(alert_id,idempotency_key,operation_id,farm_id,
+            db.execute("""INSERT INTO alerts(alert_id,idempotency_key,operation_id,
                 plot_id,urgency,active,payload_json,created_at,updated_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?)""",
-                       (alert_id, idempotency_key, operation_id, farm_id, str(plot_id), urgency,
+                VALUES(?,?,?,?,?,?,?,?,?)""",
+                       (alert_id, idempotency_key, operation_id, str(plot_id), urgency,
                         active, _json(payload), timestamp, timestamp))
             row = db.execute("SELECT * FROM alerts WHERE alert_id=?", (alert_id,)).fetchone()
             db.commit()
         return self._alert(row), True
 
-    def active_alerts(self, farm_id=None):
+    def active_alerts(self):
         query = "SELECT * FROM alerts WHERE active=1"
         values = []
-        if farm_id:
-            query += " AND farm_id=?"; values.append(farm_id)
         query += " ORDER BY CASE urgency WHEN 'critical' THEN 1 WHEN 'advise' THEN 2 ELSE 3 END, updated_at DESC"
         with self._connect() as db:
             rows = db.execute(query, values).fetchall()
@@ -463,9 +492,11 @@ def get_operations_store():
     path = Path(unified or os.getenv(
         "IRRIGATION_OPERATIONS_DB", "data/operations.sqlite3"))
     if _default_store is None or _default_store_path != path:
+        state = get_app_state_store()  # Validate/migrate farm ownership first.
         _default_store = OperationsStore(path)
         _default_store_path = path
-        if unified is not None:
+        if not state.legacy_import_complete('operations'):
             _default_store.import_legacy_database(
                 os.getenv("IRRIGATION_OPERATIONS_DB", "data/operations.sqlite3"))
+            state.mark_legacy_import_complete('operations')
     return _default_store

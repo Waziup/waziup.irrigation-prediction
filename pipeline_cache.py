@@ -50,7 +50,11 @@ def save_cycle(plot, current_tension, threshold_timestamp, predictions, result=N
     """Atomically save the worker-compatible and unified cycle payload."""
     path = cache_path(plot.id, root)
     path.parent.mkdir(parents=True, exist_ok=True)
+    from runtime_recovery import configuration_digest, forecast_implementation_digest
     payload = {
+        "plot_id": str(getattr(plot, "stable_id", None) or plot.id),
+        "configuration_digest": configuration_digest(plot),
+        "implementation_digest": forecast_implementation_digest(),
         "cache_version": CACHE_VERSION,
         "saved_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "currentSoilTension": current_tension,
