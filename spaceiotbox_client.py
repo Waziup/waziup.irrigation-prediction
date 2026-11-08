@@ -410,6 +410,13 @@ def normalize_weather_frame(payload: object, start_date=None, end_date=None) -> 
     return deduplicate_weather_frame(result)
 
 
+def _weather_inputs_complete(frame):
+    if frame is None or frame.empty or not set(LEGACY_WEATHER_COLUMNS).issubset(frame.columns):
+        return False
+    values = frame[LEGACY_WEATHER_COLUMNS].apply(pd.to_numeric, errors='coerce')
+    return bool(np.isfinite(values.to_numpy(dtype=float)).all())
+
+
 def _covers_requested_window(frame: pd.DataFrame, start_bound, end_bound) -> bool:
     """Require boundary coverage and every intervening UTC calendar date.
 
@@ -451,7 +458,7 @@ def _fetch_open_meteo_segment(url, fields, lat, lon, start_bound, end_bound):
         _request_external_json(url, params), start_bound, end_bound)
 
 
-def fetch_open_meteo_weather_frame(lat, lon, start_bound, end_bound):
+def fetch_open_meteo_weather_frame(lat, lon, start_bound, end_bound, *, on_block=None):
     """Fetch complete archive/forecast coverage when `/land` cannot provide it."""
     if start_bound is None or end_bound is None:
         raise ValueError("Open-Meteo fallback requires start_date and end_date")
@@ -460,18 +467,25 @@ def fetch_open_meteo_weather_frame(lat, lon, start_bound, end_bound):
     archive_cutoff = today - pd.Timedelta(days=OPEN_METEO_ARCHIVE_DELAY_DAYS)
     frames = []
 
+    def fetch_segment(url, fields, first, last):
+        frame = _fetch_open_meteo_segment(url, fields, lat, lon, first, last)
+        frame.attrs['provider'] = 'Open-Meteo'
+        if on_block is not None:
+            on_block(frame)
+        return frame
+
     if start_bound <= archive_cutoff:
         archive_end = min(end_bound, archive_cutoff)
-        frames.append(_fetch_open_meteo_segment(
+        frames.append(fetch_segment(
             OPEN_METEO_ARCHIVE_URL, OPEN_METEO_ARCHIVE_FIELDS,
-            lat, lon, start_bound, archive_end,
+            start_bound, archive_end,
         ))
 
     forecast_start = max(start_bound, archive_cutoff + pd.Timedelta(days=1))
     if forecast_start <= end_bound:
-        frames.append(_fetch_open_meteo_segment(
+        frames.append(fetch_segment(
             OPEN_METEO_FORECAST_URL, OPEN_METEO_FORECAST_FIELDS,
-            lat, lon, forecast_start, end_bound,
+            forecast_start, end_bound,
         ))
 
     if not frames:
@@ -487,7 +501,7 @@ def fetch_open_meteo_weather_frame(lat, lon, start_bound, end_bound):
     return combined
 
 
-def fetch_weather_frame(lat: float, lon: float, start_date=None, end_date=None) -> pd.DataFrame:
+def fetch_weather_frame(lat: float, lon: float, start_date=None, end_date=None, *, on_block=None) -> pd.DataFrame:
     start_bound = _normalize_weather_bound(
         start_date) if start_date is not None else None
     end_bound = _normalize_weather_bound(
@@ -504,10 +518,13 @@ def fetch_weather_frame(lat: float, lon: float, start_date=None, end_date=None) 
             # `/land` documents only lat/lon; never send unsupported range keys.
             full_frame = normalize_weather_frame(
                 fetch_agro_climate("land", lat, lon))
-            if _covers_requested_window(full_frame, start_bound, end_bound):
+            if (_covers_requested_window(full_frame, start_bound, end_bound)
+                    and _weather_inputs_complete(full_frame)):
                 frame = normalize_weather_frame(
                     full_frame, start_date=start_bound, end_date=end_bound)
                 frame.attrs["provider"] = "SpaceIoTBox"
+                if on_block is not None:
+                    on_block(frame)
                 return frame
             if not full_frame.empty:
                 try:
@@ -531,17 +548,50 @@ def fetch_weather_frame(lat: float, lon: float, start_date=None, end_date=None) 
     else:
         fallback_reasons.append("coordinates outside SpaceIoTBox coverage")
 
-    # Historical completeness is essential for GDD; partial SpaceIoTBox data
-    # is discarded instead of producing a confidently wrong crop stage.
+    # Persist primary coverage before requesting only its missing date blocks.
     try:
-        fallback = fetch_open_meteo_weather_frame(
-            lat, lon, start_bound, end_bound)
+        if spaceiotbox_partial is not None and not spaceiotbox_partial.empty:
+            spaceiotbox_partial.attrs['provider'] = 'SpaceIoTBox'
+            if on_block is not None:
+                on_block(spaceiotbox_partial)
+            def publish_fallback(block):
+                # Cache the same provider priority used by the returned frame.
+                primary = spaceiotbox_partial.loc[
+                    (spaceiotbox_partial.index >= block.index.min())
+                    & (spaceiotbox_partial.index <= block.index.max())]
+                merged = primary.combine_first(block).sort_index()
+                merged.attrs.update(block.attrs)
+                merged.attrs['provider'] = 'SpaceIoTBox + Open-Meteo'
+                if on_block is not None:
+                    on_block(merged)
+            groups = []
+            for day in pd.date_range(start_bound.normalize(), end_bound.normalize(), freq='D'):
+                first, last = max(day, start_bound), min(day + pd.Timedelta(hours=23), end_bound)
+                day_frame = spaceiotbox_partial[
+                    spaceiotbox_partial.index.normalize() == day.normalize()]
+                if (_covers_requested_window(spaceiotbox_partial, first, last)
+                        and _weather_inputs_complete(day_frame)):
+                    continue
+                if not groups or day != groups[-1][-1] + pd.Timedelta(days=1):
+                    groups.append([])
+                groups[-1].append(day)
+            parts = [fetch_open_meteo_weather_frame(
+                lat, lon, max(group[0], start_bound),
+                min(group[-1] + pd.Timedelta(hours=23), end_bound),
+                **({'on_block': publish_fallback} if on_block is not None else {})) for group in groups]
+            fallback = pd.concat(parts).sort_index() if parts else pd.DataFrame()
+        else:
+            fallback = fetch_open_meteo_weather_frame(
+                lat, lon, start_bound, end_bound,
+                **({'on_block': on_block} if on_block is not None else {}))
         if spaceiotbox_partial is not None and not spaceiotbox_partial.empty:
             # SpaceIoTBox remains authoritative on overlapping timestamps;
             # Open-Meteo supplies only the missing historical/forecast range.
             combined = spaceiotbox_partial.combine_first(fallback).sort_index()
             if not _covers_requested_window(combined, start_bound, end_bound):
                 raise ValueError("merged providers did not cover the full window")
+            if not _weather_inputs_complete(combined):
+                raise ValueError("merged providers left missing weather inputs")
             combined.attrs["provider"] = "SpaceIoTBox + Open-Meteo"
             combined.attrs["fallback_reason"] = "; ".join(fallback_reasons)
             return combined
