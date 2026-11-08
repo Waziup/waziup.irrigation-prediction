@@ -5,15 +5,13 @@
     <title>WAZIUP Irrigation Dashboard</title>
     <meta name="description" content="WAZIUP Irrigation Prediction Dashboard" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="wazifarm-logo.svg" type="image/svg+xml" />
 
     <link rel="stylesheet" href="styles.css?v=20260825-3" type="text/css" />
     <link rel="stylesheet" href="responsive.css?v=20260825-6" type="text/css" />
-    <link rel="stylesheet" href="demo.css?v=20260928-3" type="text/css" />
     <link rel="stylesheet" href="eo-panel.css?v=20260928-2" type="text/css" />
     <script src="libs/chart.umd.min.js"></script>
     <script src="ui-icons.js"></script>
-    <script src="demo-data.js?v=20260928-4"></script>
     <script src="eo-panel.js?v=20260928-2"></script>
 
     <script type="text/javascript">
@@ -40,9 +38,7 @@
       const TrainingReadyCheck = 10000;
 
       function appFetch(path, options) {
-        return window.WaziFarmDemo?.active
-          ? window.WaziFarmDemo.fetch(path, options)
-          : fetch(path, options);
+        return fetch(path, options);
       }
 
       async function safeFetchJson(path) {
@@ -268,15 +264,14 @@
         const currentPlot = parseInt(plots?.currentPlot, 10);
         const currentPlotId = plots?.current_plot_id;
         activeTrainingPlotId = currentPlotId || null;
-        const farms = Array.isArray(farmReg?.farms) ? farmReg.farms : [];
+
         const plotRecord = Array.isArray(plots?.plots)
           ? plots.plots.find((entry) => entry.plot_id === currentPlotId)
           : null;
         const plotName = plotRecord?.name || (Array.isArray(plots?.tabnames) && currentPlot > 0
           ? plots.tabnames[currentPlot - 1]
           : null);
-        const farm = farms.find((entry) => Array.isArray(entry.plot_ids)
-          && entry.plot_ids.includes(currentPlotId));
+        const farm = farmReg?.farm;
         const el = document.getElementById('farmName');
         const pageTitle = document.getElementById('pageTitle');
         const pageFarmName = document.getElementById('pageFarmName');
@@ -404,20 +399,6 @@
         } catch (error) {
           alert(error.message || 'Could not open this plot.');
         }
-      }
-
-      function openDemoFarm() {
-        const url = new URL(window.location.href);
-        url.searchParams.set('demo', 'true');
-        url.hash = 'dashboard';
-        window.location.href = url.toString();
-      }
-
-      function exitDemo(destination) {
-        const url = new URL(destination === 'settings' ? 'settings.html' : 'index.html', window.location.href);
-        url.searchParams.delete('demo');
-        if (destination !== 'settings') url.hash = 'dashboard';
-        window.location.href = url.toString();
       }
 
       function formatRange(start, end, digits = 0) {
@@ -836,7 +817,6 @@
       // Navigation and UI wiring
       function navigateTo(page, el) {
         if (page === 'settings') {
-          if (window.WaziFarmDemo?.active) { exitDemo('settings'); return; }
           window.location.href = `settings.html${window.location.search}`;
           return;
         }
@@ -1037,8 +1017,7 @@
               manual: ["Semi-auto", "You turn irrigation on and off"],
               advisory_only: ["Off", "No hardware commands"],
             };
-            const demoModeDetails = { automatic: ["Auto", "Irrigation runs automatically"], approval_required: ["Semi-auto", "Irrigation starts after approval"], manual: ["Manual", "Irrigation is applied manually"] };
-            const configuredMode = (window.WaziFarmDemo?.active ? demoModeDetails[action.mode] : modeDetails[action.mode])
+            const configuredMode = modeDetails[action.mode]
               || ["Not configured", "Choose a mode in Settings"];
             const formatIrrigationTime = (value) => {
               const parsed = new Date(value);
@@ -1078,10 +1057,7 @@
                 : "Schedule Irrigation";
             }
 
-            if (window.WaziFarmDemo?.active) {
-              if (scheduleButton) scheduleButton.disabled = true;
-              note.textContent = irrigationNeeded ? farmerReason : "No irrigation is needed today. Rain and soil moisture are sufficient.";
-            } else if (actuatorBased) {
+            if (actuatorBased) {
               if (scheduleButton) scheduleButton.disabled = false;
               if (pumpInput && !Number.isNaN(volumeM3) && volumeM3 > 0) {
                 pumpInput.value = volumeM3.toFixed(2);
@@ -1143,9 +1119,7 @@
                 : "Amount unavailable";
             }
             if (adviceVolumeBasis) {
-              if (window.WaziFarmDemo?.active) {
-                adviceVolumeBasis.textContent = irrigationNeeded ? "Based on crop demand, rain and plot area." : "No water needed now.";
-              } else if (!irrigationNeeded && Number.isFinite(volumeM3)) {
+              if (!irrigationNeeded && Number.isFinite(volumeM3)) {
                 adviceVolumeBasis.textContent = (
                   Number.isFinite(appliedSinceCalculationM3)
                   && appliedSinceCalculationM3 > 0
@@ -1174,7 +1148,7 @@
               adviceTime.textContent = irrigationNeeded ? (recommendedTime || "Today") : "Not needed";
             }
             if (adviceTimeBasis) {
-              adviceTimeBasis.textContent = window.WaziFarmDemo?.active ? (irrigationNeeded ? "Based on current readings and forecast." : "No irrigation is recommended today") : irrigationNeeded
+              adviceTimeBasis.textContent = irrigationNeeded
                 ? (recommendedTime ? "Irrigate before the soil becomes too dry" : "Exact time is not available")
                 : "No irrigation is recommended today";
             }
@@ -1485,11 +1459,6 @@
       window.setTimeout(hideLoadingIndicator, 2000);
 
       window.addEventListener('load', async () => {
-        if (window.WaziFarmDemo?.active) {
-          document.body.classList.add('demo-mode');
-          const banner = document.getElementById('demo-mode-banner');
-          if (banner) banner.hidden = false;
-        }
         const initialPage = (window.location.hash || '').replace('#', '').trim();
         if (initialPage === 'dashboard' || initialPage === 'plot' || initialPage === 'phenology') {
           document.body.dataset.page = initialPage;
@@ -1523,14 +1492,11 @@
   </head>
 
   <body>
-    <div id="demo-mode-banner" class="demo-mode-banner" role="status" hidden><span><strong>Demo farm</strong></span><span class="demo-banner-actions"><button type="button" onclick="exitDemo()">Exit demo</button></span></div>
     <aside class="app-sidebar" aria-label="Primary navigation">
-      <div class="sidebar-logo"><span aria-hidden="true">🌱</span><strong>WaziFarm</strong></div>
+      <div class="sidebar-logo"><img src="wazifarm-logo.svg" alt="" width="34" height="34" /><strong>WaziFarm</strong></div>
       <nav class="sidebar-links">
         <button class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard', this)"><span aria-hidden="true">▦</span><span>Dashboard</span></button>
         <button class="nav-item" data-page="settings" onclick="navigateTo('settings', this)"><span aria-hidden="true">⚙</span><span>Farm settings</span></button>
-        <!-- Temporary stakeholder demo link; remove after the presentation. -->
-        <button class="nav-item demo-nav-button" type="button" onclick="openDemoFarm()"><span aria-hidden="true">◇</span><span>Demo farm</span></button>
       </nav>
     </aside>
     <!-- Tab container for plot selection + controls -->
