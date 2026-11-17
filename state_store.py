@@ -195,6 +195,27 @@ class AppStateStore:
                 value_json=excluded.value_json,updated_at=excluded.updated_at""",
                 (str(key), json.dumps(value, default=str), timestamp))
 
+    def update_metadata(self, key, update):
+        """Atomically merge a metadata value; callbacks must not perform I/O."""
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            try:
+                row = db.execute('SELECT value_json FROM app_metadata WHERE key=?', (str(key),)).fetchone()
+                try:
+                    value = json.loads(row['value_json']) if row else None
+                except (TypeError, ValueError):
+                    value = None
+                merged = update(value)
+                db.execute("""INSERT INTO app_metadata(key,value_json,updated_at)
+                    VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET
+                    value_json=excluded.value_json,updated_at=excluded.updated_at""",
+                    (str(key), json.dumps(merged, default=str), _now()))
+                db.commit()
+                return merged
+            except BaseException:
+                db.rollback()
+                raise
+
     def legacy_import_complete(self, scope):
         return self.get_metadata(f"legacy_import:{scope}", False) is True
 
