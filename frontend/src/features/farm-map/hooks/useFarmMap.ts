@@ -30,11 +30,15 @@ export async function loadFarmMap(context: PlotContext, signal?: AbortSignal) {
 }
 export function useFarmMap() {
   const context = useFarmContext();
+  const displayedSnapshot =
+    context.status === 'refreshing'
+      ? context.lastConfirmedSnapshot
+      : context.snapshot;
   return useQuery({
     queryKey: [
       ...farmMapKey,
-      context.snapshot?.farm.name ?? '',
-      context.snapshot?.plots
+      displayedSnapshot?.farm.name ?? '',
+      displayedSnapshot?.plots
         .map((plot) => plot.id)
         .sort()
         .join(',') ?? '',
@@ -64,6 +68,10 @@ export function staleMap(data: FarmMap): FarmMap {
     plots: data.plots.map((plot) => ({
       ...plot,
       dataState: plot.dataState === 'unavailable' ? 'unavailable' : 'stale',
+      equipment: {
+        ...plot.equipment,
+        state: plot.equipment.configured ? 'ready' : 'not_configured',
+      },
     })),
   };
 }

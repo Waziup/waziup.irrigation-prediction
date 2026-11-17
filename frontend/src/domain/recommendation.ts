@@ -77,6 +77,7 @@ export type IrrigationRecommendation =
   | AvailableRecommendation
   | {
       available: false;
+      loading?: boolean;
       reason: string | null;
       modelForecastAvailable: boolean | null;
       cropType: string | null;

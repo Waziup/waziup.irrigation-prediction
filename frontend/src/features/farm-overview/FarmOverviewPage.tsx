@@ -1,3 +1,5 @@
+import { failedDashboardRefresh } from './dashboardRefresh';
+import { formatDashboardTime } from '../../shared/presentation';
 import { lazy, Suspense } from 'react';
 import { useFarmMap } from '../farm-map/hooks/useFarmMap';
 import { MapLegend } from '../farm-map/MapLegend';
@@ -100,7 +102,18 @@ export function FarmOverviewContent({
           className="overflow-hidden rounded-2xl border border-[#dde5d8] bg-white shadow-sm shadow-[#233f2d]/3"
         >
           <div className="flex items-center justify-between gap-3 border-b border-[#e7ebe2] px-5 py-3.5">
-            <h3 className="text-sm font-semibold text-[#304b3b]">Your farm</h3>
+            <div>
+              <h3 className="text-sm font-semibold text-[#304b3b]">
+                Your farm
+              </h3>
+              <p className="mt-1 text-[10px] text-[#7a8c70]">
+                Updated{' '}
+                {formatDashboardTime(
+                  dashboard.generatedAt,
+                  dashboard.farm.timezone,
+                )}
+              </p>
+            </div>
             <a
               href="#/settings/boundaries"
               className="text-xs font-medium text-[#7a8c70] no-underline hover:text-[#294e38]"
@@ -190,8 +203,14 @@ export function FarmOverviewPage() {
       </section>
     );
   if (context.status === 'switching') return <p role="status">Opening plot…</p>;
-  if (context.status !== 'ready') return <EmptyFarmOverview />;
-  if (dashboard.isError)
+  if (context.status !== 'ready' && context.status !== 'refreshing')
+    return <EmptyFarmOverview />;
+  if (
+    dashboard.isError &&
+    (!dashboard.data ||
+      (dashboard.error instanceof ApiError &&
+        dashboard.error.kind === 'context'))
+  )
     return (
       <>
         <section className="min-w-0 rounded-xl border border-gray-200 bg-white p-5 shadow-xs sm:p-8 [&>h2]:mt-0">
@@ -218,10 +237,10 @@ export function FarmOverviewPage() {
         </section>
       </>
     );
-  // Clear old totals/cards on refresh or failure rather than relabelling a cached
-  // response as current. Query cancellation prevents superseded responses winning.
-  if (dashboard.isPending || dashboard.isFetching || !dashboard.data)
-    return <EmptyFarmOverview />;
+  if (!dashboard.data) return <EmptyFarmOverview />;
+  const displayedDashboard = dashboard.isError
+    ? failedDashboardRefresh(dashboard.data)
+    : dashboard.data;
   return (
     <>
       {context.selectionError && (
@@ -232,12 +251,27 @@ export function FarmOverviewPage() {
           {context.selectionError.message}
         </p>
       )}
+      {dashboard.isFetching && (
+        <p role="status" className="sr-only">
+          Updating farm status…
+        </p>
+      )}
+      {dashboard.isError && (
+        <p role="status" className="mb-3 text-xs text-amber-900">
+          Farm status could not be refreshed. Showing the last update; live
+          water-flow status is unavailable.
+        </p>
+      )}
       <FarmOverviewContent
-        dashboard={dashboard.data}
+        dashboard={displayedDashboard}
         {...(geometry.data ? { farmMap: geometry.data } : {})}
         {...(geometry.isError ? { mapError: geometry.error.message } : {})}
         weather={<FarmWeather />}
-        currentPlotId={context.currentPlot?.id ?? ''}
+        currentPlotId={
+          context.currentPlot?.id ??
+          context.lastConfirmedSnapshot?.currentPlotId ??
+          ''
+        }
         disabled={context.status !== 'ready'}
         onConfigurePlot={(plotId) => {
           void context

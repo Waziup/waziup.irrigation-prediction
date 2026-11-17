@@ -53,6 +53,7 @@ function parseCard(value: unknown): FarmPlotCard {
       configured: boolean(equipment.configured),
       state: member(equipment.state, [
         'active',
+        'unconfirmed',
         'not_configured',
         'advisory_only',
         'ready',
@@ -77,6 +78,8 @@ export function parseFarmDashboard(value: unknown): FarmDashboard {
   const counts = object(summary.alert_counts);
   return {
     schemaVersion: member(d.schema_version, ['1.0']),
+    refreshPending:
+      d.refresh_pending == null ? false : boolean(d.refresh_pending),
     generatedAt: timestamp(d.generated_at),
     farm: parseFarm(d.farm),
     summary: {

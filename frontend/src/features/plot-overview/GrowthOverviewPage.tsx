@@ -4,34 +4,34 @@ import { useFarmContext } from '../farm-context/FarmContext';
 import { phenologyApi } from '../../api/phenologyApi';
 import { usePlotSatellite } from '../earth-observation/usePlotSatellite';
 import { usePlotQuery } from './hooks/usePlotQuery';
-import { usePlotRecommendation } from './hooks/usePlotRecommendation';
 import { resourceState } from './types';
 import { EoPanel } from './components/EoPanel';
 import { GrowthDetails } from './components/GrowthDetails';
 
 export function GrowthOverviewPage() {
   const context = useFarmContext();
-  const phenology = usePlotQuery('phenology', (signal) =>
-    phenologyApi.getCurrentSummary({ signal }),
+  const displayed =
+    context.snapshot ??
+    (context.status === 'refreshing' ? context.lastConfirmedSnapshot : null);
+  const plot =
+    context.currentPlot ??
+    displayed?.plots.find((p) => p.id === displayed.currentPlotId);
+  const farm = context.farm ?? displayed?.farm;
+  const phenology = usePlotQuery('phenology', (signal, plotId) =>
+    phenologyApi.getCurrentSummary({ signal }, plotId),
   );
   const eo = usePlotSatellite(
-    context.currentPlot?.id,
+    plot?.id,
     context.status === 'ready',
-    context.currentPlot?.coordinates,
+    plot?.coordinates,
   );
-  const recommendation = usePlotRecommendation();
-  if (context.status !== 'ready' || !context.currentPlot || !context.farm)
+  if (
+    (context.status !== 'ready' && context.status !== 'refreshing') ||
+    !plot ||
+    !farm
+  )
     return <EmptyGrowthOverview />;
-  const summary =
-    phenology.isSuccess && !phenology.isFetching && phenology.data.available
-      ? phenology.data
-      : null;
-  const advice =
-    recommendation.isSuccess &&
-    !recommendation.isFetching &&
-    recommendation.data.available
-      ? recommendation.data
-      : null;
+  const summary = phenology.data?.available ? phenology.data : null;
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -54,19 +54,29 @@ export function GrowthOverviewPage() {
                 ? (growthDays(
                     summary.plantingDate,
                     summary.evaluatedAt,
-                    context.farm.timezone,
+                    farm.timezone,
                   ) ?? '—')
                 : '—'}
             </dd>
           </div>
         </dl>
       </div>
-      {phenology.isFetching && (
+      {(phenology.isFetching ||
+        (phenology.data &&
+          !phenology.data.available &&
+          phenology.data.loading)) && (
         <p className="text-xs text-slate-500" role="status">
           Loading growth stage timeline…
         </p>
       )}
-      {(phenology.isError || recommendation.isError) && (
+      {phenology.data &&
+        !phenology.data.available &&
+        !phenology.data.loading && (
+          <p role="status" className="text-xs text-slate-500">
+            {phenology.data.reason}
+          </p>
+        )}
+      {phenology.isError && (
         <p className="text-xs text-slate-500" role="status">
           Some growth data couldn’t be loaded.{' '}
           <button
@@ -74,27 +84,16 @@ export function GrowthOverviewPage() {
             className="underline"
             onClick={() => {
               void phenology.refetch();
-              void recommendation.refetch();
             }}
           >
             Refresh growth data
           </button>
         </p>
       )}
-      <GrowthDetails summary={summary} advice={advice}>
-        {advice?.freshness.stale && (
-          <p
-            role="status"
-            className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900"
-          >
-            Stale source data:{' '}
-            {advice.freshness.staleSources.join(', ') || 'Source not specified'}
-            .
-          </p>
-        )}
+      <GrowthDetails summary={summary} advice={null}>
         <EoPanel
           state={resourceState(eo)}
-          timezone={context.farm.timezone}
+          timezone={farm.timezone}
           onRetry={() => void eo.refetch()}
         />
       </GrowthDetails>

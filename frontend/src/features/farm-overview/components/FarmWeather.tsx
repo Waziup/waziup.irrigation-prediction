@@ -74,6 +74,8 @@ export function WeatherContent({
       timeline.current.scrollLeft = timeline.current.scrollWidth;
     }
   }, [history, forecast.available]);
+  if (!forecast.available && forecast.loading)
+    return <LoadingMessage message="Loading weather…" />;
   if (!forecast.available)
     return (
       <p className="my-3 text-sm text-[#68766c]">
@@ -154,12 +156,15 @@ export function WeatherContent({
 export function FarmWeather() {
   const context = useFarmContext();
   const [view, setView] = useState<WeatherView>('forecast');
+  const displayed =
+    context.snapshot ??
+    (context.status === 'refreshing' ? context.lastConfirmedSnapshot : null);
   const range: WeatherRange = view === 'forecast' ? 'model' : 'recent';
   const weather = useQuery({
     queryKey: [
       'farm-weather',
-      view === 'forecast' ? context.currentPlot?.id : 'history',
-      context.farm?.coordinates,
+      view === 'forecast' ? displayed?.currentPlotId : 'history',
+      displayed?.farm.coordinates,
       view,
       range,
     ],
@@ -174,7 +179,14 @@ export function FarmWeather() {
     gcTime: 24 * 60 * 60_000,
     refetchOnMount: true,
     refetchOnWindowFocus: true,
-    refetchInterval: 2 * 60 * 60_000,
+    refetchInterval: (query) =>
+      query.state.status === 'error'
+        ? 30_000
+        : !query.state.data?.available
+          ? query.state.data?.loading
+            ? 3_000
+            : 30_000
+          : 2 * 60 * 60_000,
     refetchIntervalInBackground: false,
   });
   const forecast = weather.data;
@@ -227,7 +239,9 @@ export function FarmWeather() {
         <p role="alert" className="text-sm text-[#53645a]">
           Weather data could not be loaded.
         </p>
-      ) : weather.isPending || !forecast ? (
+      ) : weather.isPending ||
+        !forecast ||
+        (!forecast.available && forecast.loading) ? (
         <LoadingMessage message="Loading weather…" />
       ) : !forecast.available ? (
         <p className="text-sm text-[#53645a]">

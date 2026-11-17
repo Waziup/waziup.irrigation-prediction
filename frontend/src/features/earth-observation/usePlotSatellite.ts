@@ -16,7 +16,14 @@ export function usePlotSatellite(
       query.state.data?.available ? 24 * 60 * 60_000 : 5 * 60_000,
     gcTime: 24 * 60 * 60_000,
     refetchOnWindowFocus: true,
-    refetchInterval: 24 * 60 * 60_000,
+    refetchInterval: (query) =>
+      query.state.status === 'error'
+        ? 5 * 60_000
+        : !query.state.data?.available
+          ? query.state.data?.loading
+            ? 3_000
+            : 5 * 60_000
+          : 24 * 60 * 60_000,
     refetchIntervalInBackground: false,
   });
 }

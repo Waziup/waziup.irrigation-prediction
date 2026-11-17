@@ -7,6 +7,7 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 export interface Unavailable {
+  loading?: boolean;
   available: false;
   reason: string | null;
 }

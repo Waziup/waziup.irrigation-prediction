@@ -14,6 +14,7 @@ const conditions = {
 } as const;
 const equipmentStates = {
   active: 'Active operation',
+  unconfirmed: 'Irrigation awaiting confirmation',
   not_configured: 'Not configured',
   advisory_only: 'Advisory only',
   ready: 'Ready',

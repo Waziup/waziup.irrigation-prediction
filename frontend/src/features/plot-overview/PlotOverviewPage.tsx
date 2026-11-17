@@ -6,6 +6,7 @@ import { usePlotQuery } from './hooks/usePlotQuery';
 import { chartApi } from '../../api/chartApi';
 import { alertApi } from '../../api/alertApi';
 import { recommendationApi } from '../../api/recommendationApi';
+import { phenologyApi } from '../../api/phenologyApi';
 import { resourceState } from './types';
 import { CurrentReadings } from './components/CurrentReadings';
 import { RecommendationCard } from './components/RecommendationCard';
@@ -16,6 +17,9 @@ export function PlotOverviewPage() {
   const context = useFarmContext();
   const metrics = usePlotMetrics();
   const recommendation = usePlotRecommendation();
+  const phenology = usePlotQuery('phenology', (signal, plotId) =>
+    phenologyApi.getCurrentSummary({ signal }, plotId),
+  );
   const history = usePlotQuery('history', (signal) =>
     chartApi.getCurrentHistory({ signal }),
   );
@@ -40,6 +44,7 @@ export function PlotOverviewPage() {
     for (const query of [
       metrics,
       recommendation,
+      phenology,
       history,
       prediction,
       threshold,
@@ -80,6 +85,7 @@ export function PlotOverviewPage() {
       <CurrentReadings
         state={metricsState}
         recommendation={recommendationState}
+        phenology={resourceState(phenology)}
         onRetry={retryAll}
       />
       <ForecastChart

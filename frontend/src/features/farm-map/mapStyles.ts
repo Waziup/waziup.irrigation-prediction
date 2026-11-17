@@ -11,10 +11,10 @@ export const mapStatuses = {
     color: '#94a3b8',
     dot: 'bg-[#94a3b8]',
   },
-  active: {
-    label: 'Irrigation in progress',
-    color: '#2563eb',
-    dot: 'bg-[#2563eb]',
+  pending: {
+    label: 'Irrigation awaiting confirmation',
+    color: '#e6a800',
+    dot: 'bg-[#e6a800]',
   },
   critical: { label: 'Water needed', color: '#c62828', dot: 'bg-[#c62828]' },
   advise: {
@@ -23,13 +23,21 @@ export const mapStatuses = {
     dot: 'bg-[#e6a800]',
   },
   watch: { label: 'Needs attention', color: '#e6a800', dot: 'bg-[#e6a800]' },
-  healthy: { label: 'Healthy', color: '#3a7d34', dot: 'bg-[#3a7d34]' },
+  healthy: {
+    label: 'No irrigation needed',
+    color: '#3a7d34',
+    dot: 'bg-[#3a7d34]',
+  },
 } as const;
 export type MapStatus = keyof typeof mapStatuses;
 export function mapStatus(plot: FarmPlotCard): MapStatus {
+  if (
+    plot.equipment.state === 'unconfirmed' ||
+    plot.equipment.state === 'active' ||
+    plot.operation?.status === 'active'
+  )
+    return 'pending';
   if (plot.dataState !== 'fresh') return plot.dataState;
-  if (plot.operation?.status === 'active' || plot.equipment.state === 'active')
-    return 'active';
   const urgencies = [plot.urgency, plot.alert?.urgency];
   if (
     urgencies.includes('critical') ||

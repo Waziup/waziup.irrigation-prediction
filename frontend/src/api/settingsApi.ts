@@ -68,6 +68,11 @@ export function parsePlotSettings(value: unknown): PlotSettings {
     slope: number(d.Slope),
     thresholdCbar: number(d.Threshold),
     thresholdMode: member(d.Threshold_mode, thresholdModes),
+    stageThresholdsCbar: Object.fromEntries(
+      Object.entries(
+        d.Stage_thresholds_cbar == null ? {} : object(d.Stage_thresholds_cbar),
+      ).map(([key, value]) => [key, number(value)]),
+    ),
     irrigationType: string(d.Irrigation_type),
     irrigationMode: member(d.Irrigation_mode, irrigationModes),
     applicationEfficiency: number(d.Application_efficiency),
@@ -118,6 +123,7 @@ export function settingsForm(input: PlotSettingsInput): URLSearchParams {
     slope: String(input.slope),
     thres: String(input.thresholdCbar),
     threshold_mode: input.thresholdMode,
+    stage_thresholds_cbar: JSON.stringify(input.stageThresholdsCbar ?? {}),
     irrigation_type: input.irrigationType,
     irrigation_mode: input.irrigationMode,
     flow_confirmation_mode: input.flowConfirmationMode,

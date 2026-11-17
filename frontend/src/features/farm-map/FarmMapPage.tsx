@@ -174,7 +174,7 @@ export function FarmMapContent({
         </div>
         <div className="px-4 sm:px-6">
           <p className="text-[11px] font-medium text-[#7c8975] sm:text-xs">
-            Healthy plots
+            No irrigation needed
           </p>
           <p className="mt-1.5 text-2xl font-semibold tracking-tight text-[#356044]">
             {healthy}

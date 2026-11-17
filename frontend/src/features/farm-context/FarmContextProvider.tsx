@@ -56,6 +56,7 @@ export function FarmContextProvider({ children }: { children: ReactNode }) {
   const snapshot = status === 'ready' ? (context.data ?? null) : null;
   const value: FarmContextValue = {
     snapshot,
+    lastConfirmedSnapshot: context.data ?? null,
     farm: snapshot?.farm ?? null,
     currentPlot:
       snapshot?.plots.find((plot) => plot.id === snapshot.currentPlotId) ??

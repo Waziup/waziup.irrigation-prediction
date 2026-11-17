@@ -93,6 +93,7 @@ export function unavailable(
   return {
     available: false,
     reason: nullable(value.reason ?? value.error, string),
+    ...(value.loading === true ? { loading: true } : {}),
   };
 }
 // A few legacy measurements are numeric strings. Null/blank mean missing,

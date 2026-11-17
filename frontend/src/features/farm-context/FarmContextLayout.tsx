@@ -8,7 +8,11 @@ function ContextShell() {
   return (
     <AppShell
       contextPending={context.status !== 'ready' && context.status !== 'error'}
-      contentKey={context.currentPlot?.id ?? 'none'}
+      contentKey={
+        context.lastConfirmedSnapshot?.currentPlotId ??
+        context.currentPlot?.id ??
+        'none'
+      }
     />
   );
 }
