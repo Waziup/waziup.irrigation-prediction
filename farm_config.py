@@ -188,7 +188,7 @@ class FarmConfig:
                 f"Add the crop to crops.py or correct the plot settings."
             )
 
-        if self.sensor_kind in ("tension", "both"):
+        if self.sensor_kind in ("tension", "both") and self.threshold_mode == "static":
             if self.static_threshold_cbar is None or not math.isfinite(
                     float(self.static_threshold_cbar)) or float(self.static_threshold_cbar) <= 0:
                 raise ValueError(
@@ -312,8 +312,8 @@ class FarmConfig:
         plot.harvest_date = self.harvest_date
         plot.initial_gdd = float(self.initial_gdd)
         plot.soil_texture_class = self.soil_texture_class
-        plot.threshold_static = self.static_threshold_cbar
-        plot.threshold = self.static_threshold_cbar
+        plot.threshold_static = self.static_threshold_cbar or 0.0
+        plot.threshold = self.static_threshold_cbar or 0.0
         plot.threshold_mode = self.threshold_mode
         for name in (
             "soil_water_retention_curve", "plot_area_m2",
