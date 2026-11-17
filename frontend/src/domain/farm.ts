@@ -37,7 +37,8 @@ export interface FarmPlotCard {
   dataReason?: string | null;
   equipment: {
     configured: boolean;
-    state: 'active' | 'not_configured' | 'advisory_only' | 'ready';
+    state:
+      'active' | 'unconfirmed' | 'not_configured' | 'advisory_only' | 'ready';
     mode: IrrigationMode | null;
   };
   alert: { id: string; urgency: Urgency } | null;
@@ -48,6 +49,7 @@ export interface FarmPlotCard {
   } | null;
 }
 export interface FarmDashboard {
+  refreshPending?: boolean;
   schemaVersion: string;
   generatedAt: string;
   farm: Farm;

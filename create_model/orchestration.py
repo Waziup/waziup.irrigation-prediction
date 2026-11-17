@@ -654,6 +654,7 @@ def run_complete_cycle(plot, training: bool = False) -> PipelineCycleResult:
                         )
                         for label in forecast
                     },
+                    kc_adjustment=float(getattr(runtime_state, "eo_kc_delta", 0.0) or 0.0),
                 )
                 ordered_labels = sorted(
                     threshold_forecast,

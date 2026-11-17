@@ -27,6 +27,7 @@ export function parseRecommendation(value: unknown): IrrigationRecommendation {
     const condition = d.condition == null ? null : object(d.condition);
     return {
       available: false,
+      ...(d.loading === true ? { loading: true } : {}),
       reason: nullable(d.reason ?? d.availability_reason, string),
       modelForecastAvailable: nullable(d.model_forecast_available, boolean),
       cropType: nullable(crop?.type ?? d.crop_type, string),

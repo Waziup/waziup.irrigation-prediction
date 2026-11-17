@@ -93,7 +93,6 @@ export function PlotSettingsSections({
               <PlotIdentityForm {...props} />
               <div className="col-span-full grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
                 <CropSettingsForm {...props} />
-                <ThresholdSettingsForm {...props} section="base" />
               </div>
             </SettingsSection>
             {(props.errors.zoneName ||
@@ -134,6 +133,10 @@ export function PlotSettingsSections({
               }
               dirty={changed([
                 'soilType',
+                'thresholdMode',
+                'thresholdCbar',
+                'stageThresholdsCbar',
+                'irrigationType',
                 'soilTextureClass',
                 'soilCalibration',
                 'permanentWiltingPoint',
@@ -149,7 +152,7 @@ export function PlotSettingsSections({
               </p>
               <SoilSettingsForm
                 {...props}
-                threshold={<ThresholdSettingsForm {...props} section="mode" />}
+                threshold={<ThresholdSettingsForm {...props} />}
               />
             </SettingsSection>
           </>

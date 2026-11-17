@@ -32,19 +32,24 @@ export function GrowthDetails({
             ),
             summary
               ? summary.thresholdMode === 'dynamic'
-                ? 'Dynamic threshold'
+                ? summary.thresholdDetails?.estimated === false
+                  ? 'Calibrated crop-stage threshold'
+                  : 'Estimated crop-stage threshold'
                 : 'Static field trigger'
               : '',
           ],
           [
             'Kc today',
-            formatAmount(advice?.crop.kc ?? null, '', 3),
+            formatAmount(summary?.kcToday ?? advice?.crop.kc ?? null, '', 3),
             summary?.currentStage ?? '',
           ],
           [
             'ETc today',
-            formatAmount(advice?.weather.etcDailyMm ?? null, 'mm'),
-            'Crop water need',
+            formatAmount(
+              summary?.etcTodayMm ?? advice?.weather.etcDailyMm ?? null,
+              'mm',
+            ),
+            'Crop water use today',
           ],
           [
             'GDD today',
@@ -70,6 +75,19 @@ export function GrowthDetails({
           </div>
         ))}
       </section>
+      {summary?.thresholdMode === 'dynamic' &&
+        summary.thresholdActiveCbar == null && (
+          <p role="status" className="text-sm text-slate-600">
+            Dynamic threshold unavailable.{' '}
+            {summary.thresholdReason ??
+              'Check complete daily weather and soil calibration.'}
+          </p>
+        )}
+      {summary?.growthReason && (
+        <p role="status" className="text-xs text-slate-500">
+          {summary.growthReason}
+        </p>
+      )}
       {children}
       <DataSection title="Phenology timeline">
         {summary?.stages.length ? (
@@ -112,6 +130,11 @@ export function GrowthDetails({
         )}
       </DataSection>
       <DataSection title="Crop development reference">
+        {summary?.thresholdMode === 'dynamic' && (
+          <p className="mb-3 text-xs text-slate-500">
+            Trigger ranges use today’s weather across each stage.
+          </p>
+        )}
         <div className="max-w-full overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <thead>
@@ -154,7 +177,15 @@ export function GrowthDetails({
                     <td className="border-b border-gray-200 p-3 whitespace-nowrap">
                       {stage.thresholdSource === 'inactive_season'
                         ? 'Not applicable'
-                        : formatAmount(stage.thresholdCbar, 'cbar')}
+                        : stage.thresholdMinCbar != null &&
+                            stage.thresholdMaxCbar != null &&
+                            stage.thresholdMinCbar.toFixed(1) !==
+                              stage.thresholdMaxCbar.toFixed(1)
+                          ? `${stage.thresholdMinCbar.toFixed(1)} – ${stage.thresholdMaxCbar.toFixed(1)} cbar`
+                          : formatAmount(
+                              stage.thresholdMinCbar ?? stage.thresholdCbar,
+                              'cbar',
+                            )}
                     </td>
                   </tr>
                 ))

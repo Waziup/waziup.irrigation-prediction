@@ -849,7 +849,7 @@ def _set_config_update(url, body, currentPlot):
 
     currentPlot.slope = _parse_float(_get_first('slope'), "slope", errors)
     threshold_value = _parse_float(
-        _get_first('thres'), "threshold", errors)
+        _get_first('thres') or ('0' if _get_first('threshold_mode') == 'dynamic' else ''), "threshold", errors)
     currentPlot.threshold_static = threshold_value
     currentPlot.threshold = threshold_value
     threshold_mode_raw = _get_first('threshold_mode', '')
@@ -861,6 +861,22 @@ def _set_config_update(url, body, currentPlot):
     currentPlot.threshold_mode = threshold_mode_raw.strip().lower()
     if currentPlot.threshold_mode not in {'static', 'dynamic'}:
         errors['threshold_mode'] = "Threshold mode must be static or dynamic."
+    if currentPlot.threshold_mode == 'static' and (threshold_value is None or threshold_value <= 0):
+        errors['threshold'] = 'Enter a positive static threshold.'
+    for field in ('stage_thresholds_cbar', 'stage_depletion_fractions'):
+        if field in parsed_data:
+            try:
+                values = json.loads(_get_first(field, '{}'))
+                required = {'pre_emergence', 'development', 'mid_season', 'late_season', 'post_maturity'}
+                if not isinstance(values, dict) or (values and set(values) != required):
+                    raise ValueError('Provide all four active stages or leave stage calibration empty.')
+                if any(not np.isfinite(float(v)) or float(v) <= 0 or
+                       (field == 'stage_depletion_fractions' and float(v) >= 1)
+                       for v in values.values()):
+                    raise ValueError('Stage values must be positive and finite; depletion fractions must be below 1.')
+                setattr(currentPlot, field, values)
+            except (ValueError, TypeError) as exc:
+                errors[field] = str(exc)
     plot_area_raw = parsed_data.get(
         'plot_area_m2', parsed_data.get('area', []))
     area_unit = _get_first('area_unit', getattr(
@@ -1121,6 +1137,10 @@ def _set_config_update(url, body, currentPlot):
         "Slope": currentPlot.slope,
         "Threshold": getattr(currentPlot, 'threshold_static', currentPlot.threshold),
         "Threshold_mode": currentPlot.threshold_mode,
+        "Stage_thresholds_cbar": getattr(currentPlot, 'stage_thresholds_cbar', {}),
+        "Stage_depletion_fractions": getattr(currentPlot, 'stage_depletion_fractions', {}),
+        "Depletion_fraction": getattr(currentPlot, 'depletion_fraction', None),
+        "Threshold_hysteresis_cbar": getattr(currentPlot, 'threshold_hysteresis_cbar', 0.0),
         "Application_efficiency": currentPlot.application_efficiency,
         "Effective_rainfall_fraction": currentPlot.effective_rainfall_fraction,
         "Plot_area_m2": currentPlot.plot_area_m2,
@@ -1218,6 +1238,7 @@ _CONFIG_UPDATE_FIELDS = (
     "device_and_sensor_ids_flow", "device_and_sensor_ids_flow_confirmation", "flow_confirmation_mode",
     "user_given_name", "zone_name", "sensor_kind", "gps_info",
     "slope", "threshold", "threshold_static", "threshold_mode",
+    "stage_thresholds_cbar", "stage_depletion_fractions",
     "application_efficiency", "effective_rainfall_fraction",
     "plot_area_m2", "area_unit", "irrigation_type",
     "irrigation_mode", "look_ahead_time", "start_date", "period",
@@ -1377,6 +1398,8 @@ def _return_plot_config(currentPlot):
                 "Slope": currentPlot.slope,
                 "Threshold": getattr(currentPlot, 'threshold_static', currentPlot.threshold),
                 "Threshold_mode": getattr(currentPlot, 'threshold_mode', 'static'),
+                "Stage_thresholds_cbar": getattr(currentPlot, 'stage_thresholds_cbar', {}),
+                "Stage_depletion_fractions": getattr(currentPlot, 'stage_depletion_fractions', {}),
                 "Application_efficiency": currentPlot.application_efficiency,
                 "Effective_rainfall_fraction": currentPlot.effective_rainfall_fraction,
                 "Plot_area_m2": currentPlot.plot_area_m2,
@@ -1880,6 +1903,103 @@ def getActiveAlerts(url, body):
 usock.routerGET("/api/activeAlerts", getActiveAlerts)
 
 
+def _ui_read_key(plot):
+    import hashlib
+    config = get_app_state_store().load_plot_config(plot.stable_id)
+    fields = ('crop_type', 'planting_date', 'harvest_date', 'gps_info', 'plot_area_m2',
+              'timezone', 'initial_gdd', 'forecast_horizon_days', 'threshold_mode', 'threshold_static')
+    pipeline = getattr(plot, 'pipeline_result', None)
+    replay = None
+    if getattr(plot, 'load_data_from_csv', False):
+        module = _debug_replay_module()
+        replay = module.state(plot) if module else None
+    source = [config, {name: getattr(plot, name, None) for name in fields},
+              getattr(plot, 'farm_gps_info', None), getattr(plot, 'farm_timezone', None),
+              NetworkUtils.ApiUrl, id(pipeline), getattr(pipeline, 'calculated_at', None),
+              str(replay.get('now')) if replay else None,
+              pd.Timestamp.now(tz=TimeUtils.for_plot(plot)).date().isoformat()]
+    return plot.stable_id, hashlib.sha256(json.dumps(source, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _ui_recommendation(plot):
+    # A new plot has no irrigation decision; computing a whole crop season
+    # merely to report that fact must never delay the dashboard.
+    pipeline = getattr(plot, 'pipeline_result', None)
+    if pipeline is None:
+        threshold = getattr(plot, 'threshold_static', None)
+        if getattr(plot, 'threshold_mode', 'static') == 'dynamic':
+            threshold = None
+        try:
+            threshold = float(threshold)
+            if not np.isfinite(threshold) or threshold <= 0:
+                threshold = None
+        except (ValueError, TypeError):
+            threshold = None
+        return {'available': False, 'plot_id': plot.stable_id,
+                'reason': 'No completed model forecast is available. Train this plot to create one.',
+                'crop_type': getattr(plot, 'crop_type', None),
+                'threshold_cbar': threshold, 'model_forecast_available': False}
+    from background_reads import UI_READS
+    from spaceiotbox_client import ui_request_budget
+    def load():
+        with ui_request_budget():
+            return actuation.get_irrigation_recommendation(plot)
+    latest = get_operations_store().latest_for_plot(plot.stable_id)
+    ledger_version = tuple((latest or {}).get(field) for field in ('operation_id', 'updated_at', 'status', 'amount_m3'))
+    def retain(previous, failed):
+        if not previous.get('available'):
+            return failed
+        cached = copy.deepcopy(previous)
+        cached['freshness'] = {**cached.get('freshness', {}), 'stale': True}
+        cached['data_stale'] = True
+        cached['reason'] = 'Irrigation advice could not be refreshed. Showing the previous readings.'
+        return cached
+    return UI_READS.get(('recommendation', *_ui_read_key(plot), ledger_version), load, ttl=10,
+        pending={'available': False, 'loading': True, 'reason': 'Preparing irrigation advice…'},
+        error={'available': False, 'reason': 'Irrigation advice could not be refreshed.'},
+        failed=lambda result:not result.get('available'), retain=retain)
+
+
+def _ui_plot_read(kind, url, body, handler, *, ttl=300):
+    from background_reads import UI_READS
+    from spaceiotbox_client import ui_request_budget
+    from urllib.parse import urlencode, urlunparse
+    plot, requested_id = _training_request_plot(url)
+    if plot is None:
+        return 404, _json_bytes({'available': False, 'reason': 'Plot not found.', 'plot_id': requested_id}), []
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    query['plot_id'] = [plot.stable_id]
+    pinned_url = urlunparse(parsed._replace(query=urlencode(sorted(query.items()), doseq=True)))
+    pending = 200, _json_bytes({'available': False, 'loading': True,
+        'reason': 'Preparing '+kind+'…', 'plot_id': plot.stable_id}), []
+    error = 200, _json_bytes({'available': False,
+        'reason': kind.capitalize()+' could not be loaded. Retrying shortly.', 'plot_id': plot.stable_id}), []
+    def load():
+        with ui_request_budget():
+            return handler(pinned_url, body)
+    def lifetime(response):
+        try:
+            return ttl if json.loads(response[1]).get('available') else 30
+        except (TypeError, ValueError):
+            return 30
+    def failed(response):
+        payload = json.loads(response[1])
+        return (response[0] >= 500 or payload.get('available') is False
+                or (kind == 'crop growth' and payload.get('current_gdd') is None
+                    and bool(payload.get('growth_reason'))))
+    def retain(previous, response):
+        payload = json.loads(previous[1])
+        if not payload.get('available'):
+            return response
+        payload['cache_state'] = 'stale'
+        payload['growth_reason'] = 'Could not refresh '+kind+'. Showing the last saved update.'
+        return previous[0], _json_bytes(payload), previous[2]
+    return UI_READS.get((kind, *_ui_read_key(plot), pinned_url), load,
+        ttl=ttl, ttl_for=lifetime, pending=pending, error=error,
+        failed=failed, retain=retain)
+
+
 def _compose_farm_dashboard(registry):
     """Shared recommendation/alert composition for dashboard and spatial API."""
     farm = registry['farm']
@@ -1892,7 +2012,7 @@ def _compose_farm_dashboard(registry):
         if plot is not None:
             try:
                 recommendations[record["plot_id"]
-                                ] = actuation.get_irrigation_recommendation(plot)
+                                ] = _ui_recommendation(plot)
             except Exception as exc:
                 recommendations[record["plot_id"]] = {
                     "available": False, "reason": str(exc)}
@@ -1904,9 +2024,16 @@ def _compose_farm_dashboard(registry):
     today = _today_for_farm(registry)
     operations = store.list_operations(today=today,
                                        timezone_name=farm.get("timezone") or "UTC", limit=500)
+    activity = {}
+    for plot_id, plot in runtime_plots.items():
+        activity[plot_id] = {
+            "pending": bool(store.latest_for_plot(plot_id, statuses={"active"})
+                            or store.has_pending_flow_verification(plot_id)),
+        }
     payload = build_farm_dashboard(
         farm=farm, plot_records=plot_records, runtime_plots=runtime_plots,
-        recommendations=recommendations, alerts=alerts, operations=operations)
+        recommendations=recommendations, alerts=alerts, operations=operations,
+        activity=activity)
     return payload
 
 
@@ -2234,7 +2361,8 @@ def getHistoricalChartData(url, body):
     crop_state = getattr(pipeline, "crop_state", None)
     active_threshold = (
         getattr(crop_state, "stress_threshold_cbar", None)
-        if crop_state is not None else static_threshold
+        if crop_state is not None else (
+            static_threshold if getattr(currentPlot, "threshold_mode", "static") == "static" else None)
     )
     active_threshold_mode = (
         getattr(crop_state, "threshold_mode", None)
@@ -2577,7 +2705,7 @@ def _weather_icon_from_rain(rain_mm):
     return "partly_cloudy_day"
 
 
-def getWeatherForecast(url, body):
+def _compute_weather_forecast(url, body):
     query = parse_qs(urlparse(url).query)
     view = query.get('view', ['forecast'])[0]
     selected_range = query.get('range', ['model' if view == 'forecast' else 'recent'])[0]
@@ -2777,10 +2905,14 @@ def getWeatherForecast(url, body):
     return 200, bytes(json.dumps(payload), "utf8"), []
 
 
+def getWeatherForecast(url, body):
+    return _ui_plot_read('weather', url, body, _compute_weather_forecast, ttl=300)
+
+
 usock.routerGET("/api/getWeatherForecast", getWeatherForecast)
 
 
-def getEOObservation(url, body):
+def _compute_eo_observation(url, body):
     """Return crop-agnostic EO history for the selected plot."""
     requested_plot = parse_qs(urlparse(url).query).get('plot_id', [None])[0]
     currentPlot = (plot_manager.getPlotByStableId(requested_plot)
@@ -2850,6 +2982,10 @@ def getEOObservation(url, body):
     return 200, _json_bytes(json_safe(payload)), []
 
 
+def getEOObservation(url, body):
+    return _ui_plot_read('satellite observations', url, body, _compute_eo_observation, ttl=3600)
+
+
 usock.routerGET("/api/getEOObservation", getEOObservation)
 
 
@@ -2878,8 +3014,10 @@ def getSpaceIoTBoxDiagnostics(url, body):
 usock.routerGET("/api/getSpaceIoTBoxDiagnostics", getSpaceIoTBoxDiagnostics)
 
 
-def getPhenologySummary(url, body):
-    currentPlot = plot_manager.getCurrentPlot()
+def _compute_phenology_summary(url, body):
+    currentPlot, requested_id = _training_request_plot(url)
+    if currentPlot is None:
+        return 404, _json_bytes({"available": False, "reason": "Unknown plot_id", "plot_id": requested_id}), []
     crop_type = getattr(currentPlot, "crop_type", None) or ""
     planting_date = getattr(currentPlot, "planting_date", None)
     initial_gdd = getattr(currentPlot, "initial_gdd", 0.0)
@@ -2970,16 +3108,57 @@ def getPhenologySummary(url, body):
     ]
     pipeline = getattr(currentPlot, "pipeline_result", None)
     crop_state = getattr(pipeline, "crop_state", None)
+    try:
+        state_at = pd.Timestamp(getattr(pipeline, "calculated_at", None))
+        state_at = state_at.tz_localize("UTC") if state_at.tzinfo is None else state_at.tz_convert("UTC")
+        state_age = (pd.Timestamp.now(tz="UTC") - state_at).total_seconds()
+        state_fresh = pd.notna(state_at) and 0 <= state_age <= 3600
+    except (ValueError, TypeError, AttributeError):
+        state_fresh = False
     if (crop_state is None
+            or not state_fresh
+            or getattr(crop_state, "crop_type", crop_type) != crop_type
             or getattr(crop_state, "phenology_reference_source", None) == "eo_estimated_emergence"
             or getattr(crop_state, "phenology_reference_date", planting_date) != planting_date):
-        crop_state = actuation.get_runtime_crop_state(currentPlot)
+        crop_state = None
+    from growth_estimate import build_growth_estimate
+    try:
+        latitude, longitude = actuation._parse_weather_coordinates(currentPlot)
+    except (ValueError, TypeError, AttributeError):
+        latitude, longitude = None, None
+    independent_growth = build_growth_estimate(
+        currentPlot, fetch_weather=actuation.fetch_weather_frame,
+        latitude=latitude, longitude=longitude,
+        timezone_name=TimeUtils.for_plot(currentPlot),
+        store=get_operations_store(), crop_state=crop_state)
     from phenology_engine import compute_kc_gdd
+    from crop_model import project_stage_kc, get_stage_threshold_range
     stage_farm = actuation._build_runtime_farm_config(currentPlot)
+    threshold_error = None
+    # Never reuse a pipeline trigger: evaluate current growth and complete-day
+    # demand together. Only compatible, fresh EO can refine independent growth.
+    crop_state = None
+    if independent_growth['current_gdd'] is not None:
+        try:
+            from crop_model import get_crop_state
+            crop_state = get_crop_state(stage_farm, independent_growth['current_gdd'],
+                et0_daily_mm=independent_growth.get('et0_today_mm'),
+                etc_daily_mm=independent_growth.get('etc_today_mm'),
+                as_of=pd.Timestamp(independent_growth['evaluated_at']).tz_convert(TimeUtils.for_plot(currentPlot)))
+        except (ValueError, TypeError, AttributeError) as exc:
+            threshold_error = str(exc)
+    elif threshold_mode == "dynamic":
+        threshold_error = independent_growth.get('growth_reason') or 'Current crop growth is unavailable.'
     stage_et0 = getattr(crop_state, "et0_today_mm", None)
+    if crop_state is not None and not crop_state.season_active and threshold_mode == 'dynamic':
+        threshold_error = 'The crop is outside its active season.'
+    kc_delta = (float(independent_growth['kc_today']) - compute_kc_gdd(
+        independent_growth['current_gdd'], crop_type)
+        if independent_growth['kc_today'] is not None else 0.0)
     for row, stage_gdd in zip(stage_rows, representative_gdd):
         threshold = threshold_baseline
         threshold_source = "field_static"
+        threshold_min = threshold_max = threshold
         if threshold_mode == "dynamic":
             details = getattr(crop_state, "threshold_details", {}) or {}
             threshold_source = details.get("source", "unavailable")
@@ -2988,19 +3167,26 @@ def getPhenologySummary(url, body):
                 threshold_source = "inactive_season"
             elif threshold_source != "unavailable":
                 try:
-                    stage_etc = (float(stage_et0) * compute_kc_gdd(stage_gdd, crop_type)
+                    stage_etc = (float(stage_et0) * project_stage_kc(stage_gdd, crop_type, kc_delta)
                                  if stage_et0 is not None else None)
                     threshold = get_stress_threshold(
                         stage_farm, stage_gdd, stage_etc)
+                    threshold_min, threshold_max = get_stage_threshold_range(
+                        stage_farm, stage_gdd, row["gdd_end"], stage_et0, kc_delta)
                 except (TypeError, ValueError):
                     threshold = None
             else:
                 threshold = None
+        if threshold is None:
+            threshold_min = threshold_max = None
         row["threshold_cbar"] = threshold
+        row["threshold_min_cbar"] = threshold_min
+        row["threshold_max_cbar"] = threshold_max
         row["threshold_source"] = threshold_source
-        row["threshold_basis"] = ("At current ET0; varies with weather"
-                                  if threshold_mode == "dynamic" and threshold is not None
-                                  else None)
+        row["threshold_basis"] = (
+            "Field-calibrated stage target" if threshold_source == "farmer_calibrated_stage_curve"
+            else ("At current ET0; varies with weather"
+                  if threshold_mode == "dynamic" and threshold is not None else None))
 
     payload = {
         "available": True,
@@ -3014,12 +3200,21 @@ def getPhenologySummary(url, body):
         "initial_gdd": float(initial_gdd or 0.0),
         "threshold_mode": threshold_mode,
         "threshold_baseline_cbar": threshold_baseline,
-        "evaluated_at": getattr(pipeline, "calculated_at", None),
+        "evaluated_at": independent_growth["evaluated_at"],
+        "plot_id": currentPlot.stable_id,
+        "kc_today": independent_growth["kc_today"],
+        "etc_forecast_mm": independent_growth["etc_forecast_mm"],
+        "etc_today_mm": independent_growth["etc_today_mm"],
+        "growth_reason": independent_growth["growth_reason"],
+        "water_demand": independent_growth["water_demand"],
         "threshold_active_cbar": getattr(
-            crop_state, "stress_threshold_cbar", threshold_baseline),
+            crop_state, "stress_threshold_cbar",
+            threshold_baseline if threshold_mode == "static" else None)
+            if not (crop_state is not None and not crop_state.season_active and threshold_mode == 'dynamic') else None,
         "threshold_details": getattr(crop_state, "threshold_details", None),
-        "current_stage": getattr(crop_state, "growth_stage_name", None),
-        "current_gdd": getattr(crop_state, "gdd_cumulative", None),
+        "threshold_reason": threshold_error,
+        "current_stage": independent_growth["current_stage"],
+        "current_gdd": independent_growth["current_gdd"],
         "gdd_thresholds": {
             "emergence": params.gdd_emergence,
             "development_end": params.gdd_dev_end,
@@ -3046,6 +3241,10 @@ def getPhenologySummary(url, body):
     )
 
     return 200, bytes(json.dumps(payload), "utf8"), []
+
+
+def getPhenologySummary(url, body):
+    return _ui_plot_read('crop growth', url, body, _compute_phenology_summary, ttl=300)
 
 
 usock.routerGET("/api/getPhenologySummary", getPhenologySummary)
@@ -3088,9 +3287,9 @@ def getIrrigationRecommendation(url, body):
     # Always retain the rich crop/water/freshness contract consumed by the UI.
     # When a pipeline cycle exists, merge its exact decision into that payload
     # so the UI and actuator use the same urgency and breach timing.
-    recommendation = actuation.get_irrigation_recommendation(currentPlot)
+    recommendation = _ui_recommendation(currentPlot)
     pipeline_result = getattr(currentPlot, "pipeline_result", None)
-    if pipeline_result is not None and pipeline_result.recommendation is not None:
+    if recommendation.get("available") and pipeline_result is not None and pipeline_result.recommendation is not None:
         decision = pipeline_result.to_dict().get("recommendation") or {}
         for key, value in decision.items():
             recommendation.setdefault(key, value)

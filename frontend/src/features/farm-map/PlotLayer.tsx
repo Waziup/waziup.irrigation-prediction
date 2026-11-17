@@ -11,7 +11,8 @@ export function PlotLayer({
   selected: boolean;
   onInspect: (id: string) => void;
 }) {
-  const status = mapStatuses[mapStatus(plot)];
+  const currentStatus = mapStatus(plot);
+  const status = mapStatuses[currentStatus];
   return (
     <GeoJSON
       key={`${plot.plotId}:${plot.geometryVersion}`}
@@ -24,7 +25,9 @@ export function PlotLayer({
         fillColor: status.color,
         weight: selected ? 3 : 2,
         fillOpacity: selected ? 0.27 : 0.14,
-        dashArray: plot.dataState === 'fresh' ? undefined : '6 4',
+        dashArray: ['unavailable', 'stale'].includes(currentStatus)
+          ? '6 4'
+          : undefined,
       }}
       eventHandlers={{ click: () => onInspect(plot.plotId) }}
     >
@@ -39,9 +42,12 @@ export function PlotLayer({
           <span className={`size-2 rounded-full ${status.dot}`} />
           <span
             title={`${plot.name} · ${plot.cropType ?? 'Crop unavailable'} · ${status.label}`}
-            className="max-w-20 truncate"
+            className="max-w-44"
           >
-            {plot.name}
+            <span className="block truncate">{plot.name}</span>
+            <span className="mt-0.5 block text-[10px] font-normal">
+              {status.label}
+            </span>
           </span>
         </span>
       </Tooltip>

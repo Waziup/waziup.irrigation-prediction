@@ -133,6 +133,7 @@ def _build_runtime_farm_config(plot):
     return SimpleNamespace(
         name=getattr(plot, "user_given_name", "Plot"),
         crop_type=getattr(plot, 'crop_type', ''),
+        irrigation_type=getattr(plot, 'irrigation_type', ''),
         soil_texture_class=getattr(plot, 'soil_texture_class', None),
         planting_date=getattr(plot, 'planting_date', ''),
         harvest_date=getattr(plot, 'harvest_date', None),
@@ -789,8 +790,10 @@ def _compute_runtime_crop_state(plot):
                     return result
 
     try:
-        start_str = planting_date.strftime("%Y-%m-%d")
-        end_str = today.strftime("%Y-%m-%d")
+        timezone_name = TimeUtils.for_plot(plot)
+        planting_local = planting_date.tz_localize(timezone_name) if planting_date.tzinfo is None else planting_date.tz_convert(timezone_name)
+        start_str = planting_local.tz_convert("UTC").strftime("%Y-%m-%d")
+        end_str = (evaluation_at.tz_convert(timezone_name).normalize() + pd.DateOffset(days=1)).tz_convert("UTC").strftime("%Y-%m-%d")
         _trace_event(
             "decision.weather.started", plot, scope="farm",
             latitude=weather_lat,
@@ -848,8 +851,8 @@ def _compute_runtime_crop_state(plot):
             temp_series, timezone_name, through=now_ts)
         if daily_tmax.dropna().empty:
             raise ValueError("No historical temperature is available through now")
-        daily_tmax = daily_tmax.interpolate(limit_direction="both")
-        daily_tmin = daily_tmin.interpolate(limit_direction="both")
+        if daily_tmax.isna().any() or daily_tmin.isna().any():
+            raise ValueError("Temperature history has missing days; crop-stage thresholds cannot be calculated")
 
         if "Et0_evapotranspiration" in weather.columns:
             et0 = pd.to_numeric(
@@ -857,11 +860,9 @@ def _compute_runtime_crop_state(plot):
         else:
             et0 = pd.Series(dtype=float)
 
-        et0_available = not et0.empty and not et0.dropna().empty
-        if not et0_available:
-            et0_daily = pd.Series(0.0, index=daily_tmax.index, dtype=float)
-        else:
-            et0_daily = et0.resample("D").sum(min_count=1).fillna(0.0)
+        from weather_quality import complete_daily_et0
+        et0_daily = complete_daily_et0(weather, timezone_name)
+        et0_available = not et0_daily.dropna().empty
 
         gdd_series = compute_gdd_from_weather(daily_tmax, daily_tmin, farm_cfg)
         if reference["anchor_gdd"] > 0:
@@ -906,7 +907,8 @@ def _compute_runtime_crop_state(plot):
         )
         et0_today = (
             float(et0_daily.loc[now_ts.normalize()])
-            if et0_available and now_ts.normalize() in et0_daily.index else None
+            if et0_available and now_ts.normalize() in et0_daily.index
+            and pd.notna(et0_daily.loc[now_ts.normalize()]) else None
         )
         try:
             state = get_crop_state(
@@ -952,8 +954,8 @@ def _compute_runtime_crop_state(plot):
                 getattr(plot, "forecast_horizon_days", 5) or 5))))
             forecast_weather = fetch_weather_frame(
                 weather_lat, weather_lon,
-                start_date=today.strftime("%Y-%m-%d"),
-                end_date=(today + timedelta(days=forecast_days)).strftime("%Y-%m-%d"))
+                start_date=evaluation_at.tz_convert(timezone_name).normalize().tz_convert("UTC").strftime("%Y-%m-%d"),
+                end_date=(evaluation_at.tz_convert(timezone_name).normalize() + pd.DateOffset(days=forecast_days + 1)).tz_convert("UTC").strftime("%Y-%m-%d"))
             if not isinstance(forecast_weather, pd.DataFrame):
                 forecast_weather = pd.DataFrame()
         except Exception as exc:
@@ -964,7 +966,6 @@ def _compute_runtime_crop_state(plot):
         historical_et0 = pd.to_numeric(
             historical_et0, errors="coerce").dropna()
         if len(historical_et0) > 0:
-            state.et0_today_mm = float(historical_et0.iloc[-1])
             baseline_window = historical_et0.tail(min(len(historical_et0), 8))
             if len(baseline_window) > 1:
                 baseline_series = baseline_window.iloc[:-1]
@@ -1120,7 +1121,11 @@ def assess_plot_capabilities(plot, crop_state=None, current_tension=None) -> dic
     if threshold_mode == "dynamic":
         dynamic_source = (getattr(crop_state, "threshold_details", None) or {}).get(
             "source") if crop_state is not None else None
-        threshold_ready = threshold_ready and dynamic_source in {
+        try:
+            active_threshold = float(getattr(crop_state, "stress_threshold_cbar", np.nan))
+        except (ValueError, TypeError):
+            active_threshold = np.nan
+        threshold_ready = np.isfinite(active_threshold) and active_threshold > 0 and dynamic_source in {
             "fao56_root_zone_depletion", "existing_soil_curve_crop_demand",
             "farmer_calibrated_stage_curve",
         }
@@ -1166,6 +1171,8 @@ def get_irrigation_recommendation(plot):
     if runtime_state is None:
         threshold = getattr(
             plot, "threshold_static", getattr(plot, "threshold", None))
+        if getattr(plot, "threshold_mode", "static") == "dynamic":
+            threshold = None
         # Zero is the constructor placeholder, not a configured stress trigger.
         try:
             threshold = float(threshold)

@@ -10,6 +10,48 @@ import requests
 from weather_quality import deduplicate_weather_frame
 
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
+_UI_POLICY = ContextVar('ui_weather_policy', default=None)
+_WEATHER_MEMO = ContextVar('weather_provider_response', default=None)
+
+@contextmanager
+def provider_response_scope():
+    if _WEATHER_MEMO.get() is not None:
+        yield
+        return
+    token = _WEATHER_MEMO.set({})
+    try:
+        yield
+    finally:
+        _WEATHER_MEMO.reset(token)
+
+
+@contextmanager
+def ui_request_budget(seconds=30):
+    token = _UI_POLICY.set(time.monotonic() + seconds)
+    try:
+        with provider_response_scope():
+            yield
+    finally:
+        _UI_POLICY.reset(token)
+
+
+def _attempts():
+    return 1 if _UI_POLICY.get() is not None else REQUEST_ATTEMPTS
+
+
+def _timeout():
+    deadline = _UI_POLICY.get()
+    if deadline is None:
+        return REQUEST_TIMEOUT_SECONDS
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise requests.Timeout('Weather refresh exceeded its time budget')
+    return min(5., REQUEST_TIMEOUT_SECONDS, remaining)
+
+
 DEFAULT_BASE_URL = "https://www.smartafrihub.com/spaceiotbox/api"
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("SPACEIOTBOX_TIMEOUT_SECONDS", "30"))
 REQUEST_ATTEMPTS = max(1, int(os.getenv("SPACEIOTBOX_REQUEST_ATTEMPTS", "3")))
@@ -139,22 +181,22 @@ def build_headers() -> dict:
 
 
 def _request_json(path: str, params: Optional[dict] = None) -> object:
-    for attempt in range(REQUEST_ATTEMPTS):
+    for attempt in range(_attempts()):
         try:
             response = requests.get(
                 f"{get_base_url()}{path}",
                 params=params,
                 headers=build_headers(),
-                timeout=REQUEST_TIMEOUT_SECONDS,
+                timeout=_timeout(),
             )
             if response.ok:
                 return response.json()
             # Retry transient server failures, but preserve client errors such
             # as 422 for the bounded-query fallback handled by the caller.
-            if response.status_code < 500 or attempt == REQUEST_ATTEMPTS - 1:
+            if response.status_code < 500 or attempt == _attempts() - 1:
                 response.raise_for_status()
         except (requests.Timeout, requests.ConnectionError):
-            if attempt == REQUEST_ATTEMPTS - 1:
+            if attempt == _attempts() - 1:
                 raise
         time.sleep(min(2 ** attempt, 4))
     raise RuntimeError("SpaceIoTBox request exhausted without a response")
@@ -162,18 +204,18 @@ def _request_json(path: str, params: Optional[dict] = None) -> object:
 
 def _request_external_json(url: str, params: dict) -> object:
     """Apply the same bounded retry policy to the Open-Meteo fallback."""
-    for attempt in range(REQUEST_ATTEMPTS):
+    for attempt in range(_attempts()):
         try:
             response = requests.get(
                 url, params=params, headers={"Accept": "application/json"},
-                timeout=REQUEST_TIMEOUT_SECONDS,
+                timeout=_timeout(),
             )
             if response.ok:
                 return response.json()
-            if response.status_code < 500 or attempt == REQUEST_ATTEMPTS - 1:
+            if response.status_code < 500 or attempt == _attempts() - 1:
                 response.raise_for_status()
         except (requests.Timeout, requests.ConnectionError):
-            if attempt == REQUEST_ATTEMPTS - 1:
+            if attempt == _attempts() - 1:
                 raise
         time.sleep(min(2 ** attempt, 4))
     raise RuntimeError("Open-Meteo request exhausted without a response")
@@ -501,6 +543,25 @@ def fetch_open_meteo_weather_frame(lat, lon, start_bound, end_bound, *, on_block
     return combined
 
 
+def _primary_weather_frame(lat, lon):
+    memo = _WEATHER_MEMO.get()
+    key = (get_base_url(), float(lat), float(lon))
+    if memo is not None and key in memo:
+        value = memo[key]
+        if isinstance(value, Exception):
+            raise value
+        return value
+    try:
+        result = normalize_weather_frame(fetch_agro_climate("land", lat, lon))
+    except (requests.RequestException, TypeError, ValueError, KeyError) as exc:
+        if memo is not None:
+            memo[key] = exc
+        raise
+    if memo is not None:
+        memo[key] = result
+    return result
+
+
 def fetch_weather_frame(lat: float, lon: float, start_date=None, end_date=None, *, on_block=None) -> pd.DataFrame:
     start_bound = _normalize_weather_bound(
         start_date) if start_date is not None else None
@@ -516,8 +577,7 @@ def fetch_weather_frame(lat: float, lon: float, start_date=None, end_date=None, 
     if coordinates_supported_by_spaceiotbox(lat, lon):
         try:
             # `/land` documents only lat/lon; never send unsupported range keys.
-            full_frame = normalize_weather_frame(
-                fetch_agro_climate("land", lat, lon))
+            full_frame = _primary_weather_frame(lat, lon)
             if (_covers_requested_window(full_frame, start_bound, end_bound)
                     and _weather_inputs_complete(full_frame)):
                 frame = normalize_weather_frame(

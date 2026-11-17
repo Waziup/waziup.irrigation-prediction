@@ -34,8 +34,13 @@ export async function loadFarmDashboard(
 }
 export function useFarmDashboard() {
   const context = useFarmContext();
+  const displayedId =
+    context.currentPlot?.id ??
+    (context.status === 'refreshing'
+      ? context.lastConfirmedSnapshot?.currentPlotId
+      : null);
   return useQuery({
-    queryKey: farmDashboardKey(context.currentPlot?.id ?? 'unselected'),
+    queryKey: farmDashboardKey(displayedId ?? 'unselected'),
     queryFn: ({ signal }) => {
       if (!context.snapshot || context.status !== 'ready')
         throw new ApiError(
@@ -48,7 +53,16 @@ export function useFarmDashboard() {
     retry: false,
     staleTime: 0,
     refetchOnWindowFocus: true,
-    refetchInterval: 60_000,
+    refetchInterval: (query) =>
+      query.state.status === 'error'
+        ? 30_000
+        : query.state.data?.refreshPending
+          ? 3_000
+          : query.state.data?.plots.some(
+                (plot) => plot.equipment.state === 'unconfirmed',
+              )
+            ? 15_000
+            : 60_000,
     refetchIntervalInBackground: false,
   });
 }

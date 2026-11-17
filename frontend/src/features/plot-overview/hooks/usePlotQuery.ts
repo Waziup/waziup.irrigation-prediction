@@ -9,7 +9,11 @@ export function usePlotQuery<T>(
   staleTime = 0,
 ) {
   const context = useFarmContext();
-  const plotId = context.currentPlot?.id;
+  const plotId =
+    context.currentPlot?.id ??
+    (context.status === 'refreshing'
+      ? context.lastConfirmedSnapshot?.currentPlotId
+      : undefined);
   return useQuery({
     queryKey: ['plot', plotId ?? 'unselected', resource],
     enabled: context.status === 'ready' && !!plotId,
@@ -24,7 +28,17 @@ export function usePlotQuery<T>(
     retry: false,
     staleTime,
     refetchOnWindowFocus: true,
-    refetchInterval: interval,
+    refetchInterval: (query) => {
+      if (interval === false) return false;
+      if (query.state.status === 'error') return Math.max(interval, 30_000);
+      const value = query.state.data;
+      return value &&
+        typeof value === 'object' &&
+        'loading' in value &&
+        value.loading === true
+        ? 3_000
+        : interval;
+    },
     refetchIntervalInBackground: false,
   });
 }

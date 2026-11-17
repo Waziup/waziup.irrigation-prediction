@@ -1671,7 +1671,7 @@
           <div class="form-row">
             <div class="form-group"><label for="crop_type_form">Crop</label><select id="crop_type_form" class="form-control"><option value="">Select a crop</option><option value="maize">Maize</option><option value="beans">Beans</option><option value="wheat">Wheat</option><option value="tomato">Tomato</option><option value="sorghum">Sorghum</option><option value="rice">Rice</option><option value="olive">Olive</option></select></div>
             <div class="form-group"><label for="planting_date_form">Planting date (optional)</label><input type="date" id="planting_date_form" class="form-control" value="" /><p class="form-hint">If unknown, the app attempts a quality-gated EO emergence estimate. It will not invent a date when the vegetation signal is inconclusive.</p></div>
-            <div class="form-group"><label for="tension_threshold_form">Base irrigation threshold (cbar)</label><input type="number" min="1" step="0.1" id="tension_threshold_form" class="form-control" value="30" /></div>
+            <div class="form-group"><label for="tension_threshold_form">Static irrigation threshold (cbar)</label><input type="number" min="1" step="0.1" id="tension_threshold_form" class="form-control" value="30" /><p class="form-hint">Used only when dynamic thresholds are off.</p></div>
           </div>
         </div>
         <div class="form-actions settings-step-actions">
@@ -1707,7 +1707,6 @@
             <div class="form-group threshold-choice">
               <label for="use_dynamic_threshold_form">Threshold mode</label>
               <label class="switch-choice" for="use_dynamic_threshold_form"><input type="checkbox" id="use_dynamic_threshold_form" /><span><strong>Use dynamic tension thresholds</strong></span></label>
-              <p class="form-hint">On: adjusts the trigger using crop demand and soil data. Off: uses your fixed tension threshold.</p>
             </div>
             <details><summary>Soil values &amp; source</summary>
             <p id="soil_source_hint" class="form-hint"></p>

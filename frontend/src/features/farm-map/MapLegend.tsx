@@ -5,7 +5,7 @@ export function MapLegend() {
       aria-label="Map legend"
       className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-[#52606d]"
     >
-      {(['critical', 'watch', 'healthy', 'active', 'unavailable'] as const).map(
+      {(['critical', 'watch', 'healthy', 'unavailable'] as const).map(
         (status) => (
           <li key={status} className="flex items-center gap-2">
             <span

@@ -397,7 +397,10 @@ def build_threshold_series_for_eval(
         )
         return None
 
-    daily = df_test["Temperature"].resample("1D")
+    temperatures = df_test["Temperature"]
+    if temperatures.index.tz is not None:
+        temperatures = temperatures.tz_convert(getattr(farm, "timezone", None) or "UTC")
+    daily = temperatures.resample("1D")
     gdd_series = compute_gdd_from_weather(daily.max(), daily.min(), farm)
     etc_daily = None
     if str(getattr(farm, "threshold_mode", "static")) == "dynamic":
@@ -406,9 +409,14 @@ def build_threshold_series_for_eval(
                 "  [%s] dynamic evaluation needs Et0_evapotranspiration",
                 farm.name)
             return None
-        daily_et0 = pd.to_numeric(
-            df_test["Et0_evapotranspiration"], errors="coerce").resample(
-                "1D").sum(min_count=1)
+        from weather_quality import complete_daily_et0
+        evaluation_weather = df_test.copy()
+        if evaluation_weather.index.tz is None:
+            evaluation_weather.index = evaluation_weather.index.tz_localize(
+                getattr(farm, "timezone", None) or "UTC")
+        daily_et0 = complete_daily_et0(evaluation_weather, getattr(farm, "timezone", None) or "UTC")
+        if gdd_series.index.tz is None:
+            daily_et0.index = daily_et0.index.tz_localize(None)
         etc_daily = daily_et0.reindex(gdd_series.index) * gdd_series.apply(
             lambda value: compute_kc_gdd(value, farm.crop_type))
     daily_thresholds = get_stress_threshold_series(

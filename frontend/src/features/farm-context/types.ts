@@ -6,6 +6,7 @@ export interface FarmContextValue {
   currentPlot: Plot | null;
   plots: Plot[];
   snapshot: PlotContext | null;
+  lastConfirmedSnapshot?: PlotContext | null;
   status: 'loading' | 'refreshing' | 'switching' | 'ready' | 'error';
   error: Error | null;
   selectionError: Error | null;

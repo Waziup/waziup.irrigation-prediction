@@ -34,6 +34,7 @@ export interface PlotSettings {
   slope: number;
   thresholdCbar: number;
   thresholdMode: ThresholdMode;
+  stageThresholdsCbar?: Record<string, number>;
   irrigationType: string;
   irrigationMode: IrrigationMode;
   applicationEfficiency: number;
@@ -73,10 +74,27 @@ export interface PlotSettingsSaveResult extends SaveSettingsResult {
 }
 export function validatePlotSettings(input: PlotSettingsInput): FieldErrors {
   const errors: FieldErrors = {};
+  const stageValues = input.stageThresholdsCbar ?? {};
+  if (
+    Object.keys(stageValues).length &&
+    [
+      'pre_emergence',
+      'development',
+      'mid_season',
+      'late_season',
+      'post_maturity',
+    ].some(
+      (key) => !Number.isFinite(stageValues[key]) || stageValues[key]! <= 0,
+    )
+  )
+    errors.stageThresholdsCbar =
+      'Enter a positive target for each of the four stages, or clear all targets.';
   if (!areaUnits.includes(input.areaUnit))
     errors.areaUnit = 'Unsupported area unit.';
   if (!thresholdModes.includes(input.thresholdMode))
     errors.thresholdMode = 'Unsupported threshold mode.';
+  if (input.thresholdMode === 'static' && input.thresholdCbar <= 0)
+    errors.thresholdCbar = 'Enter a positive static threshold.';
   if (!irrigationModes.includes(input.irrigationMode))
     errors.irrigationMode = 'Unsupported irrigation mode.';
   if (!flowConfirmationModes.includes(input.flowConfirmationMode))

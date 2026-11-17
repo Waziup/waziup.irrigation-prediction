@@ -41,6 +41,19 @@
         return fetch(path, options);
       }
 
+      const pendingReadTimers = new Map();
+      function pollPendingRead(key, payload, load, pages) {
+        clearTimeout(pendingReadTimers.get(key));
+        pendingReadTimers.delete(key);
+        if (!payload?.loading) return;
+        const page = document.body.dataset.page || 'dashboard';
+        if (!pages.includes(page)) return;
+        pendingReadTimers.set(key, setTimeout(() => {
+          pendingReadTimers.delete(key);
+          if ((document.body.dataset.page || 'dashboard') === page) load();
+        }, 3000));
+      }
+
       async function safeFetchJson(path) {
         try {
           const res = await appFetch(path);
@@ -432,11 +445,13 @@
         const summary = await safeFetchJson('../api/getPhenologySummary');
         console.info('[IRRIGATION_TRACE] phenology: completed', summary);
         if (generation !== phenologyRefreshGeneration) return null;
+        pollPendingRead('growth', summary, loadPhenologySummary, ['phenology']);
         const sourceEl = document.getElementById('pheno-threshold-source');
         const valueEl = document.getElementById('pheno-threshold-value');
         const mode = summary?.available ? summary.threshold_mode : null;
         if (sourceEl) {
-          sourceEl.textContent = mode === 'dynamic' ? 'Dynamic crop-stage trigger'
+          sourceEl.textContent = mode === 'dynamic' ? (summary?.threshold_details?.estimated === false
+            ? 'Calibrated crop-stage trigger' : 'Estimated crop-stage trigger')
             : mode === 'static' ? 'Static field trigger' : 'Threshold unavailable';
           sourceEl.classList.toggle('dynamic', mode === 'dynamic');
           sourceEl.classList.toggle('static', mode === 'static');
@@ -444,6 +459,11 @@
         if (valueEl) valueEl.textContent = summary?.available
           && Number.isFinite(summary.threshold_active_cbar)
           ? summary.threshold_active_cbar.toFixed(1) : '--';
+        const activeThresholdEl = document.getElementById('summary-threshold');
+        if (activeThresholdEl) activeThresholdEl.textContent = summary?.available
+          && Number.isFinite(summary.threshold_active_cbar)
+          && summary.threshold_active_cbar > 0
+          ? `${summary.threshold_active_cbar.toFixed(1)} cbar` : '--';
         const cropNameEl = document.getElementById('pheno-crop-name');
         const dateLabelEl = document.getElementById('pheno-date-label');
         const plantingEl = document.getElementById('pheno-planting-date');
@@ -494,7 +514,7 @@
 
         setActiveGrowthStage(summary.current_stage || summary.growth_stage);
         if (thresholdNote) thresholdNote.textContent = summary.threshold_mode === 'dynamic'
-          ? 'Stage-entry reference triggers calculated using current ET0. They change with weather; the active trigger reflects the current crop stage.' : '';
+          ? 'Trigger ranges calculated across each stage using current ET0. The active trigger reflects current crop development and weather.' : '';
 
         if (tableBody) {
           const rows = Array.isArray(summary.stage_rows) ? summary.stage_rows : [];
@@ -507,7 +527,11 @@
               const trigger = row.threshold_cbar === null || row.threshold_cbar === undefined
                 ? NaN
                 : Number(row.threshold_cbar);
-              const triggerText = Number.isFinite(trigger)
+              const lower = row.threshold_min_cbar == null ? NaN : Number(row.threshold_min_cbar);
+              const upper = row.threshold_max_cbar == null ? NaN : Number(row.threshold_max_cbar);
+              const triggerText = Number.isFinite(lower) && Number.isFinite(upper) && lower.toFixed(1) !== upper.toFixed(1)
+                ? `${lower.toFixed(1)} – ${upper.toFixed(1)} cbar`
+                : Number.isFinite(trigger)
                 ? `${trigger.toFixed(1)} cbar`
                 : (['fao56_root_zone_depletion', 'existing_soil_curve_crop_demand']
                     .includes(row.threshold_source)
@@ -897,6 +921,7 @@
             // The recommendation is a single UI snapshot. A response superseded
             // while in flight must not publish any part of its state.
             if (generation !== recommendationRefreshGeneration) return null;
+            pollPendingRead('recommendation', data, fetchIrrigationRecommendation, ['plot', 'phenology']);
             const note = document.getElementById("irrigation-recommendation");
             const pumpInput = document.getElementById("irrigation_value_form");
             const scheduleButton = document.getElementById("schedule_irrigation");
@@ -909,7 +934,6 @@
             const phenoKcEl = document.getElementById("pheno-kc");
             const phenoThresholdValue = document.getElementById("pheno-threshold-value");
             const phenoEtcEl = document.getElementById("pheno-etc");
-            const summaryThreshold = document.getElementById("summary-threshold");
             const adviceVolume = document.getElementById("advice-volume");
             const adviceVolumeBasis = document.getElementById("advice-volume-basis");
             const adviceTime = document.getElementById("advice-time");
@@ -929,8 +953,6 @@
               if (decisionCopy) decisionCopy.hidden = true;
               if (waterGrid) waterGrid.hidden = true;
               const unavailableCrop = data.crop || {};
-              const unavailableCondition = data.condition || {};
-              const configuredThreshold = asNumber(unavailableCondition.threshold_cbar);
               const reason = data.reason || "Irrigation recommendation unavailable.";
               note.textContent = reason.startsWith('Planting date is not available.') ? '' : reason;
               if (scheduleButton) scheduleButton.disabled = true;
@@ -940,11 +962,6 @@
               if (phenoStageEl) phenoStageEl.textContent = "--";
               if (phenoGddEl) phenoGddEl.textContent = "--";
               if (phenoKcEl) phenoKcEl.textContent = "--";
-              if (summaryThreshold) {
-                summaryThreshold.textContent = Number.isFinite(configuredThreshold)
-                  ? `${configuredThreshold.toFixed(1)} cbar`
-                  : "--";
-              }
               if (phenoEtcEl) phenoEtcEl.textContent = "--";
               if (adviceVolume) adviceVolume.textContent = "--";
               if (adviceVolumeBasis) adviceVolumeBasis.textContent = "Plot area and complete weather data are required to calculate volume";
@@ -1105,11 +1122,6 @@
               phenoEtcEl.textContent = Number.isFinite(etcDaily) ? `${etcDaily.toFixed(1)} mm` : "--";
             }
 
-            if (summaryThreshold) {
-              summaryThreshold.textContent = Number.isFinite(thresholdCbar)
-                ? `${thresholdCbar.toFixed(1)} cbar`
-                : "--";
-            }
 
             setActiveGrowthStage(growthStage);
 
@@ -1180,9 +1192,14 @@
         const forecast = await safeFetchJson('../api/getWeatherForecast');
         console.info('[IRRIGATION_TRACE] weather forecast: request completed', forecast);
         if (generation !== weatherRefreshGeneration) return null;
+        pollPendingRead('weather', forecast, loadWeatherForecast, ['dashboard']);
         const container = document.getElementById('weather-forecast-grid');
         const panel = document.getElementById('farm-weather-forecast');
         if (!container) return;
+        if (forecast?.loading) {
+          container.textContent = 'Loading weather…';
+          return;
+        }
 
         if (forecast?.reason === 'configuration_required') {
           container.replaceChildren();
@@ -1231,6 +1248,7 @@
         console.info('[IRRIGATION_TRACE] EO observation: request started');
         const observation = await safeFetchJson('../api/getEOObservation');
         if (generation !== eoRefreshGeneration) return null;
+        pollPendingRead('eo', observation, loadEOObservationTrace, ['phenology']);
         window.renderEOObservation(observation);
         console.info('[IRRIGATION_TRACE] EO observation: request completed', observation);
         return observation;

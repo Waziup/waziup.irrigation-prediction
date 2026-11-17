@@ -10,7 +10,7 @@ def _operation_for_plot(operations, plot_id):
 
 
 def build_farm_dashboard(*, farm, plot_records, runtime_plots, recommendations,
-                         alerts, operations, generated_at=None):
+                         alerts, operations, generated_at=None, activity=None):
     generated_at = generated_at or datetime.now(
         timezone.utc).replace(microsecond=0).isoformat()
     operations = irrigation_plan(operations)
@@ -34,9 +34,11 @@ def build_farm_dashboard(*, farm, plot_records, runtime_plots, recommendations,
             runtime, "device_and_sensor_ids_flow", []) if runtime else []
         configured = bool(flow_ids)
         equipment_configured += int(configured)
+        evidence = (activity or {}).get(plot_id) or {}
         if operation and operation.get("status") == "active":
-            equipment_state = "active"
             equipment_active += 1
+        if evidence.get("pending") or (operation and operation.get("status") == "active"):
+            equipment_state = "unconfirmed"
         elif not configured:
             equipment_state = "not_configured"
         elif action.get("mode") == "advisory_only":
@@ -96,6 +98,7 @@ def build_farm_dashboard(*, farm, plot_records, runtime_plots, recommendations,
     planned_water = planned_water_total(operations)
     return {
         "schema_version": "1.0", "generated_at": generated_at,
+        "refresh_pending": any(bool(item.get('loading')) for item in recommendations.values()),
         "farm": {"name": farm.get("name"),
                  "gateway_id": farm.get("gateway_id"),
                  "size": farm.get("size"), "area_unit": farm.get("area_unit"),

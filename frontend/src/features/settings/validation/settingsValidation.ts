@@ -30,7 +30,11 @@ export function validateSettingsDraft(draft: SettingsDraft): {
   const numbers = {} as Record<NumericField, number>;
   for (const key of numericFields) {
     numbers[key] = Number(draft[key]);
-    if (!draft[key].trim() || !Number.isFinite(numbers[key]))
+    if (
+      (!draft[key].trim() &&
+        !(key === 'thresholdCbar' && draft.thresholdMode === 'dynamic')) ||
+      !Number.isFinite(numbers[key])
+    )
       errors[key] = 'Enter a finite number.';
   }
   for (const key of ['latitude', 'longitude'] as const) {
