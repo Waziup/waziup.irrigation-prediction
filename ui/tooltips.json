@@ -5,7 +5,6 @@
   "waterFlowTooltip": "Select the sensor that monitors your pump's water flow, connected to your WaziGate. Only one device can be chosen.",
   "gpsCoordinates": "Provide GPS coordinates to enable automatic retrieval of local meteorological data from online sources.",
   "slopeTooltip": "Specify the slope value to help detect artificial irrigation. Only required if no water flow sensor is added.",
-  "irrigationTypeTooltip": "Select the irrigation method so the system can estimate application efficiency.",
   "irrigationAmountTooltip": "Enter the water volume (in m³) used for each irrigation cycle. If you want to irrigate in liters, divide desired the amount by 1000. Minimum amount is 0.01 m³ (10 liter).",
   "plotAreaTooltip": "Enter the plot area so ETc depth can be converted to irrigation volume.",
   "lookAheadTimeTooltip": "Specify how many hours ahead the soil tension forecast should be considered for planning the next irrigation.",

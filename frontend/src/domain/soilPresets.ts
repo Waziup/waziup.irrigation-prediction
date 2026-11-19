@@ -1,6 +1,8 @@
 import type { PlotSettingsInput } from './settings';
-// Preserved from ui/settings.html: USDA-ARS ROSETTA texture-only estimates.
-// These are not measured curves. Never apply a preset during hydration.
+import legacyPresets from '../../../soil_presets.json';
+
+// ROSETTA compatibility for existing saved soil names.
+// New selections use the original shared table below. Never apply on hydration.
 const parameters: Record<
   string,
   { thetaR: number; thetaS: number; logAlpha: number; logN: number }
@@ -28,7 +30,7 @@ const parameters: Record<
   Silty_Clay: { thetaR: 0.111, thetaS: 0.481, logAlpha: -1.79, logN: 0.121 },
   Clay: { thetaR: 0.098, thetaS: 0.459, logAlpha: -1.825, logN: 0.098 },
 };
-export const soilTextureClasses: Record<string, number> = {
+const modernTextureClasses: Record<string, number> = {
   Sandy_Soil: 0,
   Loamy_Sand: 1,
   Sandy_Loam: 2,
@@ -42,6 +44,53 @@ export const soilTextureClasses: Record<string, number> = {
   Silty_Clay: 10,
   Clay: 11,
 };
+export const soilTextureClasses: Record<string, number> = Object.fromEntries(
+  Object.entries(legacyPresets).map(([name, preset]) => [
+    name,
+    preset.soilTextureClass,
+  ]),
+);
+export const legacyPresetReference = 'WaziFarm original soil presets';
+
+export function isLegacySoilPreset(
+  input: Pick<
+    PlotSettingsInput,
+    | 'retentionCurve'
+    | 'fieldCapacityLower'
+    | 'permanentWiltingPoint'
+    | 'saturation'
+  > & { soilCalibration?: PlotSettingsInput['soilCalibration'] },
+) {
+  const metadata = input.soilCalibration;
+  if (
+    metadata?.source !== 'estimate' ||
+    metadata.reference !== legacyPresetReference
+  )
+    return false;
+  const name = String(metadata.preset ?? '');
+  const preset = Object.hasOwn(legacyPresets, name)
+    ? legacyPresets[name as keyof typeof legacyPresets]
+    : undefined;
+  if (
+    !preset ||
+    input.fieldCapacityLower !== preset.FieldCapacity[0] ||
+    input.permanentWiltingPoint !== preset.PermanentWiltingPoint ||
+    input.saturation !== preset.Saturation
+  )
+    return false;
+  const points = [...input.retentionCurve].sort(
+    (a, b) => a.tensionCbar - b.tensionCbar,
+  );
+  return (
+    points.length === preset.soilTension.length &&
+    points.every(
+      (point, index) =>
+        point.tensionCbar === preset.soilTension[index] &&
+        point.vwc === preset.waterRetention[index],
+    )
+  );
+}
+
 export function soilPreset(
   name: string,
 ): Pick<
@@ -55,6 +104,30 @@ export function soilPreset(
   | 'saturation'
   | 'soilCalibration'
 > | null {
+  const legacy = Object.hasOwn(legacyPresets, name)
+    ? legacyPresets[name as keyof typeof legacyPresets]
+    : undefined;
+  if (legacy)
+    return {
+      soilType: name,
+      soilTextureClass: legacy.soilTextureClass,
+      permanentWiltingPoint: legacy.PermanentWiltingPoint,
+      fieldCapacityLower: legacy.FieldCapacity[0]!,
+      fieldCapacityUpper: legacy.FieldCapacity[1]!,
+      saturation: legacy.Saturation,
+      retentionCurve: legacy.soilTension.map((tensionCbar, index) => ({
+        tensionCbar,
+        vwc: legacy.waterRetention[index]!,
+      })),
+      soilCalibration: {
+        source: 'estimate',
+        reference: legacyPresetReference,
+        preset: name,
+        date: '',
+        sample_depth_cm: null,
+      },
+    };
+  // Keep reset support for previously saved ROSETTA soil names.
   const p = parameters[name];
   if (!p) return null;
   const alpha = Math.pow(10, p.logAlpha);
@@ -63,7 +136,7 @@ export function soilPreset(
   const fc = ['Sandy_Soil', 'Loamy_Sand'].includes(name) ? 10 : 33;
   return {
     soilType: name,
-    soilTextureClass: soilTextureClasses[name] ?? null,
+    soilTextureClass: modernTextureClasses[name] ?? null,
     retentionCurve: [0, 10, 33, 100, 300, 500, 1000, 1500].map(
       (tensionCbar) => ({
         tensionCbar,

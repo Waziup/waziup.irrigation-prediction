@@ -53,6 +53,9 @@ class CropParams:
     # canopy response that should be visible in the validation signal.
     validation_lag_days: float = 5.0
 
+    # Leaf crops remain in production through repeated picking until cleared.
+    continuous_leaf_harvest: bool = False
+
 
 CROP_PARAMS: Final[Dict[str, CropParams]] = {
     "maize": CropParams(
@@ -98,12 +101,26 @@ CROP_PARAMS: Final[Dict[str, CropParams]] = {
     "rice": CropParams(
         name="Rice (Oryza sativa)",
 
-        t_base=10.0, t_ceiling=35.0,
+        t_base=12.0, t_ceiling=35.0,
         gdd_emergence=100, gdd_dev_end=650, gdd_mid_end=1050, gdd_maturity=1450,
-        # FAO-56 rice priors; flooded-soil evaporation is not modelled here.
-        kc_ini=1.05, kc_mid=1.20, kc_end=0.90,
+        # FAO-56 Rev.1 (2025), Tables 6.1 and 6.13: flooded rice.
+        # GDD breakpoints above remain engineering estimates.
+        kc_ini=1.05, kc_mid=1.20, kc_end=1.05,
         depletion_fraction=0.20,
         validation_lag_days=5.0,
+    ),
+    "sukuma_wiki": CropParams(
+        name="Sukuma wiki (kale, Brassica oleracea)",
+        # FAO-56 Rev.1 (2025): kale/collards, first year (Table 6.1),
+        # p=0.40 (Table 8.1). Brassica thermal limits use cabbage as a
+        # proxy (Table 6.13); GDD stage boundaries are engineering estimates.
+        # https://agrhysmo.agr.unipi.it/wp-content/uploads/2025/09/FAO56%202025.pdf
+        t_base=4.5, t_ceiling=30.0,
+        gdd_emergence=80, gdd_dev_end=450, gdd_mid_end=1000, gdd_maturity=1600,
+        kc_ini=0.60, kc_mid=0.95, kc_end=0.90,
+        depletion_fraction=0.40,
+        validation_lag_days=4.0,
+        continuous_leaf_harvest=True,
     ),
     "olive": CropParams(
         name="Olive (Olea europaea)",

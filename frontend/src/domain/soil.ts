@@ -1,9 +1,11 @@
 import type { PlotSettingsInput } from './settings';
 import type { FieldErrors } from './api';
+import { isLegacySoilPreset } from './soilPresets';
 
 // Existing soil_calibration.py rules. The server remains authoritative.
 export function validateSoilSettings(input: PlotSettingsInput): FieldErrors {
   const errors: FieldErrors = {};
+  const original = isLegacySoilPreset(input);
   const points = [...input.retentionCurve].sort(
     (a, b) => a.tensionCbar - b.tensionCbar,
   );
@@ -24,8 +26,9 @@ export function validateSoilSettings(input: PlotSettingsInput): FieldErrors {
     errors.retentionCurve =
       'Use at least three points with increasing cbar and decreasing VWC fractions between 0 and 1.';
   else if (
-    points[0]!.tensionCbar > input.saturation ||
-    points.at(-1)!.tensionCbar < input.permanentWiltingPoint
+    !original &&
+    (points[0]!.tensionCbar > input.saturation ||
+      points.at(-1)!.tensionCbar < input.permanentWiltingPoint)
   )
     errors.retentionCurve =
       'The curve must cover saturation through wilting tension.';
@@ -55,7 +58,8 @@ export function validateSoilSettings(input: PlotSettingsInput): FieldErrors {
     errors.soilCalibration = 'Sample depth must be positive.';
   if (
     input.permanentWiltingPoint !== 1500 &&
-    !['laboratory', 'field'].includes(String(c.source))
+    !['laboratory', 'field'].includes(String(c.source)) &&
+    !original
   )
     errors.soilCalibration =
       'Nonstandard wilting tension requires a field or laboratory source; estimates use 1500 cbar.';

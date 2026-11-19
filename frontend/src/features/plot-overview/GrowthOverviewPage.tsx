@@ -1,3 +1,4 @@
+import { HelpTooltip } from '../../components/HelpTooltip';
 import { growthDays } from './growthPresentation';
 import { EmptyGrowthOverview } from './components/EmptyPlotOverview';
 import { useFarmContext } from '../farm-context/FarmContext';
@@ -35,8 +36,12 @@ export function GrowthOverviewPage() {
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <h2 className="text-base font-semibold text-[#253247]">
-          Growth stage timeline
+        <h2 className="flex items-center gap-2 text-base font-semibold text-[#253247]">
+          <span>Growth stage timeline</span>
+          <HelpTooltip
+            label="Growth stage timeline"
+            text="The app estimates crop growth from the planting date and accumulated heat (GDD). Growth stage helps calculate the crop water-use factor (Kc) and irrigation advice."
+          />
         </h2>
         <dl className="flex flex-wrap gap-5 text-xs [&_dt]:text-[10px] [&_dt]:uppercase [&_dt]:text-slate-500 [&_dd]:mt-1 [&_dd]:font-semibold">
           <div>

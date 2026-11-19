@@ -59,6 +59,8 @@ def threshold_condition(current_tension, threshold_cbar):
 
 def _next_stage_target(crop_type, growth_stage):
     params = get_crop_params(crop_type)
+    if params.continuous_leaf_harvest and int(growth_stage) >= 2:
+        return None
     targets = {
         0: (STAGE_NAMES[1], params.gdd_emergence),
         1: (STAGE_NAMES[2], params.gdd_dev_end),

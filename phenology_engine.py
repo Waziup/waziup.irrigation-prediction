@@ -339,7 +339,7 @@ def get_growth_stage(
         return STAGE_PRE_EMERGENCE
     elif cumulative_gdd < params.gdd_dev_end:
         return STAGE_DEVELOPMENT
-    elif cumulative_gdd < params.gdd_mid_end:
+    elif params.continuous_leaf_harvest or cumulative_gdd < params.gdd_mid_end:
         return STAGE_MID_SEASON
     elif cumulative_gdd < params.gdd_maturity:
         return STAGE_LATE_SEASON
@@ -365,6 +365,8 @@ def get_growth_stage_series(
             STAGE_MID_SEASON, STAGE_LATE_SEASON],
         default=STAGE_POST_MATURITY,
     )
+    if params.continuous_leaf_harvest:
+        stages = np.where(gdd >= params.gdd_dev_end, STAGE_MID_SEASON, stages)
     return pd.Series(stages, index=cumulative_gdd_series.index, dtype=int)
 
 
@@ -396,7 +398,7 @@ def _compute_kc_gdd_from_params(cumulative_gdd: float, params: CropParams) -> fl
         frac = (cumulative_gdd - params.gdd_emergence) / dev_span
         return params.kc_ini + frac * (params.kc_mid - params.kc_ini)
 
-    if cumulative_gdd < params.gdd_mid_end:
+    if params.continuous_leaf_harvest or cumulative_gdd < params.gdd_mid_end:
         return params.kc_mid
 
     if cumulative_gdd < params.gdd_maturity:
@@ -451,6 +453,8 @@ def compute_kc_gdd_series(
         kc[mask] = params.kc_mid + frac * (params.kc_end - params.kc_mid)
 
     kc[gdd >= params.gdd_maturity] = params.kc_ini
+    if params.continuous_leaf_harvest:
+        kc[gdd >= params.gdd_dev_end] = params.kc_mid
 
     return pd.Series(kc, index=cumulative_gdd_series.index)
 

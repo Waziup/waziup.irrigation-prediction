@@ -12,7 +12,7 @@ export function SensorSettingsForm({
   discoveryError: string | null;
   onRetry: () => void;
 } & SectionProps) {
-  const options = sensorOptions(devices);
+  const options = sensorOptions(devices, d);
   const controllerIds = new Set([
     ...options.actuators.map(([id]) => id),
     ...d.actuatorIds,

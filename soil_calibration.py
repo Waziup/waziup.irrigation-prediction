@@ -1,6 +1,25 @@
 """Shared validation for soil-curve calibration, independent of ML imports."""
 import math
 from datetime import date
+from functools import lru_cache
+import json
+from pathlib import Path
+
+
+@lru_cache(maxsize=1)
+def original_soil_presets():
+    return json.loads(Path(__file__).with_name('soil_presets.json').read_text())
+
+
+def is_original_soil_preset(points, fc, wp, saturation, metadata):
+    if metadata.get('source') != 'estimate' or metadata.get('reference') != 'WaziFarm original soil presets':
+        return False
+    preset = original_soil_presets().get(str(metadata.get('preset', '')))
+    return bool(preset and fc == preset['FieldCapacity'][0]
+                and wp == preset['PermanentWiltingPoint']
+                and saturation == preset['Saturation']
+                and points == list(zip(preset['soilTension'], preset['waterRetention'])))
+
 
 
 def validate_soil_calibration(curve, fc, wp, saturation=0, metadata=None):
@@ -32,8 +51,11 @@ def validate_soil_calibration(curve, fc, wp, saturation=0, metadata=None):
     fc, wp, saturation = float(fc), float(wp), float(saturation)
     if not all(math.isfinite(v) for v in (fc, wp, saturation)) or not 0 <= saturation < fc < wp:
         raise ValueError('Require saturation < field capacity < wilting tension')
-    if points[0][0] > saturation or points[-1][0] < wp:
+    original = is_original_soil_preset(points, fc, wp, saturation, metadata)
+    # The original table starts at field capacity; only those exact presets
+    # retain the original saturation endpoint convention.
+    if not original and (points[0][0] > saturation or points[-1][0] < wp):
         raise ValueError('Curve must cover saturation through wilting tension')
-    if wp != 1500 and source not in {'laboratory', 'field'}:
+    if wp != 1500 and source not in {'laboratory', 'field'} and not original:
         raise ValueError('Nonstandard PWP requires a field or laboratory source; use 1500 cbar for estimates')
     return points

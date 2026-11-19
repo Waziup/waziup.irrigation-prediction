@@ -1,9 +1,20 @@
+import { HelpTooltip } from '../../../components/HelpTooltip';
 import type { PhenologySummary } from '../../../domain/phenology';
 import type { IrrigationRecommendation } from '../../../domain/recommendation';
 import { DataSection } from '../../../components/DataSection';
 import { formatAmount } from '../../../shared/presentation';
 import type { ReactNode } from 'react';
 
+const metricHelp: Record<string, string> = {
+  Threshold:
+    'The soil-tension trigger for irrigation advice. Higher cbar means drier soil. Static uses your saved value; Dynamic calculates an estimate for the crop and soil.',
+  'Kc today':
+    'Kc is the crop water-use factor. The app estimates it from growth stage and refines it with usable satellite observations. Multiplying Kc by ET0 gives crop water use (ETc).',
+  'ETc today':
+    'ET0 is reference grass water loss estimated from weather. ETc = Kc × ET0 estimates water used by this crop, in millimetres.',
+  'GDD today':
+    'Growing Degree Days are accumulated heat units since planting. Daily high and low temperatures, with crop-specific limits, estimate growth stage.',
+};
 type Summary = Extract<PhenologySummary, { available: true }>;
 type Advice = Extract<IrrigationRecommendation, { available: true }>;
 export function GrowthDetails({
@@ -65,8 +76,12 @@ export function GrowthDetails({
             key={label}
             className="min-w-0 rounded-2xl border border-[#e0e0e0] bg-white p-5"
           >
-            <h3 className="text-xs font-semibold uppercase text-[#64748b]">
-              {label}
+            <h3 className="flex items-center justify-between gap-3 text-xs font-semibold uppercase text-[#64748b]">
+              <span>{label}</span>
+              <HelpTooltip
+                label={label ?? 'Growth metric'}
+                text={metricHelp[label ?? ''] ?? ''}
+              />
             </h3>
             <p className="mt-3 text-2xl font-semibold text-[#111827]">
               {value === 'Unavailable' ? '—' : value}
@@ -89,7 +104,10 @@ export function GrowthDetails({
         </p>
       )}
       {children}
-      <DataSection title="Phenology timeline">
+      <DataSection
+        title="Phenology timeline"
+        help="This shows the crop’s estimated progress from planting using accumulated heat units. The highlighted stage is current. Timing varies with crop and weather; these are estimates."
+      >
         {summary?.stages.length ? (
           <ol
             aria-label="Crop stages"
@@ -101,9 +119,9 @@ export function GrowthDetails({
                 aria-current={
                   stage.stage === summary.currentStage ? 'step' : undefined
                 }
-                className="rounded-xl border border-[#d8dee8] px-4 py-3 text-sm text-[#52627a] aria-[current=step]:border-[#315f48] aria-[current=step]:bg-[#e7f2e4] aria-[current=step]:font-semibold aria-[current=step]:text-[#174f2a]"
+                className="flex items-center rounded-xl border border-[#d8dee8] px-4 py-3 text-sm text-[#52627a] aria-[current=step]:border-[#315f48] aria-[current=step]:bg-[#e7f2e4] aria-[current=step]:font-semibold aria-[current=step]:text-[#174f2a]"
               >
-                {stage.stage}
+                <span>{stage.stage}</span>
               </li>
             ))}
           </ol>
@@ -121,9 +139,9 @@ export function GrowthDetails({
             ].map((stage) => (
               <li
                 key={stage}
-                className="rounded-full bg-slate-100 px-3 py-3 text-center text-xs text-slate-600"
+                className="flex items-center justify-center rounded-full bg-slate-100 px-3 py-3 text-center text-xs text-slate-600"
               >
-                {stage}
+                <span>{stage}</span>
               </li>
             ))}
           </ol>

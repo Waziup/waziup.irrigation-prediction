@@ -3,6 +3,7 @@ WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --include=dev
 COPY frontend/ ./
+COPY soil_presets.json /build/soil_presets.json
 RUN npm run build
 
 FROM python:3.9-slim-bookworm

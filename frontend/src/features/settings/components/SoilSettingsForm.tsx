@@ -1,7 +1,12 @@
+import { HelpTooltip } from '../../../components/HelpTooltip';
 import { soilWaterContents } from '../../../domain/soil';
 import { useId } from 'react';
 import type { ReactNode } from 'react';
-import { soilPreset, soilTextureClasses } from '../../../domain/soilPresets';
+import {
+  isLegacySoilPreset,
+  soilPreset,
+  soilTextureClasses,
+} from '../../../domain/soilPresets';
 import type { SectionProps } from '../types';
 import { parseRetention } from '../validation/settingsValidation';
 import { Field, SelectField } from './Fields';
@@ -53,6 +58,7 @@ export function SoilSettingsForm({
     <>
       <SelectField
         label="Soil type"
+        help="Selecting a soil type fills its preset soil values and retention curve."
         value={d.soilType}
         options={Object.keys(soilTextureClasses).map((v) => [
           v,
@@ -76,11 +82,18 @@ export function SoilSettingsForm({
         }
       >
         <summary className="cursor-pointer text-sm font-semibold text-[#374151]">
-          Soil values &amp; source
+          <span className="inline-flex items-center gap-2 align-middle">
+            <span>Soil values &amp; source</span>
+            <HelpTooltip
+              label="Soil values and sources"
+              text="The retention curve links soil tension to water content. The app uses it and the soil limits to calculate irrigation thresholds. Soil-type presets are estimates; Field measurement and Laboratory analysis identify values measured for your soil."
+            />
+          </span>
         </summary>
         <div className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
           <SelectField
             label="Values obtained from"
+            help="Soil-type estimates load the selected preset. Choose Field measurement or Laboratory analysis when entering measured soil values and curves."
             value={source}
             options={['estimate', 'laboratory', 'field'].map((v) => [
               v,
@@ -129,7 +142,9 @@ export function SoilSettingsForm({
             error={e.saturation}
           />
           <div className="flex min-w-0 flex-col gap-1.5 [&>label]:font-semibold col-span-full">
-            <label htmlFor={id}>Soil water retention curve</label>
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor={id}>Soil water retention curve</label>
+            </div>
             <textarea
               className="min-h-11 w-full min-w-0 rounded-md border border-[#afbeb4] bg-white px-3 py-2.5 text-[#173c29] aria-invalid:border-[#a92323] disabled:bg-[#f0f2ef] font-mono"
               id={id}
@@ -163,7 +178,14 @@ export function SoilSettingsForm({
               <p className="text-[#a92323]">{e.soilCalibration}</p>
             )}
             {Number(d.permanentWiltingPoint) !== 1500 &&
-              source === 'estimate' && (
+              source === 'estimate' &&
+              !isLegacySoilPreset({
+                retentionCurve: points ?? [],
+                fieldCapacityLower: Number(d.fieldCapacityLower),
+                permanentWiltingPoint: Number(d.permanentWiltingPoint),
+                saturation: Number(d.saturation),
+                soilCalibration: d.soilCalibration,
+              }) && (
                 <p className="my-3 leading-relaxed text-gray-600">
                   Select a field or laboratory source for a nonstandard wilting
                   point, or restore soil-type estimates.

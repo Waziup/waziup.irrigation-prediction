@@ -1,0 +1,138 @@
+{
+  "Sandy_Soil": {
+    "waterRetention": [0.4, 0.3, 0.2, 0.1],
+    "soilTension": [10, 20, 30, 40],
+    "Saturation": 0,
+    "FieldCapacity": [10, 30],
+    "PermanentWiltingPoint": 40,
+    "soilTextureClass": 0
+  },
+  "Fine_sandy_loams": {
+    "waterRetention": [0.5, 0.4, 0.3, 0.2],
+    "soilTension": [15, 25, 35, 45],
+    "Saturation": 0,
+    "FieldCapacity": [15, 35],
+    "PermanentWiltingPoint": 45,
+    "soilTextureClass": 2
+  },
+  "Loams_and_silt_loams": {
+    "waterRetention": [0.6, 0.5, 0.4, 0.3],
+    "soilTension": [20, 30, 40, 50],
+    "Saturation": 0,
+    "FieldCapacity": [20, 40],
+    "PermanentWiltingPoint": 50,
+    "soilTextureClass": 3
+  },
+  "Clay_loams": {
+    "waterRetention": [0.5, 0.4, 0.3, 0.2],
+    "soilTension": [15, 25, 35, 45],
+    "Saturation": 0,
+    "FieldCapacity": [15, 35],
+    "PermanentWiltingPoint": 45,
+    "soilTextureClass": 7
+  },
+  "Clays": {
+    "waterRetention": [0.4, 0.3, 0.2, 0.1],
+    "soilTension": [10, 20, 30, 40],
+    "Saturation": 0,
+    "FieldCapacity": [10, 30],
+    "PermanentWiltingPoint": 40,
+    "soilTextureClass": 11
+  },
+  "Kaolinite": {
+    "waterRetention": [0.5, 0.4, 0.3, 0.2],
+    "soilTension": [15, 25, 35, 45],
+    "Saturation": 0,
+    "FieldCapacity": [15, 35],
+    "PermanentWiltingPoint": 45,
+    "soilTextureClass": 7
+  },
+  "Illite": {
+    "waterRetention": [0.6, 0.5, 0.4, 0.3],
+    "soilTension": [20, 30, 40, 50],
+    "Saturation": 0,
+    "FieldCapacity": [20, 40],
+    "PermanentWiltingPoint": 50,
+    "soilTextureClass": 8
+  },
+  "Montmorillonite": {
+    "waterRetention": [0.7, 0.6, 0.5, 0.4],
+    "soilTension": [25, 35, 45, 55],
+    "Saturation": 0,
+    "FieldCapacity": [25, 45],
+    "PermanentWiltingPoint": 55,
+    "soilTextureClass": 11
+  },
+  "Vermiculite": {
+    "waterRetention": [0.6, 0.5, 0.4, 0.3],
+    "soilTension": [20, 30, 40, 50],
+    "Saturation": 0,
+    "FieldCapacity": [20, 40],
+    "PermanentWiltingPoint": 50,
+    "soilTextureClass": 8
+  },
+  "Humus": {
+    "waterRetention": [0.5, 0.4, 0.3, 0.2],
+    "soilTension": [15, 25, 35, 45],
+    "Saturation": 0,
+    "FieldCapacity": [15, 35],
+    "PermanentWiltingPoint": 45,
+    "soilTextureClass": 4
+  },
+  "Peat_Soil": {
+    "waterRetention": [0.4, 0.3, 0.2, 0.1],
+    "soilTension": [10, 20, 30, 40],
+    "Saturation": 0,
+    "FieldCapacity": [10, 30],
+    "PermanentWiltingPoint": 40,
+    "soilTextureClass": 4
+  },
+  "Sandy_Clay_Loam": {
+    "waterRetention": [0.5, 0.4, 0.3, 0.2],
+    "soilTension": [15, 25, 35, 45],
+    "Saturation": 0,
+    "FieldCapacity": [15, 35],
+    "PermanentWiltingPoint": 45,
+    "soilTextureClass": 6
+  },
+  "Silty_Clay": {
+    "waterRetention": [0.6, 0.5, 0.4, 0.3],
+    "soilTension": [20, 30, 40, 50],
+    "Saturation": 0,
+    "FieldCapacity": [20, 40],
+    "PermanentWiltingPoint": 50,
+    "soilTextureClass": 10
+  },
+  "Loess_Soil": {
+    "waterRetention": [0.5, 0.4, 0.3, 0.2],
+    "soilTension": [15, 25, 35, 45],
+    "Saturation": 0,
+    "FieldCapacity": [15, 35],
+    "PermanentWiltingPoint": 45,
+    "soilTextureClass": 4
+  },
+  "Chalky_Soil": {
+    "waterRetention": [0.4, 0.3, 0.2, 0.1],
+    "soilTension": [10, 20, 30, 40],
+    "Saturation": 0,
+    "FieldCapacity": [10, 30],
+    "PermanentWiltingPoint": 40,
+    "soilTextureClass": 1
+  },
+  "Volcanic_Ash_Soil": {
+    "waterRetention": [0.5, 0.4, 0.3, 0.2],
+    "soilTension": [15, 25, 35, 45],
+    "Saturation": 0,
+    "FieldCapacity": [15, 35],
+    "PermanentWiltingPoint": 45,
+    "soilTextureClass": 4
+  },
+  "Sesquioxides": {
+    "waterRetention": [0.6, 0.5, 0.4, 0.3],
+    "soilTension": [20, 30, 40, 50],
+    "Saturation": 0,
+    "FieldCapacity": [20, 40],
+    "PermanentWiltingPoint": 50,
+    "soilTextureClass": 5
+  }
+}

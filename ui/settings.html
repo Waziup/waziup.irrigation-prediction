@@ -760,11 +760,6 @@
                 : "";
               document.getElementById("plot_area_unit_form").value = storedAreaUnit;
 
-              // Assignment for Irrigation_type
-              if (response_data.Irrigation_type) {
-                document.getElementById("irrigation_type_select").value =
-                  response_data.Irrigation_type;
-              }
               if (response_data.Irrigation_mode) {
                 setIrrigationModeChoice(response_data.Irrigation_mode);
               }
@@ -1131,9 +1126,6 @@
         ).checked ? "dynamic" : "static";
         var plot_area_m2 = document.getElementById("plot_area_m2_form").value;
         var area_unit = document.getElementById("plot_area_unit_form").value;
-        var irrigation_type = document.getElementById(
-          "irrigation_type_select"
-        ).value;
         var irrigation_mode = document.querySelector(
           'input[name="irrigation_mode_choice"]:checked'
         )?.value || "manual";
@@ -1184,8 +1176,6 @@
           encodeURIComponent(plot_area_m2) +
           "&area_unit=" +
           encodeURIComponent(area_unit) +
-          "&irrigation_type=" +
-          encodeURIComponent(irrigation_type) +
           "&irrigation_mode=" +
           encodeURIComponent(irrigation_mode) +
           "&flow_confirmation_mode=" +
@@ -1823,7 +1813,6 @@
         <input type="radio" id="both" name="sensor_kind_radio" value="both" />
         <input type="radio" id="tension" name="sensor_kind_radio" value="tension" checked />
         <input type="date" id="starting_timestamp_form" value="" />
-        <select id="irrigation_type_select"><option value="manual">Manual</option><option value="drip">Drip</option><option value="sprinkler">Sprinkler</option></select>
         <input type="number" id="slope_form" value="0" />
         <input type="number" id="look_ahead_time_form" value="24" />
         <input type="number" id="maximum_time_period_form" value="30" />
