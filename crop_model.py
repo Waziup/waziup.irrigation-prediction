@@ -222,22 +222,96 @@ def _depletion_policy(farm, gdd, etc):
     params = get_crop_params(farm.crop_type)
     configured = getattr(farm, "depletion_fraction", None)
     stage_p = _stage_calibrated_depletion_fraction(farm, gdd)
-    if farm.crop_type == "rice" and configured in (None, "") and stage_p is None:
-        raise ValueError("rice requires a locally calibrated depletion_fraction; FAO's rice value is saturation-specific")
     reference = float(stage_p if stage_p is not None else (
         params.depletion_fraction if configured in (None, "") else configured))
     if not np.isfinite(reference) or not 0 < reference < 1:
         raise ValueError("depletion_fraction must be between 0 and 1")
-    adjusted = float(np.clip(reference + 0.04 * (5.0 - etc), 0.1, 0.8))
     calibrated = stage_p is not None or configured not in (None, "")
+    rice_default = farm.crop_type == "rice" and not calibrated
+    # Revised FAO-56 Table 8.2 gives flooded rice an explicit 0.80 theta_sat
+    # threshold, rather than an ETc-adjusted fraction of FC-to-WP water.
+    adjusted = reference if rice_default else float(
+        np.clip(reference + 0.04 * (5.0 - etc), 0.1, 0.8))
+    policy_name = ("calibrated_stage" if stage_p is not None else
+                   "calibrated_crop" if calibrated else
+                   "rice_saturation_estimate" if rice_default else "fao56_table22")
+    reference_source = ("site_configuration" if calibrated else
+                        "FAO-56 Rev.1 (2025), Table 8.2" if rice_default
+                        else "FAO-56 Table 22")
     return reference, adjusted, {
-        "depletion_policy": "calibrated_stage" if stage_p is not None else (
-            "calibrated_crop" if calibrated else "fao56_table22"),
-        "depletion_reference_source": "site_configuration" if calibrated else "FAO-56 Table 22",
-        "depletion_adjustment_source": "FAO-56 Chapter 8, Table 22 footnote 2",
-        "reference_url": "https://www.fao.org/4/x0490e/x0490e0e.htm",
+        "depletion_policy": policy_name,
+        "depletion_reference_source": reference_source,
+        "depletion_adjustment_source": (
+            "Fixed saturation-relative rice threshold" if rice_default else
+            "FAO-56 Chapter 8, Table 22 footnote 2"),
+        "reference_url": (
+            "https://agrhysmo.agr.unipi.it/wp-content/uploads/2025/09/FAO56%202025.pdf"
+            if rice_default else "https://www.fao.org/4/x0490e/x0490e0e.htm"),
         "stage_policy": "field_calibrated" if stage_p is not None else "stage_kc_and_daily_etc",
         "estimated": not calibrated or (getattr(farm, "soil_calibration", {}) or {}).get("source", "estimate") == "estimate",
+    }
+
+
+def _rice_saturation_threshold_details(farm, gdd, etc_daily_mm):
+    """Estimated rice soil-tension policy, not a ponded-water balance.
+
+    FAO-56 Rev.1 (2025), Table 8.2 specifies 0.80 theta_sat for flooded rice.
+    The application maps that water-content target to the saved soil curve.
+    No general FC-to-WP or daily ETc p adjustment is applied. Original curves
+    omit the saturation endpoint; their wettest point is an explicit proxy.
+    No water-table depth is converted into cbar and no static value is used.
+    """
+    curve = getattr(farm, "soil_water_retention_curve", None)
+    tensions, vwcs = _retention_curve_points(curve)
+    saturation = _nonnegative_finite(getattr(farm, "saturation", 0), "saturation")
+    saturation_source = "soil_retention_curve"
+    if saturation < tensions[0]:
+        from soil_calibration import is_original_soil_preset
+        if not is_original_soil_preset(
+                list(zip(tensions.tolist(), vwcs.tolist())),
+                getattr(farm, "field_capacity_lower", None),
+                getattr(farm, "permanent_wilting_point", None), saturation,
+                getattr(farm, "soil_calibration", {}) or {}):
+            raise ValueError(
+                "Rice dynamic threshold needs a soil retention curve covering "
+                "saturation. Select a soil-type preset or correct the saved curve.")
+        theta_sat = float(vwcs[0])
+        saturation_source = "original_preset_wettest_point_proxy"
+    else:
+        theta_sat = _vwc_for_tension(saturation, curve)
+    etc = (None if etc_daily_mm is None else
+           _nonnegative_finite(etc_daily_mm, "etc_daily_mm"))
+    reference, fraction, policy = _depletion_policy(farm, gdd, etc)
+    unconstrained_target = theta_sat * (1.0 - fraction)
+    target = float(np.clip(unconstrained_target, vwcs[-1], theta_sat))
+    depletion_threshold = _tension_for_vwc(target, curve)
+    # IRRI's safe-AWD guidance associates the 15-cm field-water level with
+    # root-zone tension below 10 kPa. Use 10 cbar as a conservative application
+    # ceiling, not a conversion between ponding depth and soil tension.
+    # IRRI technical leaflet (hosted by TNAU):
+    # https://www.agritech.tnau.ac.in/agriculture/pdf/csa_pdf/Smart_water_technique_for_rice.pdf
+    management_limit = 10.0
+    threshold = min(depletion_threshold, management_limit)
+    return {
+        **policy,
+        "source": "rice_saturation_soil_curve",
+        "threshold_cbar": threshold,
+        "depletion_threshold_cbar": depletion_threshold,
+        "rice_management_limit_cbar": management_limit,
+        "rice_management_reference_url": "https://www.agritech.tnau.ac.in/agriculture/pdf/csa_pdf/Smart_water_technique_for_rice.pdf",
+        "rice_management_limited": threshold < depletion_threshold,
+        "growth_stage": STAGE_NAMES[get_growth_stage(gdd, farm.crop_type)],
+        "etc_daily_mm": etc,
+        "depletion_fraction_reference": reference,
+        "depletion_fraction_adjusted": fraction,
+        "depletion_reference_basis": "saturation",
+        "saturation_vwc": theta_sat,
+        "saturation_vwc_source": saturation_source,
+        "saturation_depletion_target_vwc": target,
+        "target_vwc": (_vwc_for_tension(threshold, curve)
+                       if tensions[0] <= threshold <= tensions[-1] else None),
+        "curve_limited": target != unconstrained_target,
+        "estimated": True,
     }
 
 
@@ -262,6 +336,10 @@ def _get_depletion_threshold_details(
             "growth_stage": STAGE_NAMES[get_growth_stage(gdd_cumulative, farm.crop_type)],
             "estimated": False,
         }
+    if (farm.crop_type == "rice"
+            and getattr(farm, "depletion_fraction", None) in (None, "")
+            and not getattr(farm, "stage_depletion_fractions", None)):
+        return _rice_saturation_threshold_details(farm, gdd_cumulative, etc_daily_mm)
     hydraulic_names = (
         "field_capacity_vwc", "wilting_point_vwc", "root_depth_m",
         "sensor_depth_m", "soil_water_retention_curve",
@@ -444,7 +522,9 @@ def _configured_threshold(
         details["recovery_hysteresis_cbar"] = hysteresis
     threshold = float(details["threshold_cbar"])
     stage = details["growth_stage"]
-    if details["source"] in {
+    if details["source"] == "rice_saturation_soil_curve":
+        reason = f"{stage}: estimated rice trigger from saturation-relative depletion and the soil retention curve."
+    elif details["source"] in {
         "fao56_root_zone_depletion", "existing_soil_curve_crop_demand"
     }:
         reason = (
@@ -521,7 +601,8 @@ def get_crop_season_status(
                 "reason": "harvest_date_reached",
             }
 
-    if not params.is_perennial and float(gdd_cumulative) >= params.gdd_maturity:
+    if (not params.is_perennial and not params.continuous_leaf_harvest
+            and float(gdd_cumulative) >= params.gdd_maturity):
         return {
             "active": False,
             "status": "mature",

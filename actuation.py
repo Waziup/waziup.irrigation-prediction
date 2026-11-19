@@ -1127,10 +1127,10 @@ def assess_plot_capabilities(plot, crop_state=None, current_tension=None) -> dic
             active_threshold = np.nan
         threshold_ready = np.isfinite(active_threshold) and active_threshold > 0 and dynamic_source in {
             "fao56_root_zone_depletion", "existing_soil_curve_crop_demand",
-            "farmer_calibrated_stage_curve",
+            "rice_saturation_soil_curve", "farmer_calibrated_stage_curve",
         }
-        if not threshold_ready:
-            threshold_reasons = ["complete_dynamic_threshold_calibration"]
+        threshold_reasons = [] if threshold_ready else [
+            "complete_dynamic_threshold_calibration"]
     return {
         "tension_evidence": {
             "implemented": True,
