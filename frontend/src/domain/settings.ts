@@ -35,7 +35,6 @@ export interface PlotSettings {
   thresholdCbar: number;
   thresholdMode: ThresholdMode;
   stageThresholdsCbar?: Record<string, number>;
-  irrigationType: string;
   irrigationMode: IrrigationMode;
   applicationEfficiency: number;
   effectiveRainfallFraction: number;

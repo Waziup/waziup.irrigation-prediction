@@ -1,7 +1,8 @@
+import { HelpTooltip } from '../../../components/HelpTooltip';
 import { useContext, useId } from 'react';
 import { SettingsDataContext } from '../settingsDataContext';
 import type { SectionProps } from '../types';
-import { Field, SelectField } from './Fields';
+import { Field } from './Fields';
 
 export function ThresholdSettingsForm({
   draft: d,
@@ -16,7 +17,13 @@ export function ThresholdSettingsForm({
       disabled={!available}
     >
       <legend className="mb-3 text-xs font-bold uppercase text-[#374151]">
-        Irrigation threshold
+        <span className="inline-flex items-center gap-2">
+          Irrigation threshold
+          <HelpTooltip
+            label="Irrigation threshold"
+            text="Choose Static to keep a field threshold you enter. Choose Dynamic to let the app calculate the threshold from the crop, soil and available weather."
+          />
+        </span>
       </legend>
       <div className="flex flex-wrap gap-x-8 gap-y-2">
         {(['static', 'dynamic'] as const).map((mode) => (
@@ -43,40 +50,16 @@ export function ThresholdSettingsForm({
           {e.thresholdMode}
         </p>
       )}
-      {d.thresholdMode === 'static' ? (
+      {d.thresholdMode === 'static' && (
         <Field
           label="Static irrigation threshold (cbar)"
+          help="The app uses this value unchanged. Higher cbar means drier soil. Use a threshold suitable for your field and crop."
           type="number"
           min={1}
           step="0.1"
           value={d.thresholdCbar}
           onChange={(value) => update('thresholdCbar', value)}
           error={e.thresholdCbar}
-        />
-      ) : (
-        <SelectField
-          label="Irrigation method"
-          value={d.irrigationType}
-          options={[
-            [
-              [
-                'drip',
-                'micro_sprinkler',
-                'sprinkler',
-                'furrow',
-                'flood',
-              ].includes(d.irrigationType)
-                ? ''
-                : d.irrigationType,
-              'Not specified',
-            ],
-            ['drip', 'Drip'],
-            ['micro_sprinkler', 'Micro-sprinkler'],
-            ['sprinkler', 'Sprinkler'],
-            ['furrow', 'Furrow'],
-            ['flood', 'Flood'],
-          ]}
-          onChange={(values) => update('irrigationType', values[0]!)}
         />
       )}
     </fieldset>

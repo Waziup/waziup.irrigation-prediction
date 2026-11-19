@@ -1,15 +1,21 @@
+import { HelpTooltip } from './HelpTooltip';
 import type { ReactNode } from 'react';
 
 export function DataSection({
   title,
   children,
+  help,
 }: {
   title: string;
+  help?: string;
   children?: ReactNode;
 }) {
   return (
     <section className="min-w-0 rounded-2xl border border-[#e0e0e0] bg-white p-4 shadow-[0_1px_2px_#00000014] sm:p-5">
-      <h2 className="mb-3 text-base font-bold text-[#111827]">{title}</h2>
+      <h2 className="mb-3 flex items-center justify-between gap-3 text-base font-bold text-[#111827]">
+        <span>{title}</span>
+        {help && <HelpTooltip label={title} text={help} />}
+      </h2>
       {children ?? <span className="text-gray-500">—</span>}
     </section>
   );

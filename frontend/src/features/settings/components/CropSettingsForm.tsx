@@ -18,8 +18,14 @@ export function CropSettingsForm({
           'tomato',
           'sorghum',
           'rice',
+          'sukuma_wiki',
           'olive',
-        ].map((v) => [v, v || 'Not planted / no crop'])}
+        ].map((v) => [
+          v,
+          v === 'sukuma_wiki'
+            ? 'Sukuma wiki (kale)'
+            : v || 'Not planted / no crop',
+        ])}
         onChange={(v) => {
           update('cropType', v[0]!);
           if (!v[0]) update('plantingDate', '');

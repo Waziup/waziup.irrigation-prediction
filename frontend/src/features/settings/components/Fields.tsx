@@ -1,4 +1,5 @@
-import { useContext, useEffect, useId, useRef, useState } from 'react';
+import { HelpTooltip } from '../../../components/HelpTooltip';
+import { useContext, useId, useState } from 'react';
 import { SettingsDataContext } from '../settingsDataContext';
 import type { ReactNode } from 'react';
 export function Field({
@@ -52,23 +53,7 @@ export function Field({
         >
           {label}
         </label>
-        {help && (
-          <details className="relative shrink-0">
-            <summary
-              title={help}
-              aria-label={`Help for ${label}`}
-              className="flex size-5 cursor-pointer list-none items-center justify-center rounded-full border border-[#a8b4c4] text-xs font-bold text-[#52627a] focus-visible:outline-2 focus-visible:outline-[#315f48]"
-            >
-              ?
-            </summary>
-            <p
-              id={`${id}-tooltip`}
-              className="absolute top-full right-0 z-20 mt-2 w-[min(18rem,70vw)] rounded-lg border border-[#d8dee8] bg-white p-3 text-xs font-normal leading-relaxed text-[#374151] shadow-lg"
-            >
-              {help}
-            </p>
-          </details>
-        )}
+        {help && <HelpTooltip label={label} text={help} id={`${id}-tooltip`} />}
       </div>
       <input
         className="min-h-11 w-full min-w-0 rounded-lg border border-[#d8dee8] bg-white px-3.5 py-2.5 text-sm text-[#1f2937] aria-invalid:border-[#a92323] disabled:bg-[#f9fafb]"
@@ -119,26 +104,6 @@ export function SelectField({
   help?: string;
 }) {
   const id = useId();
-  const helpRef = useRef<HTMLDetailsElement>(null);
-  useEffect(() => {
-    if (!help) return;
-    function dismissOutside(event: Event) {
-      const details = helpRef.current;
-      if (
-        details?.open &&
-        event.target instanceof Node &&
-        !details.contains(event.target)
-      ) {
-        details.open = false;
-      }
-    }
-    document.addEventListener('pointerdown', dismissOutside);
-    document.addEventListener('focusin', dismissOutside);
-    return () => {
-      document.removeEventListener('pointerdown', dismissOutside);
-      document.removeEventListener('focusin', dismissOutside);
-    };
-  }, [help]);
   const available = useContext(SettingsDataContext);
   const displayValue = available ? value : multiple ? [] : '';
   const displayOptions = available
@@ -158,23 +123,7 @@ export function SelectField({
         >
           {label}
         </label>
-        {help && (
-          <details ref={helpRef} className="relative shrink-0">
-            <summary
-              title={help}
-              aria-label={`Help for ${label}`}
-              className="flex size-5 cursor-pointer list-none items-center justify-center rounded-full border border-[#a8b4c4] text-xs font-bold text-[#52627a] focus-visible:outline-2 focus-visible:outline-[#315f48]"
-            >
-              ?
-            </summary>
-            <p
-              id={`${id}-help`}
-              className="absolute top-full right-0 z-20 mt-2 w-[min(18rem,70vw)] rounded-lg border border-[#d8dee8] bg-white p-3 text-xs font-normal leading-relaxed text-[#374151] shadow-lg"
-            >
-              {help}
-            </p>
-          </details>
-        )}
+        {help && <HelpTooltip label={label} text={help} id={`${id}-help`} />}
       </div>
       <select
         className="min-h-11 w-full min-w-0 rounded-lg border border-[#d8dee8] bg-white px-3.5 py-2.5 text-sm text-[#1f2937] aria-invalid:border-[#a92323] disabled:bg-[#f9fafb] **:text-gray-800 [&[multiple]]:min-h-36"

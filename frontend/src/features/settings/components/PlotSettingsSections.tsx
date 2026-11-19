@@ -136,7 +136,6 @@ export function PlotSettingsSections({
                 'thresholdMode',
                 'thresholdCbar',
                 'stageThresholdsCbar',
-                'irrigationType',
                 'soilTextureClass',
                 'soilCalibration',
                 'permanentWiltingPoint',

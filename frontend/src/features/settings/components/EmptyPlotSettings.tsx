@@ -25,7 +25,6 @@ const emptyDraft: SettingsDraft = {
   slope: '',
   thresholdCbar: '',
   thresholdMode: 'static',
-  irrigationType: '',
   irrigationMode: 'manual',
   applicationEfficiency: '',
   effectiveRainfallFraction: '',
