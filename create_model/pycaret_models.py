@@ -342,22 +342,11 @@ def tune_one_model(exp, best):
         return best
 
 
-# Tune hyperparameters of several models -> used for ensemble learning, not implemented yet
+# Tune each ranked candidate independently before ensemble selection.
 def tune_models(exp, best):
-    # tune hyperparameters of dt
-    tuned_best_models = []
-    for i in range(len(best)):
-        print("This is for the",i+1,"model:",best[i])
-        # get model id and grid
-        model_id = Model_mapping[best[i].__class__.__name__]
-        # Load grid
-        grid = PYCARET_REGRESSION_TUNE_GRIDS.get(model_id)
-        # tune model and append
-        tuned_best_models.append(
-            exp.tune_model(best[i], choose_better = True)#, custom_grid=grid)
-        ) # check grid again: xgboost, !!!catboost!!! is VERY SLOW
-        
-    return tuned_best_models
+    # Keep the validation ranking and isolate failures to one candidate. In
+    # particular, estimator/clone incompatibilities must not abort every model.
+    return [tune_one_model(exp, model) for model in best]
 
 
 def safe_make(label: str, fn):
@@ -436,7 +425,20 @@ def init_pycaret_subprocess_ensemble(plot_name, exp, tuned_best_models):
         return tuned_best_models
 
 
+def _prediction_candidate(models):
+    """Return the first usable estimator from validation-ranked candidates."""
+    candidates = models if isinstance(models, (list, tuple)) else [models]
+    for candidate in candidates:
+        candidate = unwrap_model(candidate)
+        if callable(getattr(candidate, "predict", None)):
+            return candidate
+    raise ValueError("No prediction-capable model is available after tuning")
+
+
 def init_pycaret_subprocess_tuning_and_ensemble(plot_name, exp, tuned_best_models, ensemble=True):
+    fallback_model = _prediction_candidate(tuned_best_models)
+    if not isinstance(tuned_best_models, (list, tuple)):
+        tuned_best_models = [tuned_best_models]
     try:
         # save data, model and exp to disk TODO: evaluate tmp folder-> overflow
         temp_dir = Path("./tmp") / f"tuning_{plot_name}_{datetime.now().timestamp()}" #TODO: later cleanup old temp folders
@@ -463,7 +465,7 @@ def init_pycaret_subprocess_tuning_and_ensemble(plot_name, exp, tuned_best_model
         )
 
         # Load ensemble model from disk after creation
-        best_ensemble_model = unwrap_model(load_model(best_ensemble_model_path))
+        best_ensemble_model = _prediction_candidate(load_model(best_ensemble_model_path))
 
          # Save best ensemble pycaret model
         model_names = save_models(plot_name, exp, best_ensemble_model, f'models/{plot_name}/ensemble_models/pycaret/best_soil_tension_prediction_')
@@ -472,7 +474,7 @@ def init_pycaret_subprocess_tuning_and_ensemble(plot_name, exp, tuned_best_model
 
     except Exception as e:
         print(f"[{plot_name}] Error during tuning: {e}, using the original model.")
-        return tuned_best_models
+        return fallback_model
 
 
 # Create and compare different ensemble model techniques for pycaret models
